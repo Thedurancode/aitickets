@@ -219,6 +219,19 @@ async def list_tools():
             },
         ),
         Tool(
+            name="register_customer",
+            description="Register a new customer/contact",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Customer's full name"},
+                    "email": {"type": "string", "description": "Customer's email address"},
+                    "phone": {"type": "string", "description": "Customer's phone number (optional)"},
+                },
+                "required": ["name", "email"],
+            },
+        ),
+        Tool(
             name="check_in_ticket",
             description="Validate and check in a ticket by QR token (for scanning)",
             inputSchema={
@@ -747,6 +760,44 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             })
 
         return list(attendees.values())
+
+    elif name == "register_customer":
+        # Check if customer already exists
+        existing = db.query(EventGoer).filter(EventGoer.email == arguments["email"]).first()
+        if existing:
+            return {
+                "success": False,
+                "message": f"Customer with email {arguments['email']} already exists",
+                "customer": {
+                    "id": existing.id,
+                    "name": existing.name,
+                    "email": existing.email,
+                    "phone": existing.phone,
+                }
+            }
+
+        # Create new customer
+        customer = EventGoer(
+            name=arguments["name"],
+            email=arguments["email"],
+            phone=arguments.get("phone"),
+            email_opt_in=True,
+            sms_opt_in=bool(arguments.get("phone")),
+        )
+        db.add(customer)
+        db.commit()
+        db.refresh(customer)
+
+        return {
+            "success": True,
+            "message": f"Customer {customer.name} registered successfully",
+            "customer": {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "phone": customer.phone,
+            }
+        }
 
     elif name == "check_in_ticket":
         ticket = (
