@@ -132,7 +132,7 @@ async def list_tools():
         ),
         Tool(
             name="update_event",
-            description="Update event details including promo video",
+            description="Update event details including image and promo video",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -141,6 +141,7 @@ async def list_tools():
                     "description": {"type": "string", "description": "New description (optional)"},
                     "event_date": {"type": "string", "description": "New date (optional)"},
                     "event_time": {"type": "string", "description": "New time (optional)"},
+                    "image_url": {"type": "string", "description": "Event poster/image URL (optional)"},
                     "promo_video_url": {"type": "string", "description": "YouTube or video URL for event promo (optional)"},
                 },
                 "required": ["event_id"],
@@ -645,6 +646,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             event.event_date = arguments["event_date"]
         if "event_time" in arguments:
             event.event_time = arguments["event_time"]
+        if "image_url" in arguments:
+            event.image_url = arguments["image_url"]
         if "promo_video_url" in arguments:
             event.promo_video_url = arguments["promo_video_url"]
         db.commit()
