@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event Cancelled</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #ff6b6b 0%, #c0392b 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        .header .emoji {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+        .body {
+            padding: 30px;
+        }
+        .greeting {
+            font-size: 18px;
+            margin-bottom: 20px;
+        }
+        .cancellation-notice {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 0 8px 8px 0;
+        }
+        .cancellation-notice h3 {
+            margin-top: 0;
+            color: #c62828;
+        }
+        .event-details {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .detail-row {
+            display: flex;
+            margin-bottom: 12px;
+        }
+        .detail-row:last-child {
+            margin-bottom: 0;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #666;
+            width: 80px;
+            flex-shrink: 0;
+        }
+        .detail-value {
+            color: #333;
+        }
+        .refund-info {
+            background: #e8f5e9;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .refund-info h3 {
+            margin-top: 0;
+            color: #2e7d32;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="emoji">&#10060;</div>
+            <h1>Event Cancelled</h1>
+        </div>
+
+        <div class="body">
+            <p class="greeting">Hi {{ recipient_name }},</p>
+
+            <p>We're sorry to inform you that the following event has been cancelled:</p>
+
+            <div class="cancellation-notice">
+                <h3>{{ event_name }}</h3>
+                <p><strong>Originally scheduled:</strong> {{ event_date }} at {{ venue_name }}</p>
+                {% if cancellation_reason %}
+                <p><strong>Reason:</strong> {{ cancellation_reason }}</p>
+                {% endif %}
+            </div>
+
+            <div class="refund-info">
+                <h3>Refund Information</h3>
+                <p>A full refund will be processed automatically to your original payment method. Please allow 5-10 business days for the refund to appear on your statement.</p>
+                <p>If you paid with a credit card, you'll see the refund from the original charge.</p>
+            </div>
+
+            <p style="margin-top: 20px;">We sincerely apologize for any inconvenience this may cause. We hope to see you at a future event!</p>
+        </div>
+
+        <div class="footer">
+            <p>If you have any questions about your refund, please contact us.</p>
+        </div>
+    </div>
+</body>
+</html>

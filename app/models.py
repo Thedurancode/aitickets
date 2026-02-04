@@ -1,0 +1,201 @@
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean
+from sqlalchemy.orm import relationship
+from datetime import datetime, timezone
+import enum
+
+from app.database import Base
+
+
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+class TicketStatus(str, enum.Enum):
+    PENDING = "pending"
+    PAID = "paid"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+    CHECKED_IN = "checked_in"
+
+
+class NotificationType(str, enum.Enum):
+    TICKET_CONFIRMATION = "ticket_confirmation"
+    EVENT_REMINDER = "event_reminder"
+    EVENT_UPDATE = "event_update"
+    EVENT_CANCELLED = "event_cancelled"
+    MARKETING = "marketing"
+    SMS_TICKET = "sms_ticket"
+
+
+class NotificationChannel(str, enum.Enum):
+    EMAIL = "email"
+    SMS = "sms"
+
+
+class NotificationStatus(str, enum.Enum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+
+
+class EventStatus(str, enum.Enum):
+    SCHEDULED = "scheduled"
+    POSTPONED = "postponed"
+    CANCELLED = "cancelled"
+
+
+class Venue(Base):
+    __tablename__ = "venues"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    logo_url = Column(String(500), nullable=True)
+    address = Column(String(500), nullable=False)
+    phone = Column(String(50), nullable=True)
+    description = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    events = relationship("Event", back_populates="venue", cascade="all, delete-orphan")
+
+
+class Event(Base):
+    __tablename__ = "events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    image_url = Column(String(500), nullable=True)
+    event_date = Column(String(20), nullable=False)  # YYYY-MM-DD format
+    event_time = Column(String(10), nullable=False)  # HH:MM format
+    status = Column(Enum(EventStatus), default=EventStatus.SCHEDULED)
+    cancellation_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    venue = relationship("Venue", back_populates="events")
+    ticket_tiers = relationship("TicketTier", back_populates="event", cascade="all, delete-orphan")
+    updates = relationship("EventUpdate", back_populates="event", cascade="all, delete-orphan")
+
+
+class EventUpdate(Base):
+    """Track updates/changes made to events for notification purposes."""
+    __tablename__ = "event_updates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    update_type = Column(String(50), nullable=False)  # date_change, time_change, venue_change, cancelled, etc.
+    message = Column(Text, nullable=False)
+    old_value = Column(String(255), nullable=True)
+    new_value = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    notifications_sent = Column(Boolean, default=False)
+
+    event = relationship("Event", back_populates="updates")
+
+
+class TicketTier(Base):
+    __tablename__ = "ticket_tiers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    price = Column(Integer, nullable=False)  # Price in cents
+    quantity_available = Column(Integer, nullable=False)
+    quantity_sold = Column(Integer, default=0)
+
+    event = relationship("Event", back_populates="ticket_tiers")
+    tickets = relationship("Ticket", back_populates="ticket_tier", cascade="all, delete-orphan")
+
+
+class EventGoer(Base):
+    __tablename__ = "event_goers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    phone = Column(String(50), nullable=True)
+
+    # Notification preferences
+    email_opt_in = Column(Boolean, default=True)  # Transactional emails (tickets, reminders)
+    sms_opt_in = Column(Boolean, default=False)   # SMS notifications
+    marketing_opt_in = Column(Boolean, default=False)  # Marketing communications
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    tickets = relationship("Ticket", back_populates="event_goer", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="event_goer", cascade="all, delete-orphan")
+
+
+class Ticket(Base):
+    __tablename__ = "tickets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_tier_id = Column(Integer, ForeignKey("ticket_tiers.id"), nullable=False)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False)
+    stripe_payment_intent_id = Column(String(255), nullable=True)
+    stripe_checkout_session_id = Column(String(255), nullable=True)
+    qr_code_token = Column(String(100), unique=True, nullable=True, index=True)
+    status = Column(Enum(TicketStatus), default=TicketStatus.PENDING)
+    purchased_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Reminder tracking
+    reminder_sent = Column(Boolean, default=False)
+    reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
+
+    ticket_tier = relationship("TicketTier", back_populates="tickets")
+    event_goer = relationship("EventGoer", back_populates="tickets")
+
+
+class Notification(Base):
+    """Track all notifications sent to users."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
+
+    notification_type = Column(Enum(NotificationType), nullable=False)
+    channel = Column(Enum(NotificationChannel), nullable=False)
+    status = Column(Enum(NotificationStatus), default=NotificationStatus.PENDING)
+
+    subject = Column(String(255), nullable=True)  # For emails
+    message = Column(Text, nullable=False)
+
+    # Delivery tracking
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    failed_reason = Column(Text, nullable=True)
+
+    # External references
+    external_id = Column(String(255), nullable=True)  # Twilio SID, Resend ID, etc.
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event_goer = relationship("EventGoer", back_populates="notifications")
+
+
+class MarketingCampaign(Base):
+    """Track marketing campaigns."""
+    __tablename__ = "marketing_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    subject = Column(String(255), nullable=False)
+    content = Column(Text, nullable=False)
+
+    # Targeting
+    target_all = Column(Boolean, default=False)  # Send to all opted-in users
+    target_event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # Send to attendees of specific event
+
+    # Stats
+    total_recipients = Column(Integer, default=0)
+    sent_count = Column(Integer, default=0)
+
+    status = Column(String(50), default="draft")  # draft, scheduled, sending, sent
+    scheduled_at = Column(DateTime(timezone=True), nullable=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
