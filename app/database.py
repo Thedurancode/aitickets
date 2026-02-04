@@ -4,10 +4,16 @@ from app.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(
-    settings.database_url,
-    connect_args={"check_same_thread": False}  # Needed for SQLite
-)
+# Fix postgres:// to postgresql:// for SQLAlchemy compatibility
+database_url = settings.database_url
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+# Configure engine based on database type
+if database_url.startswith("sqlite"):
+    engine = create_engine(database_url, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(database_url)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

@@ -219,13 +219,37 @@ async def list_tools():
         ),
         Tool(
             name="check_in_ticket",
-            description="Validate and check in a ticket by QR token",
+            description="Validate and check in a ticket by QR token (for scanning)",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "qr_token": {"type": "string", "description": "The QR code token"},
                 },
                 "required": ["qr_token"],
+            },
+        ),
+        Tool(
+            name="check_in_by_name",
+            description="Check in a guest by their name. Use when guest doesn't have QR code.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Guest's full name"},
+                    "event_id": {"type": "integer", "description": "Event ID (optional - uses today's event if not specified)"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="find_guest",
+            description="Search for a guest by name to see their tickets",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Guest name to search (partial match)"},
+                    "event_id": {"type": "integer", "description": "Filter by event (optional)"},
+                },
+                "required": ["name"],
             },
         ),
         Tool(
@@ -775,6 +799,124 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         return {
             "found": True,
             "ticket": _ticket_to_dict(ticket),
+        }
+
+    elif name == "check_in_by_name":
+        guest_name = arguments["name"].strip().lower()
+        event_id = arguments.get("event_id")
+
+        # Build query for tickets
+        query = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
+                joinedload(Ticket.event_goer),
+            )
+            .join(EventGoer)
+            .join(TicketTier)
+            .filter(Ticket.status == TicketStatus.PAID)
+        )
+
+        # Filter by event if specified
+        if event_id:
+            query = query.filter(TicketTier.event_id == event_id)
+
+        # Get all paid tickets and filter by name
+        tickets = query.all()
+        matching_tickets = [
+            t for t in tickets
+            if guest_name in t.event_goer.name.lower()
+        ]
+
+        if not matching_tickets:
+            return {
+                "success": False,
+                "message": f"No tickets found for '{arguments['name']}'. Check the name spelling.",
+            }
+
+        if len(matching_tickets) > 1:
+            # Multiple matches - ask to clarify
+            return {
+                "success": False,
+                "multiple_matches": True,
+                "message": f"Found {len(matching_tickets)} guests matching '{arguments['name']}'. Please be more specific.",
+                "matches": [
+                    {
+                        "name": t.event_goer.name,
+                        "event": t.ticket_tier.event.name,
+                        "tier": t.ticket_tier.name,
+                        "ticket_id": t.id,
+                    }
+                    for t in matching_tickets[:5]
+                ],
+            }
+
+        # Single match - check them in
+        ticket = matching_tickets[0]
+        ticket.status = TicketStatus.CHECKED_IN
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Welcome {ticket.event_goer.name}! You're checked in.",
+            "guest": {
+                "name": ticket.event_goer.name,
+                "email": ticket.event_goer.email,
+            },
+            "ticket": {
+                "event": ticket.ticket_tier.event.name,
+                "venue": ticket.ticket_tier.event.venue.name,
+                "tier": ticket.ticket_tier.name,
+                "status": "checked_in",
+            },
+        }
+
+    elif name == "find_guest":
+        guest_name = arguments["name"].strip().lower()
+        event_id = arguments.get("event_id")
+
+        # Build query
+        query = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier).joinedload(TicketTier.event),
+                joinedload(Ticket.event_goer),
+            )
+            .join(EventGoer)
+            .join(TicketTier)
+        )
+
+        if event_id:
+            query = query.filter(TicketTier.event_id == event_id)
+
+        tickets = query.all()
+        matching = [
+            t for t in tickets
+            if guest_name in t.event_goer.name.lower()
+        ]
+
+        if not matching:
+            return {
+                "found": False,
+                "message": f"No guests found matching '{arguments['name']}'",
+            }
+
+        return {
+            "found": True,
+            "count": len(matching),
+            "guests": [
+                {
+                    "name": t.event_goer.name,
+                    "email": t.event_goer.email,
+                    "phone": t.event_goer.phone,
+                    "event": t.ticket_tier.event.name,
+                    "event_date": t.ticket_tier.event.event_date,
+                    "tier": t.ticket_tier.name,
+                    "status": t.status.value,
+                    "ticket_id": t.id,
+                }
+                for t in matching[:10]
+            ],
         }
 
     # ============== Notification Tools ==============

@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Raptors Tickets - Live Operations</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+            color: white;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            padding: 20px;
+            max-width: 1920px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 40px;
+            background: rgba(206, 17, 38, 0.9);
+            border-bottom: 4px solid #ffd700;
+        }
+
+        .logo {
+            font-size: 2.5em;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .logo span {
+            color: #ffd700;
+        }
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.2em;
+        }
+
+        .live-dot {
+            width: 15px;
+            height: 15px;
+            background: #00ff00;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            padding: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(206, 17, 38, 0.3);
+        }
+
+        .stat-card.highlight {
+            animation: highlightPulse 0.5s ease-out;
+        }
+
+        @keyframes highlightPulse {
+            0% { background: rgba(206, 17, 38, 0.5); }
+            100% { background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05)); }
+        }
+
+        .stat-value {
+            font-size: 3.5em;
+            font-weight: bold;
+            color: #ffd700;
+            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+        }
+
+        .stat-label {
+            font-size: 1.1em;
+            color: #aaa;
+            margin-top: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* Main Content */
+        .main-content {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            padding: 0 30px 30px;
+        }
+
+        /* Activity Feed */
+        .activity-feed {
+            background: rgba(0,0,0,0.3);
+            border-radius: 20px;
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .section-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #ffd700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 5px;
+            height: 30px;
+            background: #ce1126;
+            border-radius: 3px;
+        }
+
+        .activity-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .activity-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            animation: slideIn 0.3s ease-out;
+            border-left: 4px solid #ce1126;
+        }
+
+        .activity-item.check-in {
+            border-left-color: #00ff00;
+        }
+
+        .activity-item.purchase {
+            border-left-color: #ffd700;
+        }
+
+        .activity-item.notification {
+            border-left-color: #00bfff;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-50px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .activity-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5em;
+            background: rgba(206, 17, 38, 0.3);
+        }
+
+        .activity-details {
+            flex: 1;
+        }
+
+        .activity-title {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .activity-subtitle {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .activity-time {
+            color: #666;
+            font-size: 0.8em;
+        }
+
+        /* Right Panel */
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Current Event */
+        .current-event {
+            background: linear-gradient(145deg, #ce1126, #8b0000);
+            border-radius: 20px;
+            padding: 25px;
+            text-align: center;
+        }
+
+        .event-name {
+            font-size: 1.8em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .event-info {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .event-countdown {
+            font-size: 2em;
+            font-weight: bold;
+            margin-top: 15px;
+            color: #ffd700;
+        }
+
+        /* Recent Check-ins */
+        .recent-checkins {
+            background: rgba(0,0,0,0.3);
+            border-radius: 20px;
+            padding: 25px;
+            border: 1px solid rgba(255,255,255,0.1);
+            flex: 1;
+        }
+
+        .checkin-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: rgba(0,255,0,0.1);
+            border-radius: 10px;
+            animation: checkInSlide 0.5s ease-out;
+        }
+
+        @keyframes checkInSlide {
+            from { opacity: 0; transform: scale(0.8); }
+            to { opacity: 1; transform: scale(1); }
+        }
+
+        .checkin-avatar {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ce1126, #ffd700);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+
+        .checkin-name {
+            font-weight: bold;
+        }
+
+        .checkin-tier {
+            font-size: 0.85em;
+            color: #ffd700;
+        }
+
+        /* Sales Ticker */
+        .sales-ticker {
+            background: #000;
+            padding: 15px 0;
+            overflow: hidden;
+            border-top: 2px solid #ce1126;
+            border-bottom: 2px solid #ce1126;
+        }
+
+        .ticker-content {
+            display: flex;
+            animation: scroll 30s linear infinite;
+            white-space: nowrap;
+        }
+
+        @keyframes scroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+
+        .ticker-item {
+            padding: 0 50px;
+            font-size: 1.2em;
+        }
+
+        .ticker-item span {
+            color: #ffd700;
+        }
+
+        /* Connection Status */
+        .connection-status {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 30px;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .connection-status.connected {
+            background: rgba(0, 255, 0, 0.2);
+            border: 1px solid #00ff00;
+        }
+
+        .connection-status.disconnected {
+            background: rgba(255, 0, 0, 0.2);
+            border: 1px solid #ff0000;
+        }
+
+        /* Animations for value changes */
+        .value-up {
+            animation: valueUp 0.5s ease-out;
+        }
+
+        @keyframes valueUp {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.2); color: #00ff00; }
+            100% { transform: scale(1); }
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="logo">🦖 <span>RAPTORS</span> TICKETS</div>
+        <div class="live-indicator">
+            <div class="live-dot"></div>
+            <span>LIVE OPERATIONS</span>
+        </div>
+    </header>
+
+    <div class="sales-ticker">
+        <div class="ticker-content" id="ticker">
+            <div class="ticker-item">🎟️ <span>Raptors vs Heat</span> - 1,550 tickets available</div>
+            <div class="ticker-item">🔥 <span>Courtside</span> starting at $750</div>
+            <div class="ticker-item">📍 <span>Scotiabank Arena</span> - 40 Bay Street, Toronto</div>
+            <div class="ticker-item">⭐ <span>VIP Experience</span> available for all games</div>
+            <div class="ticker-item">🎟️ <span>Raptors vs Heat</span> - 1,550 tickets available</div>
+            <div class="ticker-item">🔥 <span>Courtside</span> starting at $750</div>
+            <div class="ticker-item">📍 <span>Scotiabank Arena</span> - 40 Bay Street, Toronto</div>
+            <div class="ticker-item">⭐ <span>VIP Experience</span> available for all games</div>
+        </div>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card" id="stat-tickets">
+            <div class="stat-value" id="tickets-sold">0</div>
+            <div class="stat-label">Tickets Sold Today</div>
+        </div>
+        <div class="stat-card" id="stat-revenue">
+            <div class="stat-value">$<span id="revenue">0</span></div>
+            <div class="stat-label">Revenue Today</div>
+        </div>
+        <div class="stat-card" id="stat-checkins">
+            <div class="stat-value" id="checkins">0</div>
+            <div class="stat-label">Checked In</div>
+        </div>
+        <div class="stat-card" id="stat-calls">
+            <div class="stat-value" id="agent-calls">0</div>
+            <div class="stat-label">Agent Interactions</div>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="activity-feed">
+            <h2 class="section-title">Live Activity</h2>
+            <div class="activity-list" id="activity-list">
+                <div class="activity-item">
+                    <div class="activity-icon">🚀</div>
+                    <div class="activity-details">
+                        <div class="activity-title">Dashboard Started</div>
+                        <div class="activity-subtitle">Waiting for agent activity...</div>
+                    </div>
+                    <div class="activity-time">Just now</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <div class="current-event">
+                <div class="event-name" id="event-name">Raptors vs Heat</div>
+                <div class="event-info" id="event-info">📅 April 10, 2026 • 7:30 PM</div>
+                <div class="event-info">📍 Scotiabank Arena</div>
+                <div class="event-countdown" id="countdown">Loading...</div>
+            </div>
+
+            <div class="recent-checkins">
+                <h2 class="section-title">Recent Check-ins</h2>
+                <div id="checkin-list">
+                    <div style="color: #666; text-align: center; padding: 40px;">
+                        No check-ins yet
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="connection-status disconnected" id="connection-status">
+        <div class="live-dot" style="background: #ff0000;"></div>
+        <span>Connecting...</span>
+    </div>
+
+    <script>
+        // Configuration - auto-detect URL based on host
+        const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? `http://${window.location.hostname}:3001`
+            : window.location.origin;
+        const SSE_URL = `${API_URL}/sse`;
+
+        // State
+        let stats = {
+            ticketsSold: 0,
+            revenue: 0,
+            checkIns: 0,
+            agentCalls: 0
+        };
+
+        let activities = [];
+        let recentCheckIns = [];
+
+        // Connect to SSE
+        function connectSSE() {
+            const statusEl = document.getElementById('connection-status');
+
+            const eventSource = new EventSource(SSE_URL);
+
+            eventSource.onopen = () => {
+                statusEl.className = 'connection-status connected';
+                statusEl.innerHTML = '<div class="live-dot"></div><span>Connected</span>';
+                addActivity('system', 'Connected to Live Feed', 'Real-time updates active');
+            };
+
+            eventSource.addEventListener('connected', (e) => {
+                const data = JSON.parse(e.data);
+                console.log('SSE Connected:', data);
+            });
+
+            eventSource.addEventListener('tool_called', (e) => {
+                const data = JSON.parse(e.data);
+                handleToolCall(data);
+            });
+
+            eventSource.addEventListener('keepalive', (e) => {
+                console.log('Keepalive received');
+            });
+
+            eventSource.onerror = () => {
+                statusEl.className = 'connection-status disconnected';
+                statusEl.innerHTML = '<div class="live-dot" style="background: #ff0000;"></div><span>Reconnecting...</span>';
+
+                setTimeout(() => {
+                    eventSource.close();
+                    connectSSE();
+                }, 5000);
+            };
+        }
+
+        // Handle tool calls
+        function handleToolCall(data) {
+            stats.agentCalls++;
+            updateStat('agent-calls', stats.agentCalls);
+
+            const tool = data.tool;
+            const args = data.arguments || {};
+
+            // Map tools to activities
+            const toolMappings = {
+                'list_events': { icon: '📅', title: 'Events Listed', type: 'query' },
+                'get_event': { icon: '🎫', title: 'Event Details Viewed', type: 'query' },
+                'get_ticket_availability': { icon: '🎟️', title: 'Availability Checked', type: 'query' },
+                'check_in_ticket': { icon: '✅', title: 'QR Check-in', type: 'check-in' },
+                'check_in_by_name': { icon: '✅', title: 'Name Check-in', type: 'check-in' },
+                'find_guest': { icon: '🔍', title: 'Guest Search', type: 'query' },
+                'get_customer_profile': { icon: '👤', title: 'Profile Loaded', type: 'query' },
+                'add_customer_note': { icon: '📝', title: 'Note Added', type: 'notification' },
+                'send_purchase_link': { icon: '💳', title: 'Purchase Link Sent', type: 'purchase' },
+                'send_verification_code': { icon: '📱', title: 'Verification Sent', type: 'notification' },
+                'send_event_reminders': { icon: '🔔', title: 'Reminders Sent', type: 'notification' },
+                'create_event': { icon: '➕', title: 'Event Created', type: 'system' },
+                'get_event_sales': { icon: '📊', title: 'Sales Report', type: 'query' },
+            };
+
+            const mapping = toolMappings[tool] || { icon: '⚡', title: tool, type: 'query' };
+
+            addActivity(mapping.type, mapping.title, `Tool: ${tool}`, mapping.icon);
+
+            // Special handling for check-ins
+            if (tool === 'check_in_ticket' || tool === 'check_in_by_name') {
+                if (data.success) {
+                    stats.checkIns++;
+                    updateStat('checkins', stats.checkIns);
+                    addCheckIn(args.name || 'Guest');
+                }
+            }
+
+            // Special handling for purchases
+            if (tool === 'send_purchase_link') {
+                highlightCard('stat-tickets');
+            }
+        }
+
+        // Add activity to feed
+        function addActivity(type, title, subtitle, icon = '⚡') {
+            const list = document.getElementById('activity-list');
+            const time = new Date().toLocaleTimeString();
+
+            const item = document.createElement('div');
+            item.className = `activity-item ${type}`;
+            item.innerHTML = `
+                <div class="activity-icon">${icon}</div>
+                <div class="activity-details">
+                    <div class="activity-title">${title}</div>
+                    <div class="activity-subtitle">${subtitle}</div>
+                </div>
+                <div class="activity-time">${time}</div>
+            `;
+
+            list.insertBefore(item, list.firstChild);
+
+            // Keep only last 20 activities
+            while (list.children.length > 20) {
+                list.removeChild(list.lastChild);
+            }
+        }
+
+        // Add check-in
+        function addCheckIn(name) {
+            const list = document.getElementById('checkin-list');
+            const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+
+            const item = document.createElement('div');
+            item.className = 'checkin-item';
+            item.innerHTML = `
+                <div class="checkin-avatar">${initials}</div>
+                <div>
+                    <div class="checkin-name">${name}</div>
+                    <div class="checkin-tier">Just checked in</div>
+                </div>
+            `;
+
+            // Remove placeholder if exists
+            if (list.querySelector('div[style]')) {
+                list.innerHTML = '';
+            }
+
+            list.insertBefore(item, list.firstChild);
+
+            // Keep only last 5
+            while (list.children.length > 5) {
+                list.removeChild(list.lastChild);
+            }
+        }
+
+        // Update stat with animation
+        function updateStat(id, value) {
+            const el = document.getElementById(id);
+            el.textContent = value.toLocaleString();
+            el.classList.add('value-up');
+            setTimeout(() => el.classList.remove('value-up'), 500);
+        }
+
+        // Highlight card
+        function highlightCard(id) {
+            const card = document.getElementById(id);
+            card.classList.add('highlight');
+            setTimeout(() => card.classList.remove('highlight'), 500);
+        }
+
+        // Countdown timer
+        function updateCountdown() {
+            const eventDate = new Date('2026-04-10T19:30:00');
+            const now = new Date();
+            const diff = eventDate - now;
+
+            if (diff > 0) {
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                document.getElementById('countdown').textContent = `${days}d ${hours}h until tip-off`;
+            } else {
+                document.getElementById('countdown').textContent = 'GAME DAY!';
+            }
+        }
+
+        // Load initial data
+        async function loadInitialData() {
+            try {
+                // Get events
+                const eventsRes = await fetch(`${API_URL}/tools/list_events`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: {} })
+                });
+                const events = await eventsRes.json();
+
+                if (events.result && events.result.length > 0) {
+                    const event = events.result[0];
+                    document.getElementById('event-name').textContent = event.name;
+                    document.getElementById('event-info').textContent =
+                        `📅 ${event.event_date} • ${event.event_time}`;
+                }
+
+                // Get sales
+                const salesRes = await fetch(`${API_URL}/tools/get_event_sales`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: { event_id: 1 } })
+                });
+                const sales = await salesRes.json();
+
+                if (sales.result) {
+                    stats.ticketsSold = sales.result.total_tickets_sold || 0;
+                    stats.revenue = (sales.result.total_revenue_cents || 0) / 100;
+                    stats.checkIns = sales.result.tickets_checked_in || 0;
+
+                    document.getElementById('tickets-sold').textContent = stats.ticketsSold;
+                    document.getElementById('revenue').textContent = stats.revenue.toLocaleString();
+                    document.getElementById('checkins').textContent = stats.checkIns;
+                }
+
+                addActivity('system', 'Data Loaded', 'Initial stats loaded from server', '📊');
+
+            } catch (error) {
+                console.error('Failed to load initial data:', error);
+                addActivity('system', 'Connection Issue', 'Could not load initial data', '⚠️');
+            }
+        }
+
+        // Demo mode - simulate activity
+        function startDemoMode() {
+            const demoActivities = [
+                { type: 'query', title: 'Event Listed', subtitle: 'Customer asked about games', icon: '📅' },
+                { type: 'query', title: 'Availability Checked', subtitle: 'Raptors vs Heat', icon: '🎟️' },
+                { type: 'notification', title: 'Verification Sent', subtitle: '+1 416-555-xxxx', icon: '📱' },
+                { type: 'purchase', title: 'Purchase Link Sent', subtitle: 'Lower Bowl x2', icon: '💳' },
+                { type: 'query', title: 'Profile Loaded', subtitle: 'Returning customer', icon: '👤' },
+            ];
+
+            setInterval(() => {
+                if (Math.random() > 0.7) {
+                    const activity = demoActivities[Math.floor(Math.random() * demoActivities.length)];
+                    addActivity(activity.type, activity.title, activity.subtitle, activity.icon);
+                    stats.agentCalls++;
+                    updateStat('agent-calls', stats.agentCalls);
+                }
+            }, 5000);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadInitialData();
+            connectSSE();
+            updateCountdown();
+            setInterval(updateCountdown, 60000);
+
+            // Start demo mode for visual effect
+            startDemoMode();
+        });
+    </script>
+</body>
+</html>

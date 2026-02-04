@@ -25,7 +25,8 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -145,6 +146,7 @@ async def root():
         "version": "1.0.0",
         "transport": "http/sse",
         "endpoints": {
+            "dashboard": "/dashboard",
             "tools": "/tools",
             "call_tool": "/tools/{tool_name}",
             "sse_stream": "/sse",
@@ -161,6 +163,19 @@ async def root():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard():
+    """Serve the real-time TV-style operations dashboard."""
+    dashboard_path = Path(__file__).parent.parent / "app" / "static" / "dashboard.html"
+    if dashboard_path.exists():
+        return HTMLResponse(content=dashboard_path.read_text(), status_code=200)
+    else:
+        return HTMLResponse(
+            content="<h1>Dashboard not found</h1><p>Looking for: " + str(dashboard_path) + "</p>",
+            status_code=404
+        )
 
 
 @app.get("/tools")

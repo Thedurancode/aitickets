@@ -8,7 +8,7 @@ primary_region = "sjc"
   dockerfile = "Dockerfile.mcp"
 
 [env]
-  DATABASE_URL = "sqlite:///./data/tickets.db"
+  # DATABASE_URL set via secrets (Postgres)
 
 [http_service]
   internal_port = 3001

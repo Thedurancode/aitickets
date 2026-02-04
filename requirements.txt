@@ -1,6 +1,7 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
+psycopg2-binary
 pydantic[email]
 pydantic-settings
 stripe
@@ -12,3 +13,4 @@ python-multipart
 mcp
 twilio
 apscheduler
+sse-starlette
