@@ -1408,10 +1408,14 @@
             }
 
             // Update event display if we got event data
-            if (result && (tool === 'get_event' || tool === 'list_events')) {
+            if (result && (tool === 'get_event' || tool === 'list_events' || tool === 'update_event' || tool === 'create_event')) {
                 const event = Array.isArray(result) ? result[0] : result;
                 if (event && event.name) {
                     updateEventCard(event);
+                    // Also update ticker if event list changed
+                    if (tool === 'create_event' || tool === 'update_event') {
+                        refreshTicker();
+                    }
                 }
             }
 
@@ -1952,6 +1956,23 @@
 
             // Duplicate for seamless scroll
             ticker.innerHTML = tickerHtml + tickerHtml;
+        }
+
+        // Refresh ticker from API
+        async function refreshTicker() {
+            try {
+                const res = await fetch(`${API_URL}/tools/list_events`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: {} })
+                });
+                const data = await res.json();
+                if (data.result && Array.isArray(data.result)) {
+                    updateTicker(data.result);
+                }
+            } catch (e) {
+                console.error('Failed to refresh ticker:', e);
+            }
         }
 
         // Update event card with real data
