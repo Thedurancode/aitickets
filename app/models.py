@@ -66,6 +66,7 @@ class Event(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     image_url = Column(String(500), nullable=True)
+    promo_video_url = Column(String(500), nullable=True)  # YouTube or video URL
     event_date = Column(String(20), nullable=False)  # YYYY-MM-DD format
     event_time = Column(String(10), nullable=False)  # HH:MM format
     status = Column(Enum(EventStatus), default=EventStatus.SCHEDULED)

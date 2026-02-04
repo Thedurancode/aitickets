@@ -237,11 +237,12 @@ async def call_tool(tool_name: str, request: ToolCallRequest, session_id: Option
             if "ticket_id" in request.arguments:
                 session.last_ticket_id = request.arguments["ticket_id"]
 
-        # Broadcast event via SSE
+        # Broadcast event via SSE with full result
         await sse_manager.broadcast("tool_called", {
             "tool": tool_name,
             "arguments": request.arguments,
             "success": "error" not in result,
+            "result": result,
         })
 
         return {
@@ -447,6 +448,15 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
         db = SessionLocal()
         try:
             result = await _execute_tool(tool_name, arguments, db)
+
+            # Broadcast to dashboard via SSE
+            await sse_manager.broadcast("tool_called", {
+                "tool": tool_name,
+                "arguments": arguments,
+                "success": "error" not in result,
+                "result": result,
+            })
+
             response = {
                 "jsonrpc": "2.0",
                 "id": msg_id,

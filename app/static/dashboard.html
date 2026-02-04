@@ -30,19 +30,26 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 20px 40px;
-            background: rgba(206, 17, 38, 0.9);
+            padding: 15px 40px;
+            background: rgba(206, 17, 38, 0.95);
             border-bottom: 4px solid #ffd700;
         }
 
         .logo {
-            font-size: 2.5em;
-            font-weight: bold;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
         }
 
-        .logo span {
-            color: #ffd700;
+        .logo-img {
+            height: 60px;
+            width: auto;
+            filter: drop-shadow(2px 2px 4px rgba(0,0,0,0.5));
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 20px;
         }
 
         .live-indicator {
@@ -50,33 +57,118 @@
             align-items: center;
             gap: 10px;
             font-size: 1.2em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
         }
 
         .live-dot {
-            width: 15px;
-            height: 15px;
+            width: 12px;
+            height: 12px;
             background: #00ff00;
             border-radius: 50%;
             animation: pulse 1.5s infinite;
+            box-shadow: 0 0 10px #00ff00;
         }
 
         @keyframes pulse {
             0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(1.2); }
+            50% { opacity: 0.5; transform: scale(1.3); }
+        }
+
+        .fullscreen-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            width: 45px;
+            height: 45px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1.5em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+
+        .fullscreen-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: #ffd700;
+        }
+
+        .fullscreen-btn .fs-collapse {
+            display: none;
+        }
+
+        :fullscreen .fullscreen-btn .fs-expand {
+            display: none;
+        }
+
+        :fullscreen .fullscreen-btn .fs-collapse {
+            display: block;
+        }
+
+        /* Fullscreen mode adjustments */
+        :fullscreen {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f0f23 100%);
+        }
+
+        :fullscreen .header {
+            padding: 20px 50px;
+        }
+
+        :fullscreen .logo-img {
+            height: 80px;
+        }
+
+        :fullscreen .stats-grid {
+            padding: 30px 50px;
+        }
+
+        :fullscreen .stat-value {
+            font-size: 3em;
+        }
+
+        :fullscreen .main-content {
+            padding: 0 50px 50px;
+        }
+
+        :fullscreen .query-text {
+            font-size: 1.5em;
+        }
+
+        :fullscreen .response-title {
+            font-size: 1.5em;
+        }
+
+        :fullscreen .result-data-row {
+            font-size: 1.2em;
         }
 
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
-            padding: 30px;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 15px;
+            padding: 20px 30px;
+        }
+
+        @media (max-width: 1400px) {
+            .stats-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        @media (max-width: 900px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
         }
 
         .stat-card {
             background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
-            border-radius: 20px;
-            padding: 30px;
+            border-radius: 15px;
+            padding: 20px 15px;
             text-align: center;
             border: 1px solid rgba(255,255,255,0.1);
             backdrop-filter: blur(10px);
@@ -98,18 +190,18 @@
         }
 
         .stat-value {
-            font-size: 3.5em;
+            font-size: 2.5em;
             font-weight: bold;
             color: #ffd700;
             text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
         }
 
         .stat-label {
-            font-size: 1.1em;
+            font-size: 0.85em;
             color: #aaa;
-            margin-top: 10px;
+            margin-top: 8px;
             text-transform: uppercase;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
         }
 
         /* Main Content */
@@ -120,93 +212,230 @@
             padding: 0 30px 30px;
         }
 
-        /* Activity Feed */
+        /* Activity Feed - TV Style */
         .activity-feed {
-            background: rgba(0,0,0,0.3);
+            background: rgba(0,0,0,0.4);
             border-radius: 20px;
-            padding: 25px;
+            padding: 30px;
             border: 1px solid rgba(255,255,255,0.1);
         }
 
         .section-title {
-            font-size: 1.5em;
-            margin-bottom: 20px;
+            font-size: 1.8em;
+            margin-bottom: 25px;
             color: #ffd700;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 15px;
         }
 
         .section-title::before {
             content: '';
-            width: 5px;
-            height: 30px;
+            width: 6px;
+            height: 35px;
             background: #ce1126;
             border-radius: 3px;
         }
 
         .activity-list {
-            max-height: 500px;
+            max-height: 600px;
             overflow-y: auto;
+            padding-right: 10px;
         }
 
-        .activity-item {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            padding: 15px;
-            margin-bottom: 10px;
+        .activity-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .activity-list::-webkit-scrollbar-track {
             background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            animation: slideIn 0.3s ease-out;
-            border-left: 4px solid #ce1126;
+            border-radius: 3px;
         }
 
-        .activity-item.check-in {
-            border-left-color: #00ff00;
+        .activity-list::-webkit-scrollbar-thumb {
+            background: #ce1126;
+            border-radius: 3px;
         }
 
-        .activity-item.purchase {
-            border-left-color: #ffd700;
-        }
-
-        .activity-item.notification {
-            border-left-color: #00bfff;
+        /* Modern Activity Item */
+        .activity-item {
+            margin-bottom: 25px;
+            animation: slideIn 0.4s ease-out;
         }
 
         @keyframes slideIn {
-            from { opacity: 0; transform: translateX(-50px); }
-            to { opacity: 1; transform: translateX(0); }
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        .activity-icon {
-            width: 50px;
-            height: 50px;
+        /* Query Bubble - User Question */
+        .query-bubble {
+            background: linear-gradient(135deg, rgba(255, 215, 0, 0.15), rgba(255, 215, 0, 0.05));
+            border: 1px solid rgba(255, 215, 0, 0.3);
+            border-radius: 20px 20px 20px 5px;
+            padding: 18px 25px;
+            margin-bottom: 15px;
+            margin-right: 60px;
+            position: relative;
+        }
+
+        .query-bubble::before {
+            content: '🎤';
+            position: absolute;
+            left: -45px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 1.8em;
+        }
+
+        .query-text {
+            font-size: 1.3em;
+            font-style: italic;
+            color: #ffd700;
+            line-height: 1.4;
+        }
+
+        /* Response Card - AI Answer */
+        .response-card {
+            background: linear-gradient(145deg, rgba(206, 17, 38, 0.2), rgba(206, 17, 38, 0.05));
+            border: 1px solid rgba(206, 17, 38, 0.3);
+            border-radius: 5px 20px 20px 20px;
+            padding: 20px 25px;
+            margin-left: 60px;
+            position: relative;
+        }
+
+        .response-card::before {
+            content: '';
+            position: absolute;
+            right: -45px;
+            top: 15px;
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #ce1126, #8b0000);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
+        }
+
+        .response-card::after {
+            content: '🤖';
+            position: absolute;
+            right: -37px;
+            top: 22px;
+            font-size: 1.3em;
+        }
+
+        .response-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .response-icon {
+            width: 45px;
+            height: 45px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-size: 1.5em;
-            background: rgba(206, 17, 38, 0.3);
+            background: rgba(255, 255, 255, 0.1);
         }
 
-        .activity-details {
-            flex: 1;
-        }
-
-        .activity-title {
+        .response-title {
             font-weight: bold;
-            font-size: 1.1em;
+            font-size: 1.3em;
+            color: #fff;
         }
 
-        .activity-subtitle {
-            color: #888;
+        .response-subtitle {
+            color: #aaa;
+            font-size: 1em;
+            margin-top: 3px;
+        }
+
+        .response-time {
+            margin-left: auto;
+            color: #666;
             font-size: 0.9em;
         }
 
-        .activity-time {
-            color: #666;
-            font-size: 0.8em;
+        /* Result Data Display */
+        .result-data {
+            margin-top: 15px;
+            padding: 15px 20px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 12px;
+            border-left: 4px solid #ffd700;
+        }
+
+        .result-data-row {
+            display: flex;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-size: 1.1em;
+        }
+
+        .result-data-row:last-child {
+            border-bottom: none;
+        }
+
+        .result-data-icon {
+            margin-right: 12px;
+            font-size: 1.2em;
+        }
+
+        .result-data-label {
+            color: #888;
+            margin-right: 10px;
+        }
+
+        .result-data-value {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .result-highlight {
+            color: #ffd700;
+            font-weight: bold;
+        }
+
+        /* Activity type colors */
+        .activity-item.check-in .response-card {
+            border-color: rgba(0, 255, 0, 0.3);
+            background: linear-gradient(145deg, rgba(0, 255, 0, 0.15), rgba(0, 255, 0, 0.02));
+        }
+
+        .activity-item.purchase .response-card {
+            border-color: rgba(255, 215, 0, 0.4);
+            background: linear-gradient(145deg, rgba(255, 215, 0, 0.15), rgba(255, 215, 0, 0.02));
+        }
+
+        .activity-item.notification .response-card {
+            border-color: rgba(0, 191, 255, 0.3);
+            background: linear-gradient(145deg, rgba(0, 191, 255, 0.15), rgba(0, 191, 255, 0.02));
+        }
+
+        /* System messages */
+        .activity-item.system {
+            margin-bottom: 15px;
+        }
+
+        .activity-item.system .response-card {
+            margin-left: 0;
+            margin-right: 0;
+            background: rgba(255,255,255,0.03);
+            border-color: rgba(255,255,255,0.1);
+            padding: 15px 20px;
+        }
+
+        .activity-item.system .response-card::before,
+        .activity-item.system .response-card::after {
+            display: none;
         }
 
         /* Right Panel */
@@ -216,30 +445,113 @@
             gap: 20px;
         }
 
-        /* Current Event */
+        /* Current Event - TV Style */
         .current-event {
             background: linear-gradient(145deg, #ce1126, #8b0000);
             border-radius: 20px;
-            padding: 25px;
-            text-align: center;
+            overflow: hidden;
+            position: relative;
+            min-height: 280px;
+        }
+
+        .promo-video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .promo-video-container iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            pointer-events: none;
+        }
+
+        .promo-video-container .video-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4em;
+            background: linear-gradient(135deg, #ce1126 0%, #8b0000 50%, #5c0011 100%);
+            animation: gradientShift 5s ease infinite;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .event-overlay-info {
+            position: relative;
+            z-index: 2;
+            padding: 20px;
+            background: linear-gradient(transparent, rgba(0,0,0,0.9));
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+        }
+
+        .event-badge {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: #ffd700;
+            color: #000;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.8em;
+            letter-spacing: 1px;
+            animation: badgePulse 2s ease infinite;
+        }
+
+        @keyframes badgePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
         }
 
         .event-name {
-            font-size: 1.8em;
+            font-size: 1.6em;
             font-weight: bold;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
         }
 
         .event-info {
-            font-size: 1.1em;
+            font-size: 1em;
             opacity: 0.9;
+            margin-bottom: 3px;
         }
 
         .event-countdown {
-            font-size: 2em;
+            font-size: 1.8em;
             font-weight: bold;
-            margin-top: 15px;
+            margin-top: 10px;
             color: #ffd700;
+            text-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+            animation: countdownGlow 1.5s ease infinite;
+        }
+
+        @keyframes countdownGlow {
+            0%, 100% { text-shadow: 0 0 20px rgba(255, 215, 0, 0.5); }
+            50% { text-shadow: 0 0 30px rgba(255, 215, 0, 0.8); }
+        }
+
+        /* Hide text when video is playing */
+        .event-overlay-info.video-playing {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .current-event:hover .event-overlay-info.video-playing {
+            opacity: 1;
+            transition: opacity 0.3s;
         }
 
         /* Recent Check-ins */
@@ -350,38 +662,501 @@
             50% { transform: scale(1.2); color: #00ff00; }
             100% { transform: scale(1); }
         }
+
+        /* Clickable stat cards */
+        .stat-card.clickable {
+            cursor: pointer;
+        }
+
+        .stat-card.clickable:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(206, 17, 38, 0.4);
+            border-color: #ffd700;
+        }
+
+        .stat-card.clickable::after {
+            content: '↗';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            opacity: 0.5;
+            font-size: 0.8em;
+        }
+
+        .stat-card {
+            position: relative;
+        }
+
+        /* List Modal */
+        .list-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 1000;
+            overflow-y: auto;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .list-modal.active {
+            display: block;
+            padding: 40px 20px;
+        }
+
+        .list-modal-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .list-modal-content h1 {
+            text-align: center;
+            font-size: 2.5em;
+            margin-bottom: 30px;
+            color: #ffd700;
+        }
+
+        .list-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        /* Event Card in List */
+        .list-event-card {
+            background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+            border-radius: 15px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.3s, border-color 0.3s;
+            cursor: pointer;
+        }
+
+        .list-event-card:hover {
+            transform: translateY(-5px);
+            border-color: #ce1126;
+        }
+
+        .list-event-image {
+            width: 100%;
+            height: 180px;
+            object-fit: cover;
+            background: linear-gradient(135deg, #ce1126, #8b0000);
+        }
+
+        .list-event-info {
+            padding: 20px;
+        }
+
+        .list-event-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .list-event-meta {
+            color: #ffd700;
+            margin-bottom: 10px;
+        }
+
+        .list-event-venue {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .list-event-stats {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .list-event-stat {
+            text-align: center;
+        }
+
+        .list-event-stat-value {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .list-event-stat-label {
+            font-size: 0.75em;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        /* Venue Card in List */
+        .list-venue-card {
+            background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+            border-radius: 15px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.3s, border-color 0.3s;
+            padding: 25px;
+        }
+
+        .list-venue-card:hover {
+            transform: translateY(-5px);
+            border-color: #ffd700;
+        }
+
+        .list-venue-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+
+        .list-venue-name {
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        .list-venue-address {
+            color: #888;
+            margin-bottom: 10px;
+        }
+
+        .list-venue-phone {
+            color: #ffd700;
+        }
+
+        /* Contact Card in List */
+        .list-contact-card {
+            background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+            border-radius: 15px;
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transition: transform 0.3s, border-color 0.3s;
+        }
+
+        .list-contact-card:hover {
+            transform: translateY(-3px);
+            border-color: #ce1126;
+        }
+
+        .list-contact-avatar {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ce1126, #ffd700);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .list-contact-info {
+            flex: 1;
+        }
+
+        .list-contact-name {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .list-contact-email {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .list-contact-phone {
+            color: #ffd700;
+            font-size: 0.9em;
+        }
+
+        .list-contact-tickets {
+            text-align: right;
+        }
+
+        .list-contact-ticket-count {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .list-contact-ticket-label {
+            font-size: 0.75em;
+            color: #888;
+            text-transform: uppercase;
+        }
+
+        /* Empty state */
+        .list-empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: #888;
+            font-size: 1.2em;
+        }
+
+        .list-empty-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        /* Event Modal */
+        .event-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 1000;
+            overflow-y: auto;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .event-modal.active {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 40px 20px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .event-modal-content {
+            background: linear-gradient(145deg, #1a1a2e, #16213e);
+            border-radius: 20px;
+            max-width: 900px;
+            width: 100%;
+            overflow: hidden;
+            border: 2px solid #ce1126;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(50px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.5);
+            border: none;
+            color: white;
+            font-size: 2em;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            cursor: pointer;
+            z-index: 10;
+            transition: background 0.3s;
+        }
+
+        .modal-close:hover {
+            background: #ce1126;
+        }
+
+        .event-modal-header {
+            position: relative;
+            height: 350px;
+            overflow: hidden;
+        }
+
+        .modal-event-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .modal-event-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 40px 30px 30px;
+            background: linear-gradient(transparent, rgba(0,0,0,0.9));
+        }
+
+        .modal-event-overlay h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .modal-event-meta {
+            font-size: 1.2em;
+            color: #ffd700;
+            display: flex;
+            gap: 20px;
+        }
+
+        .event-modal-body {
+            padding: 30px;
+        }
+
+        .event-modal-body h3 {
+            color: #ffd700;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .modal-venue-section,
+        .modal-description-section {
+            margin-bottom: 25px;
+        }
+
+        .venue-address {
+            color: #888;
+            font-size: 0.95em;
+        }
+
+        .modal-tiers-section {
+            margin-bottom: 25px;
+        }
+
+        .tiers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .tier-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.1);
+            transition: transform 0.3s, border-color 0.3s;
+        }
+
+        .tier-card:hover {
+            transform: translateY(-3px);
+            border-color: #ffd700;
+        }
+
+        .tier-name {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 8px;
+        }
+
+        .tier-price {
+            color: #ffd700;
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .tier-available {
+            color: #888;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .tier-available.low {
+            color: #ff6b6b;
+        }
+
+        .modal-stats-section {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .modal-stat {
+            text-align: center;
+            padding: 15px;
+            background: rgba(206, 17, 38, 0.2);
+            border-radius: 10px;
+        }
+
+        .modal-stat-value {
+            display: block;
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #ffd700;
+        }
+
+        .modal-stat-label {
+            color: #888;
+            font-size: 0.85em;
+            text-transform: uppercase;
+        }
+
+        /* Make event card clickable */
+        .current-event {
+            cursor: pointer;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .current-event:hover {
+            transform: scale(1.02);
+            box-shadow: 0 10px 30px rgba(206, 17, 38, 0.4);
+        }
+
+        .current-event::after {
+            content: 'Click for details';
+            display: block;
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-top: 10px;
+        }
     </style>
 </head>
 <body>
     <header class="header">
-        <div class="logo">🦖 <span>RAPTORS</span> TICKETS</div>
-        <div class="live-indicator">
-            <div class="live-dot"></div>
-            <span>LIVE OPERATIONS</span>
+        <div class="logo">
+            <img src="https://upload.wikimedia.org/wikipedia/en/3/36/Toronto_Raptors_logo.svg" alt="Raptors" class="logo-img">
+        </div>
+        <div class="header-right">
+            <div class="live-indicator">
+                <div class="live-dot"></div>
+                <span>LIVE</span>
+            </div>
+            <button class="fullscreen-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">
+                <span class="fs-expand">⛶</span>
+                <span class="fs-collapse">✕</span>
+            </button>
         </div>
     </header>
 
     <div class="sales-ticker">
         <div class="ticker-content" id="ticker">
-            <div class="ticker-item">🎟️ <span>Raptors vs Heat</span> - 1,550 tickets available</div>
-            <div class="ticker-item">🔥 <span>Courtside</span> starting at $750</div>
-            <div class="ticker-item">📍 <span>Scotiabank Arena</span> - 40 Bay Street, Toronto</div>
-            <div class="ticker-item">⭐ <span>VIP Experience</span> available for all games</div>
-            <div class="ticker-item">🎟️ <span>Raptors vs Heat</span> - 1,550 tickets available</div>
-            <div class="ticker-item">🔥 <span>Courtside</span> starting at $750</div>
-            <div class="ticker-item">📍 <span>Scotiabank Arena</span> - 40 Bay Street, Toronto</div>
-            <div class="ticker-item">⭐ <span>VIP Experience</span> available for all games</div>
+            <div class="ticker-item">🎟️ <span>Loading events...</span></div>
         </div>
     </div>
 
     <div class="stats-grid">
+        <div class="stat-card clickable" id="stat-events" onclick="openListModal('events')">
+            <div class="stat-value" id="total-events">0</div>
+            <div class="stat-label">Events</div>
+        </div>
+        <div class="stat-card clickable" id="stat-venues" onclick="openListModal('venues')">
+            <div class="stat-value" id="total-venues">0</div>
+            <div class="stat-label">Venues</div>
+        </div>
+        <div class="stat-card clickable" id="stat-contacts" onclick="openListModal('contacts')">
+            <div class="stat-value" id="total-contacts">0</div>
+            <div class="stat-label">Contacts</div>
+        </div>
         <div class="stat-card" id="stat-tickets">
             <div class="stat-value" id="tickets-sold">0</div>
-            <div class="stat-label">Tickets Sold Today</div>
+            <div class="stat-label">Tickets Sold</div>
         </div>
         <div class="stat-card" id="stat-revenue">
             <div class="stat-value">$<span id="revenue">0</span></div>
-            <div class="stat-label">Revenue Today</div>
+            <div class="stat-label">Revenue</div>
         </div>
         <div class="stat-card" id="stat-checkins">
             <div class="stat-value" id="checkins">0</div>
@@ -389,7 +1164,7 @@
         </div>
         <div class="stat-card" id="stat-calls">
             <div class="stat-value" id="agent-calls">0</div>
-            <div class="stat-label">Agent Interactions</div>
+            <div class="stat-label">Agent Calls</div>
         </div>
     </div>
 
@@ -409,11 +1184,17 @@
         </div>
 
         <div class="right-panel">
-            <div class="current-event">
-                <div class="event-name" id="event-name">Raptors vs Heat</div>
-                <div class="event-info" id="event-info">📅 April 10, 2026 • 7:30 PM</div>
-                <div class="event-info">📍 Scotiabank Arena</div>
-                <div class="event-countdown" id="countdown">Loading...</div>
+            <div class="current-event" onclick="openEventModal()">
+                <div class="promo-video-container" id="promo-video-container">
+                    <!-- Video loads here -->
+                </div>
+                <div class="event-overlay-info">
+                    <div class="event-badge">NEXT GAME</div>
+                    <div class="event-name" id="event-name">Loading...</div>
+                    <div class="event-info" id="event-info">📅 Waiting for data</div>
+                    <div class="event-info" id="event-venue">📍 --</div>
+                    <div class="event-countdown" id="countdown">--</div>
+                </div>
             </div>
 
             <div class="recent-checkins">
@@ -430,6 +1211,69 @@
     <div class="connection-status disconnected" id="connection-status">
         <div class="live-dot" style="background: #ff0000;"></div>
         <span>Connecting...</span>
+    </div>
+
+    <!-- List Modal (Events/Venues/Contacts) -->
+    <div class="list-modal" id="list-modal" onclick="closeListModal(event)">
+        <div class="list-modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeListModal()">&times;</button>
+            <h1 id="list-modal-title">Items</h1>
+            <div id="list-modal-grid" class="list-grid">
+                <!-- Items loaded dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Event Fullscreen Modal -->
+    <div class="event-modal" id="event-modal" onclick="closeEventModal(event)">
+        <div class="event-modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeEventModal()">&times;</button>
+            <div class="event-modal-header">
+                <img id="modal-event-image" src="" alt="Event" class="modal-event-image">
+                <div class="modal-event-overlay">
+                    <h1 id="modal-event-name">Event Name</h1>
+                    <div class="modal-event-meta">
+                        <span id="modal-event-date">📅 Date</span>
+                        <span id="modal-event-time">🕐 Time</span>
+                    </div>
+                </div>
+            </div>
+            <div class="event-modal-body">
+                <div class="modal-venue-section">
+                    <h3>📍 Venue</h3>
+                    <p id="modal-venue-name">Venue Name</p>
+                    <p id="modal-venue-address" class="venue-address">Address</p>
+                </div>
+                <div class="modal-description-section">
+                    <h3>About This Event</h3>
+                    <p id="modal-event-description">Event description...</p>
+                </div>
+                <div class="modal-tiers-section">
+                    <h3>🎟️ Ticket Options</h3>
+                    <div id="modal-tiers-list" class="tiers-grid">
+                        <!-- Tiers loaded dynamically -->
+                    </div>
+                </div>
+                <div class="modal-stats-section">
+                    <div class="modal-stat">
+                        <span class="modal-stat-value" id="modal-tickets-sold">0</span>
+                        <span class="modal-stat-label">Sold</span>
+                    </div>
+                    <div class="modal-stat">
+                        <span class="modal-stat-value" id="modal-tickets-available">0</span>
+                        <span class="modal-stat-label">Available</span>
+                    </div>
+                    <div class="modal-stat">
+                        <span class="modal-stat-value" id="modal-checked-in">0</span>
+                        <span class="modal-stat-label">Checked In</span>
+                    </div>
+                    <div class="modal-stat">
+                        <span class="modal-stat-value">$<span id="modal-revenue">0</span></span>
+                        <span class="modal-stat-label">Revenue</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -449,6 +1293,8 @@
 
         let activities = [];
         let recentCheckIns = [];
+        let isInitialLoad = true; // Flag to ignore initial data loading
+        let isRefreshing = false; // Flag to prevent refresh loops
 
         // Connect to SSE
         function connectSSE() {
@@ -489,39 +1335,54 @@
 
         // Handle tool calls
         function handleToolCall(data) {
+            // Ignore calls during initial page load or refresh
+            if (isInitialLoad || isRefreshing) return;
+
             stats.agentCalls++;
             updateStat('agent-calls', stats.agentCalls);
 
             const tool = data.tool;
             const args = data.arguments || {};
+            const result = data.result || {};
 
             // Map tools to activities
             const toolMappings = {
                 'list_events': { icon: '📅', title: 'Events Listed', type: 'query' },
-                'get_event': { icon: '🎫', title: 'Event Details Viewed', type: 'query' },
-                'get_ticket_availability': { icon: '🎟️', title: 'Availability Checked', type: 'query' },
+                'get_event': { icon: '🎫', title: 'Event Details', type: 'query' },
+                'get_ticket_availability': { icon: '🎟️', title: 'Availability Check', type: 'query' },
                 'check_in_ticket': { icon: '✅', title: 'QR Check-in', type: 'check-in' },
                 'check_in_by_name': { icon: '✅', title: 'Name Check-in', type: 'check-in' },
                 'find_guest': { icon: '🔍', title: 'Guest Search', type: 'query' },
-                'get_customer_profile': { icon: '👤', title: 'Profile Loaded', type: 'query' },
+                'get_customer_profile': { icon: '👤', title: 'Customer Profile', type: 'query' },
+                'lookup_customer': { icon: '👤', title: 'Customer Lookup', type: 'query' },
                 'add_customer_note': { icon: '📝', title: 'Note Added', type: 'notification' },
                 'send_purchase_link': { icon: '💳', title: 'Purchase Link Sent', type: 'purchase' },
                 'send_verification_code': { icon: '📱', title: 'Verification Sent', type: 'notification' },
+                'verify_phone_code': { icon: '✓', title: 'Phone Verified', type: 'notification' },
                 'send_event_reminders': { icon: '🔔', title: 'Reminders Sent', type: 'notification' },
                 'create_event': { icon: '➕', title: 'Event Created', type: 'system' },
                 'get_event_sales': { icon: '📊', title: 'Sales Report', type: 'query' },
+                'list_venues': { icon: '🏟️', title: 'Venues Listed', type: 'query' },
+                'get_venue': { icon: '🏟️', title: 'Venue Details', type: 'query' },
+                'list_ticket_tiers': { icon: '🎫', title: 'Ticket Tiers', type: 'query' },
             };
 
             const mapping = toolMappings[tool] || { icon: '⚡', title: tool, type: 'query' };
 
-            addActivity(mapping.type, mapping.title, `Tool: ${tool}`, mapping.icon);
+            // Generate inferred query (what the user likely asked)
+            const inferredQuery = inferQuery(tool, args);
+
+            // Generate result summary for display
+            const resultSummary = formatResult(tool, result, args);
+            addActivity(mapping.type, mapping.title, resultSummary, mapping.icon, result, inferredQuery);
 
             // Special handling for check-ins
             if (tool === 'check_in_ticket' || tool === 'check_in_by_name') {
-                if (data.success) {
+                if (data.success && result.success) {
                     stats.checkIns++;
                     updateStat('checkins', stats.checkIns);
-                    addCheckIn(args.name || 'Guest');
+                    const name = result.guest_name || result.attendee_name || args.name || 'Guest';
+                    addCheckIn(name, result.tier_name || 'General');
                 }
             }
 
@@ -529,36 +1390,318 @@
             if (tool === 'send_purchase_link') {
                 highlightCard('stat-tickets');
             }
+
+            // Update event display if we got event data
+            if (result && (tool === 'get_event' || tool === 'list_events')) {
+                const event = Array.isArray(result) ? result[0] : result;
+                if (event && event.name) {
+                    updateEventCard(event);
+                }
+            }
+
+            // Update stats in real-time when data changes
+            if (tool === 'create_event') {
+                // Increment event count directly
+                const currentCount = parseInt(document.getElementById('total-events').textContent) || 0;
+                document.getElementById('total-events').textContent = currentCount + 1;
+                highlightCard('stat-events');
+            }
+            if (tool === 'create_venue') {
+                const currentCount = parseInt(document.getElementById('total-venues').textContent) || 0;
+                document.getElementById('total-venues').textContent = currentCount + 1;
+                highlightCard('stat-venues');
+            }
+            if (tool === 'register_customer') {
+                const currentCount = parseInt(document.getElementById('total-contacts').textContent) || 0;
+                document.getElementById('total-contacts').textContent = currentCount + 1;
+                highlightCard('stat-contacts');
+            }
+        }
+
+        // Refresh individual stats (with flag to prevent loops)
+        async function refreshEventCount() {
+            if (isRefreshing) return;
+            isRefreshing = true;
+            try {
+                const res = await fetch(`${API_URL}/tools/list_events`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: {} })
+                });
+                const data = await res.json();
+                if (data.result) {
+                    const count = Array.isArray(data.result) ? data.result.length : 0;
+                    document.getElementById('total-events').textContent = count;
+                    highlightCard('stat-events');
+                }
+            } catch (e) { console.error('Failed to refresh events:', e); }
+            setTimeout(() => { isRefreshing = false; }, 500);
+        }
+
+        async function refreshVenueCount() {
+            if (isRefreshing) return;
+            isRefreshing = true;
+            try {
+                const res = await fetch(`${API_URL}/tools/list_venues`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: {} })
+                });
+                const data = await res.json();
+                if (data.result) {
+                    const count = Array.isArray(data.result) ? data.result.length : 0;
+                    document.getElementById('total-venues').textContent = count;
+                    highlightCard('stat-venues');
+                }
+            } catch (e) { console.error('Failed to refresh venues:', e); }
+            setTimeout(() => { isRefreshing = false; }, 500);
+        }
+
+        async function refreshContactCount() {
+            if (isRefreshing) return;
+            isRefreshing = true;
+            try {
+                const res = await fetch(`${API_URL}/tools/list_event_goers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: {} })
+                });
+                const data = await res.json();
+                if (data.result) {
+                    const count = Array.isArray(data.result) ? data.result.length : 0;
+                    document.getElementById('total-contacts').textContent = count;
+                    highlightCard('stat-contacts');
+                }
+            } catch (e) { console.error('Failed to refresh contacts:', e); }
+            setTimeout(() => { isRefreshing = false; }, 500);
+        }
+
+        async function refreshSalesStats() {
+            if (isRefreshing) return;
+            isRefreshing = true;
+            try {
+                const res = await fetch(`${API_URL}/tools/get_event_sales`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: { event_id: currentEventData?.id || 1 } })
+                });
+                const data = await res.json();
+                if (data.result) {
+                    document.getElementById('tickets-sold').textContent = data.result.total_tickets_sold || 0;
+                    document.getElementById('revenue').textContent = ((data.result.total_revenue_cents || 0) / 100).toLocaleString();
+                    document.getElementById('checkins').textContent = data.result.tickets_checked_in || 0;
+                    highlightCard('stat-tickets');
+                }
+            } catch (e) { console.error('Failed to refresh sales:', e); }
+            setTimeout(() => { isRefreshing = false; }, 500);
+        }
+
+        // Infer what the user likely asked based on tool and arguments
+        function inferQuery(tool, args) {
+            switch(tool) {
+                case 'list_events':
+                    return '"What events do you have?" or "What games are coming up?"';
+                case 'get_event':
+                    return `"Tell me about event ${args.event_id || ''}"`;
+                case 'get_ticket_availability':
+                    return '"How many tickets are available?"';
+                case 'list_ticket_tiers':
+                    return '"What ticket options do you have?" or "What are the prices?"';
+                case 'check_in_ticket':
+                    return `"Check in ticket" (QR: ${args.qr_token || '...'})`;
+                case 'check_in_by_name':
+                    return `"Check in ${args.name || 'guest'}"`;
+                case 'find_guest':
+                    return `"Find ${args.name || 'guest'}" or "Is ${args.name || 'someone'} here?"`;
+                case 'lookup_customer':
+                    return `"Look up customer ${args.phone || args.email || ''}"`;
+                case 'get_customer_profile':
+                    return '"What do you know about this customer?"';
+                case 'send_purchase_link':
+                    return `"Send me a link to buy tickets" → ${args.phone || ''}`;
+                case 'send_verification_code':
+                    return `"Verify my phone number" → ${args.phone || ''}`;
+                case 'verify_phone_code':
+                    return `"My code is ${args.code || '...'}"`;
+                case 'add_customer_note':
+                    return `Adding note: "${(args.note || '').slice(0, 30)}..."`;
+                case 'get_event_sales':
+                    return '"How are ticket sales going?"';
+                case 'list_venues':
+                    return '"What venues do you have?"';
+                case 'get_venue':
+                    return '"Tell me about the venue"';
+                case 'create_event':
+                    return `"Create an event: ${args.name || ''}"`;
+                case 'send_event_reminders':
+                    return '"Send reminders to ticket holders"';
+                default:
+                    return null;
+            }
+        }
+
+        // Format result for display
+        function formatResult(tool, result, args) {
+            if (!result) return `Tool: ${tool}`;
+
+            if (result.error) return `Error: ${result.error}`;
+
+            switch(tool) {
+                case 'list_events':
+                    if (Array.isArray(result)) {
+                        return `Found ${result.length} event(s)` + (result[0] ? `: ${result[0].name}` : '');
+                    }
+                    break;
+                case 'get_event':
+                    return result.name ? `${result.name} - ${result.event_date}` : 'Event details loaded';
+                case 'get_ticket_availability':
+                    return `${result.available || 0} tickets available`;
+                case 'list_ticket_tiers':
+                    if (Array.isArray(result)) {
+                        return result.map(t => `${t.name}: $${(t.price/100).toFixed(0)}`).join(', ');
+                    }
+                    break;
+                case 'check_in_ticket':
+                case 'check_in_by_name':
+                    return result.success ? `✓ ${result.guest_name || 'Guest'} checked in!` : result.message || 'Check-in failed';
+                case 'find_guest':
+                    if (Array.isArray(result)) {
+                        return `Found ${result.length} guest(s)`;
+                    }
+                    return result.name ? `Found: ${result.name}` : 'Searching...';
+                case 'lookup_customer':
+                case 'get_customer_profile':
+                    return result.name ? `${result.name} - ${result.email || ''}` : 'Customer loaded';
+                case 'send_purchase_link':
+                    return result.success ? `Link sent to ${args.phone || 'customer'}` : 'Failed to send';
+                case 'send_verification_code':
+                    return result.success ? `Code sent to ${args.phone || 'phone'}` : 'Failed to send';
+                case 'verify_phone_code':
+                    return result.verified ? '✓ Phone verified!' : 'Verification failed';
+                case 'get_event_sales':
+                    return `${result.total_tickets_sold || 0} sold - $${((result.total_revenue_cents || 0)/100).toLocaleString()}`;
+                case 'list_venues':
+                    if (Array.isArray(result)) {
+                        return `${result.length} venue(s)` + (result[0] ? `: ${result[0].name}` : '');
+                    }
+                    break;
+                default:
+                    if (typeof result === 'object') {
+                        return result.message || result.name || JSON.stringify(result).slice(0, 50);
+                    }
+            }
+            return `Tool: ${tool}`;
         }
 
         // Add activity to feed
-        function addActivity(type, title, subtitle, icon = '⚡') {
+        function addActivity(type, title, subtitle, icon = '⚡', resultData = null, query = null) {
             const list = document.getElementById('activity-list');
             const time = new Date().toLocaleTimeString();
 
             const item = document.createElement('div');
             item.className = `activity-item ${type}`;
-            item.innerHTML = `
-                <div class="activity-icon">${icon}</div>
-                <div class="activity-details">
-                    <div class="activity-title">${title}</div>
-                    <div class="activity-subtitle">${subtitle}</div>
-                </div>
-                <div class="activity-time">${time}</div>
-            `;
+
+            // System messages (no query)
+            if (type === 'system' || !query) {
+                item.innerHTML = `
+                    <div class="response-card">
+                        <div class="response-header">
+                            <div class="response-icon">${icon}</div>
+                            <div>
+                                <div class="response-title">${title}</div>
+                                <div class="response-subtitle">${subtitle}</div>
+                            </div>
+                            <div class="response-time">${time}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Full query + response layout
+                const resultHtml = buildResultData(resultData);
+
+                item.innerHTML = `
+                    <div class="query-bubble">
+                        <div class="query-text">${query}</div>
+                    </div>
+                    <div class="response-card">
+                        <div class="response-header">
+                            <div class="response-icon">${icon}</div>
+                            <div>
+                                <div class="response-title">${title}</div>
+                                <div class="response-subtitle">${subtitle}</div>
+                            </div>
+                            <div class="response-time">${time}</div>
+                        </div>
+                        ${resultHtml}
+                    </div>
+                `;
+            }
 
             list.insertBefore(item, list.firstChild);
 
-            // Keep only last 20 activities
-            while (list.children.length > 20) {
+            // Keep only last 10 activities for TV
+            while (list.children.length > 10) {
                 list.removeChild(list.lastChild);
             }
         }
 
+        // Build result data display
+        function buildResultData(data) {
+            if (!data || typeof data !== 'object') return '';
+            if (data.error) return `<div class="result-data"><div class="result-data-row"><span class="result-data-icon">⚠️</span><span class="result-data-value">${data.error}</span></div></div>`;
+
+            let rows = [];
+
+            // For arrays (like list_events)
+            if (Array.isArray(data)) {
+                if (data.length === 0) return '<div class="result-data"><div class="result-data-row">No results found</div></div>';
+
+                data.slice(0, 3).forEach(item => {
+                    if (item.name) {
+                        let row = `<div class="result-data-row">`;
+                        if (item.event_date) {
+                            row += `<span class="result-data-icon">📅</span>`;
+                            row += `<span class="result-highlight">${item.name}</span>`;
+                            row += `<span class="result-data-label" style="margin-left:auto;">${item.event_date}</span>`;
+                        } else if (item.price !== undefined) {
+                            row += `<span class="result-data-icon">🎫</span>`;
+                            row += `<span class="result-data-value">${item.name}</span>`;
+                            row += `<span class="result-highlight" style="margin-left:auto;">$${(item.price/100).toFixed(0)}</span>`;
+                        } else {
+                            row += `<span class="result-data-icon">•</span>`;
+                            row += `<span class="result-data-value">${item.name}</span>`;
+                        }
+                        row += `</div>`;
+                        rows.push(row);
+                    }
+                });
+
+                if (data.length > 3) {
+                    rows.push(`<div class="result-data-row" style="color:#888;font-size:0.9em;">+ ${data.length - 3} more items</div>`);
+                }
+            } else {
+                // Single object
+                if (data.name) rows.push(`<div class="result-data-row"><span class="result-data-icon">✨</span><span class="result-highlight">${data.name}</span></div>`);
+                if (data.event_date) rows.push(`<div class="result-data-row"><span class="result-data-icon">📅</span><span class="result-data-label">Date</span><span class="result-data-value">${data.event_date}</span></div>`);
+                if (data.event_time) rows.push(`<div class="result-data-row"><span class="result-data-icon">🕐</span><span class="result-data-label">Time</span><span class="result-data-value">${data.event_time}</span></div>`);
+                if (data.venue_name) rows.push(`<div class="result-data-row"><span class="result-data-icon">📍</span><span class="result-data-label">Venue</span><span class="result-data-value">${data.venue_name}</span></div>`);
+                if (data.email) rows.push(`<div class="result-data-row"><span class="result-data-icon">✉️</span><span class="result-data-label">Email</span><span class="result-data-value">${data.email}</span></div>`);
+                if (data.phone) rows.push(`<div class="result-data-row"><span class="result-data-icon">📱</span><span class="result-data-label">Phone</span><span class="result-data-value">${data.phone}</span></div>`);
+                if (data.total_tickets_sold !== undefined) rows.push(`<div class="result-data-row"><span class="result-data-icon">🎟️</span><span class="result-data-label">Sold</span><span class="result-highlight">${data.total_tickets_sold}</span></div>`);
+                if (data.total_revenue_cents !== undefined) rows.push(`<div class="result-data-row"><span class="result-data-icon">💰</span><span class="result-data-label">Revenue</span><span class="result-highlight">$${(data.total_revenue_cents/100).toLocaleString()}</span></div>`);
+                if (data.tickets_checked_in !== undefined) rows.push(`<div class="result-data-row"><span class="result-data-icon">✅</span><span class="result-data-label">Checked In</span><span class="result-highlight">${data.tickets_checked_in}</span></div>`);
+                if (data.success !== undefined) rows.push(`<div class="result-data-row"><span class="result-data-icon">${data.success ? '✅' : '❌'}</span><span class="result-data-value">${data.message || (data.success ? 'Success' : 'Failed')}</span></div>`);
+                if (data.guest_name) rows.push(`<div class="result-data-row"><span class="result-data-icon">👤</span><span class="result-data-label">Guest</span><span class="result-highlight">${data.guest_name}</span></div>`);
+            }
+
+            if (rows.length === 0) return '';
+            return `<div class="result-data">${rows.join('')}</div>`;
+        }
+
         // Add check-in
-        function addCheckIn(name) {
+        function addCheckIn(name, tier = 'General') {
             const list = document.getElementById('checkin-list');
-            const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+            const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || '??';
 
             const item = document.createElement('div');
             item.className = 'checkin-item';
@@ -566,7 +1709,7 @@
                 <div class="checkin-avatar">${initials}</div>
                 <div>
                     <div class="checkin-name">${name}</div>
-                    <div class="checkin-tier">Just checked in</div>
+                    <div class="checkin-tier">${tier}</div>
                 </div>
             `;
 
@@ -598,83 +1741,456 @@
             setTimeout(() => card.classList.remove('highlight'), 500);
         }
 
-        // Countdown timer
+        // Countdown timer (placeholder until event loads)
         function updateCountdown() {
-            const eventDate = new Date('2026-04-10T19:30:00');
-            const now = new Date();
-            const diff = eventDate - now;
-
-            if (diff > 0) {
-                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                document.getElementById('countdown').textContent = `${days}d ${hours}h until tip-off`;
-            } else {
-                document.getElementById('countdown').textContent = 'GAME DAY!';
-            }
+            // Will be updated when event data loads
         }
 
         // Load initial data
         async function loadInitialData() {
             try {
-                // Get events
-                const eventsRes = await fetch(`${API_URL}/tools/list_events`, {
+                // Fetch events, venues, and contacts in parallel
+                const [eventsRes, venuesRes, contactsRes] = await Promise.all([
+                    fetch(`${API_URL}/tools/list_events`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ arguments: {} })
+                    }),
+                    fetch(`${API_URL}/tools/list_venues`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ arguments: {} })
+                    }),
+                    fetch(`${API_URL}/tools/list_event_goers`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ arguments: {} })
+                    })
+                ]);
+
+                const events = await eventsRes.json();
+                const venues = await venuesRes.json();
+                const contacts = await contactsRes.json();
+
+                // Update event count
+                if (events.result) {
+                    const eventList = Array.isArray(events.result) ? events.result : [];
+                    document.getElementById('total-events').textContent = eventList.length;
+
+                    if (eventList.length > 0) {
+                        updateEventCard(eventList[0]);
+                        updateTicker(eventList);
+
+                        // Get sales for first event
+                        const salesRes = await fetch(`${API_URL}/tools/get_event_sales`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ arguments: { event_id: eventList[0].id } })
+                        });
+                        const sales = await salesRes.json();
+
+                        if (sales.result) {
+                            stats.ticketsSold = sales.result.total_tickets_sold || 0;
+                            stats.revenue = (sales.result.total_revenue_cents || 0) / 100;
+                            stats.checkIns = sales.result.tickets_checked_in || 0;
+
+                            document.getElementById('tickets-sold').textContent = stats.ticketsSold;
+                            document.getElementById('revenue').textContent = stats.revenue.toLocaleString();
+                            document.getElementById('checkins').textContent = stats.checkIns;
+                        }
+                    }
+                }
+
+                // Update venue count
+                if (venues.result) {
+                    const venueList = Array.isArray(venues.result) ? venues.result : [];
+                    document.getElementById('total-venues').textContent = venueList.length;
+                }
+
+                // Update contacts count
+                if (contacts.result) {
+                    const contactList = Array.isArray(contacts.result) ? contacts.result : [];
+                    document.getElementById('total-contacts').textContent = contactList.length;
+                }
+
+                // Clear any activities from initial load and show ready message
+                document.getElementById('activity-list').innerHTML = '';
+                addActivity('system', 'Dashboard Ready', 'Waiting for voice agent activity...', '🎙️');
+
+                // Allow future tool calls to show
+                setTimeout(() => { isInitialLoad = false; }, 1000);
+
+            } catch (error) {
+                console.error('Failed to load initial data:', error);
+                document.getElementById('activity-list').innerHTML = '';
+                addActivity('system', 'Dashboard Ready', 'Waiting for voice agent activity...', '🎙️');
+                setTimeout(() => { isInitialLoad = false; }, 1000);
+            }
+        }
+
+        // Update ticker with real event data
+        function updateTicker(events) {
+            const ticker = document.getElementById('ticker');
+            if (!events || events.length === 0) return;
+
+            let tickerHtml = '';
+            events.forEach(event => {
+                tickerHtml += `<div class="ticker-item">🎟️ <span>${event.name}</span> - ${event.event_date} at ${event.event_time}</div>`;
+            });
+
+            // Add venue info if available
+            if (events[0].venue_name) {
+                tickerHtml += `<div class="ticker-item">📍 <span>${events[0].venue_name}</span></div>`;
+            }
+
+            // Duplicate for seamless scroll
+            ticker.innerHTML = tickerHtml + tickerHtml;
+        }
+
+        // Update event card with real data
+        function updateEventCard(event) {
+            // Store for modal use
+            currentEventData = event;
+
+            document.getElementById('event-name').textContent = event.name || 'No Event';
+            document.getElementById('event-info').textContent =
+                `📅 ${event.event_date || 'TBD'} • ${event.event_time || 'TBD'}`;
+            document.getElementById('event-venue').textContent =
+                `📍 ${event.venue_name || 'Venue TBD'}`;
+
+            // Update countdown if we have a date
+            if (event.event_date) {
+                updateCountdownForEvent(event.event_date, event.event_time);
+            }
+
+            // Update promo video
+            updatePromoVideo(event.promo_video_url);
+        }
+
+        // Update promo video
+        function updatePromoVideo(videoUrl) {
+            const container = document.getElementById('promo-video-container');
+            const overlay = document.querySelector('.event-overlay-info');
+
+            if (videoUrl) {
+                // Extract YouTube video ID
+                const youtubeId = extractYouTubeId(videoUrl);
+                if (youtubeId) {
+                    container.innerHTML = `
+                        <iframe
+                            src="https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&rel=0&modestbranding=1&iv_load_policy=3"
+                            allow="autoplay; encrypted-media"
+                            allowfullscreen>
+                        </iframe>
+                    `;
+                    // Hide overlay text when video is playing
+                    overlay.classList.add('video-playing');
+                } else {
+                    // Direct video URL
+                    container.innerHTML = `
+                        <video autoplay muted loop style="width:100%;height:100%;object-fit:cover;">
+                            <source src="${videoUrl}" type="video/mp4">
+                        </video>
+                    `;
+                    overlay.classList.add('video-playing');
+                }
+            } else {
+                // Placeholder animation - show full overlay
+                container.innerHTML = `<div class="video-placeholder">🏀</div>`;
+                overlay.classList.remove('video-playing');
+            }
+        }
+
+        // Extract YouTube video ID from URL
+        function extractYouTubeId(url) {
+            if (!url) return null;
+            const patterns = [
+                /youtu\.be\/([^?&]+)/,
+                /youtube\.com\/watch\?v=([^?&]+)/,
+                /youtube\.com\/embed\/([^?&]+)/,
+                /youtube\.com\/v\/([^?&]+)/
+            ];
+            for (const pattern of patterns) {
+                const match = url.match(pattern);
+                if (match) return match[1];
+            }
+            return null;
+        }
+
+        // Update countdown for specific event
+        function updateCountdownForEvent(dateStr, timeStr) {
+            try {
+                const eventDate = new Date(`${dateStr}T${timeStr || '19:00'}:00`);
+                const now = new Date();
+                const diff = eventDate - now;
+
+                const countdownEl = document.getElementById('countdown');
+                if (diff > 0) {
+                    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                    countdownEl.textContent = days > 0 ? `${days}d ${hours}h to go` : `${hours}h to go`;
+                } else {
+                    countdownEl.textContent = 'NOW LIVE';
+                }
+            } catch(e) {
+                document.getElementById('countdown').textContent = '--';
+            }
+        }
+
+        // Current event data for modal
+        let currentEventData = null;
+        let allEventsData = [];
+        let allVenuesData = [];
+        let allContactsData = [];
+
+        // Open list modal for events/venues/contacts
+        async function openListModal(type) {
+            const modal = document.getElementById('list-modal');
+            const title = document.getElementById('list-modal-title');
+            const grid = document.getElementById('list-modal-grid');
+
+            grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">⏳</div>Loading...</div>';
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            if (type === 'events') {
+                title.textContent = '🎟️ All Events';
+                await loadEventsList(grid);
+            } else if (type === 'venues') {
+                title.textContent = '🏟️ All Venues';
+                await loadVenuesList(grid);
+            } else if (type === 'contacts') {
+                title.textContent = '👥 All Contacts';
+                await loadContactsList(grid);
+            }
+        }
+
+        // Load events list
+        async function loadEventsList(grid) {
+            try {
+                const res = await fetch(`${API_URL}/tools/list_events`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ arguments: {} })
                 });
-                const events = await eventsRes.json();
+                const data = await res.json();
+                const events = data.result || [];
+                allEventsData = events;
 
-                if (events.result && events.result.length > 0) {
-                    const event = events.result[0];
-                    document.getElementById('event-name').textContent = event.name;
-                    document.getElementById('event-info').textContent =
-                        `📅 ${event.event_date} • ${event.event_time}`;
+                if (events.length === 0) {
+                    grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">📅</div>No events yet</div>';
+                    return;
                 }
 
-                // Get sales
+                grid.innerHTML = events.map((event, i) => `
+                    <div class="list-event-card" onclick="viewEventDetail(${i})">
+                        <div class="list-event-image" style="background: linear-gradient(135deg, #ce1126 ${i * 10}%, #8b0000);display:flex;align-items:center;justify-content:center;font-size:3em;">
+                            🏀
+                        </div>
+                        <div class="list-event-info">
+                            <div class="list-event-name">${event.name}</div>
+                            <div class="list-event-meta">📅 ${event.event_date || 'TBD'} • 🕐 ${event.event_time || 'TBD'}</div>
+                            <div class="list-event-venue">📍 ${event.venue_name || 'Venue TBD'}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">⚠️</div>Failed to load events</div>';
+            }
+        }
+
+        // Load venues list
+        async function loadVenuesList(grid) {
+            try {
+                const res = await fetch(`${API_URL}/tools/list_venues`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: {} })
+                });
+                const data = await res.json();
+                const venues = data.result || [];
+                allVenuesData = venues;
+
+                if (venues.length === 0) {
+                    grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">🏟️</div>No venues yet</div>';
+                    return;
+                }
+
+                grid.innerHTML = venues.map(venue => `
+                    <div class="list-venue-card">
+                        <div class="list-venue-icon">🏟️</div>
+                        <div class="list-venue-name">${venue.name}</div>
+                        <div class="list-venue-address">${venue.address || 'No address'}</div>
+                        <div class="list-venue-phone">${venue.phone || ''}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">⚠️</div>Failed to load venues</div>';
+            }
+        }
+
+        // Load contacts list
+        async function loadContactsList(grid) {
+            try {
+                const res = await fetch(`${API_URL}/tools/list_event_goers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: {} })
+                });
+                const data = await res.json();
+                const contacts = data.result || [];
+                allContactsData = contacts;
+
+                if (contacts.length === 0) {
+                    grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">👥</div>No contacts yet</div>';
+                    return;
+                }
+
+                grid.innerHTML = contacts.map(contact => {
+                    const initials = (contact.name || 'U').split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                    return `
+                        <div class="list-contact-card">
+                            <div class="list-contact-avatar">${initials}</div>
+                            <div class="list-contact-info">
+                                <div class="list-contact-name">${contact.name || 'Unknown'}</div>
+                                <div class="list-contact-email">${contact.email || ''}</div>
+                                <div class="list-contact-phone">${contact.phone || ''}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">⚠️</div>Failed to load contacts</div>';
+            }
+        }
+
+        // View event detail from list
+        function viewEventDetail(index) {
+            if (allEventsData[index]) {
+                currentEventData = allEventsData[index];
+                closeListModal();
+                openEventModal();
+            }
+        }
+
+        // Close list modal
+        function closeListModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            const modal = document.getElementById('list-modal');
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
+
+        // Open event modal
+        async function openEventModal() {
+            if (!currentEventData) return;
+
+            const modal = document.getElementById('event-modal');
+            const event = currentEventData;
+
+            // Set basic event info
+            document.getElementById('modal-event-name').textContent = event.name || 'Event';
+            document.getElementById('modal-event-date').textContent = `📅 ${event.event_date || 'TBD'}`;
+            document.getElementById('modal-event-time').textContent = `🕐 ${event.event_time || 'TBD'}`;
+            document.getElementById('modal-event-description').textContent = event.description || 'No description available.';
+
+            // Set event image (use placeholder if none)
+            const imageEl = document.getElementById('modal-event-image');
+            if (event.image_url) {
+                imageEl.src = event.image_url;
+            } else {
+                // Gradient placeholder
+                imageEl.src = 'data:image/svg+xml,' + encodeURIComponent(`
+                    <svg xmlns="http://www.w3.org/2000/svg" width="900" height="350">
+                        <defs>
+                            <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#ce1126"/>
+                                <stop offset="100%" style="stop-color:#8b0000"/>
+                            </linearGradient>
+                        </defs>
+                        <rect width="900" height="350" fill="url(#grad)"/>
+                        <text x="450" y="175" font-family="Arial" font-size="48" fill="white" text-anchor="middle" dominant-baseline="middle">🏀 ${event.name || 'Event'}</text>
+                    </svg>
+                `);
+            }
+
+            // Set venue info
+            document.getElementById('modal-venue-name').textContent = event.venue_name || 'Venue TBD';
+            document.getElementById('modal-venue-address').textContent = event.venue_address || '';
+
+            // Load ticket tiers
+            try {
+                const tiersRes = await fetch(`${API_URL}/tools/list_ticket_tiers`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ arguments: { event_id: event.id } })
+                });
+                const tiers = await tiersRes.json();
+
+                const tiersList = document.getElementById('modal-tiers-list');
+                if (tiers.result && Array.isArray(tiers.result) && tiers.result.length > 0) {
+                    tiersList.innerHTML = tiers.result.map(tier => {
+                        const available = (tier.quantity_available || 0) - (tier.quantity_sold || 0);
+                        const lowClass = available < 10 ? 'low' : '';
+                        return `
+                            <div class="tier-card">
+                                <div class="tier-name">${tier.name}</div>
+                                <div class="tier-price">$${((tier.price || 0) / 100).toFixed(0)}</div>
+                                <div class="tier-available ${lowClass}">${available} available</div>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    tiersList.innerHTML = '<p style="color: #888;">No ticket tiers configured</p>';
+                }
+
+                // Load sales stats
                 const salesRes = await fetch(`${API_URL}/tools/get_event_sales`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ arguments: { event_id: 1 } })
+                    body: JSON.stringify({ arguments: { event_id: event.id } })
                 });
                 const sales = await salesRes.json();
 
                 if (sales.result) {
-                    stats.ticketsSold = sales.result.total_tickets_sold || 0;
-                    stats.revenue = (sales.result.total_revenue_cents || 0) / 100;
-                    stats.checkIns = sales.result.tickets_checked_in || 0;
-
-                    document.getElementById('tickets-sold').textContent = stats.ticketsSold;
-                    document.getElementById('revenue').textContent = stats.revenue.toLocaleString();
-                    document.getElementById('checkins').textContent = stats.checkIns;
+                    document.getElementById('modal-tickets-sold').textContent = sales.result.total_tickets_sold || 0;
+                    document.getElementById('modal-tickets-available').textContent = sales.result.total_available || 0;
+                    document.getElementById('modal-checked-in').textContent = sales.result.tickets_checked_in || 0;
+                    document.getElementById('modal-revenue').textContent = ((sales.result.total_revenue_cents || 0) / 100).toLocaleString();
                 }
-
-                addActivity('system', 'Data Loaded', 'Initial stats loaded from server', '📊');
-
-            } catch (error) {
-                console.error('Failed to load initial data:', error);
-                addActivity('system', 'Connection Issue', 'Could not load initial data', '⚠️');
+            } catch (err) {
+                console.error('Failed to load event details:', err);
             }
+
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
         }
 
-        // Demo mode - simulate activity
-        function startDemoMode() {
-            const demoActivities = [
-                { type: 'query', title: 'Event Listed', subtitle: 'Customer asked about games', icon: '📅' },
-                { type: 'query', title: 'Availability Checked', subtitle: 'Raptors vs Heat', icon: '🎟️' },
-                { type: 'notification', title: 'Verification Sent', subtitle: '+1 416-555-xxxx', icon: '📱' },
-                { type: 'purchase', title: 'Purchase Link Sent', subtitle: 'Lower Bowl x2', icon: '💳' },
-                { type: 'query', title: 'Profile Loaded', subtitle: 'Returning customer', icon: '👤' },
-            ];
+        // Close event modal
+        function closeEventModal(e) {
+            if (e && e.target !== e.currentTarget) return;
+            const modal = document.getElementById('event-modal');
+            modal.classList.remove('active');
+            document.body.style.overflow = '';
+        }
 
-            setInterval(() => {
-                if (Math.random() > 0.7) {
-                    const activity = demoActivities[Math.floor(Math.random() * demoActivities.length)];
-                    addActivity(activity.type, activity.title, activity.subtitle, activity.icon);
-                    stats.agentCalls++;
-                    updateStat('agent-calls', stats.agentCalls);
-                }
-            }, 5000);
+        // Handle ESC key to close modals
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeEventModal();
+                closeListModal();
+            }
+        });
+
+        // Toggle fullscreen mode
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log('Fullscreen error:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
         }
 
         // Initialize
@@ -684,8 +2200,8 @@
             updateCountdown();
             setInterval(updateCountdown, 60000);
 
-            // Start demo mode for visual effect
-            startDemoMode();
+            // Make event card clickable
+            document.querySelector('.current-event').addEventListener('click', openEventModal);
         });
     </script>
 </body>

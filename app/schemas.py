@@ -51,12 +51,14 @@ class EventUpdate(BaseModel):
     description: Optional[str] = None
     event_date: Optional[str] = None
     event_time: Optional[str] = None
+    promo_video_url: Optional[str] = None
 
 
 class EventResponse(EventBase):
     id: int
     venue_id: int
     image_url: Optional[str] = None
+    promo_video_url: Optional[str] = None
     status: EventStatus = EventStatus.SCHEDULED
     created_at: datetime
 

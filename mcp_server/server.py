@@ -132,7 +132,7 @@ async def list_tools():
         ),
         Tool(
             name="update_event",
-            description="Update event details",
+            description="Update event details including promo video",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -141,6 +141,7 @@ async def list_tools():
                     "description": {"type": "string", "description": "New description (optional)"},
                     "event_date": {"type": "string", "description": "New date (optional)"},
                     "event_time": {"type": "string", "description": "New time (optional)"},
+                    "promo_video_url": {"type": "string", "description": "YouTube or video URL for event promo (optional)"},
                 },
                 "required": ["event_id"],
             },
@@ -597,6 +598,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             event.event_date = arguments["event_date"]
         if "event_time" in arguments:
             event.event_time = arguments["event_time"]
+        if "promo_video_url" in arguments:
+            event.promo_video_url = arguments["promo_video_url"]
         db.commit()
         db.refresh(event)
         return _event_to_dict(event)
@@ -1452,17 +1455,23 @@ def _venue_to_dict(venue: Venue) -> dict:
 
 
 def _event_to_dict(event: Event) -> dict:
-    return {
+    result = {
         "id": event.id,
         "venue_id": event.venue_id,
         "name": event.name,
         "description": event.description,
         "image_url": event.image_url,
+        "promo_video_url": event.promo_video_url,
         "event_date": event.event_date,
         "event_time": event.event_time,
         "status": event.status.value if event.status else "scheduled",
         "created_at": event.created_at,
     }
+    # Include venue info if loaded
+    if event.venue:
+        result["venue_name"] = event.venue.name
+        result["venue_address"] = event.venue.address
+    return result
 
 
 def _tier_to_dict(tier: TicketTier) -> dict:
