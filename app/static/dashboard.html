@@ -1357,6 +1357,7 @@
                 'get_ticket_availability': { icon: '🎟️', title: 'Availability Check', type: 'query' },
                 'check_in_ticket': { icon: '✅', title: 'QR Check-in', type: 'check-in' },
                 'check_in_by_name': { icon: '✅', title: 'Name Check-in', type: 'check-in' },
+                'check_out_by_name': { icon: '👋', title: 'Guest Checked Out', type: 'check-in' },
                 'find_guest': { icon: '🔍', title: 'Guest Search', type: 'query' },
                 'get_customer_profile': { icon: '👤', title: 'Customer Profile', type: 'query' },
                 'lookup_customer': { icon: '👤', title: 'Customer Lookup', type: 'query' },
@@ -1366,11 +1367,16 @@
                 'verify_phone_code': { icon: '✓', title: 'Phone Verified', type: 'notification' },
                 'send_event_reminders': { icon: '🔔', title: 'Reminders Sent', type: 'notification' },
                 'create_event': { icon: '➕', title: 'Event Created', type: 'system' },
+                'update_event': { icon: '✏️', title: 'Event Updated', type: 'system' },
                 'get_event_sales': { icon: '📊', title: 'Sales Report', type: 'query' },
                 'list_venues': { icon: '🏟️', title: 'Venues Listed', type: 'query' },
                 'get_venue': { icon: '🏟️', title: 'Venue Details', type: 'query' },
                 'list_ticket_tiers': { icon: '🎫', title: 'Ticket Tiers', type: 'query' },
+                'register_customer': { icon: '👤', title: 'Customer Registered', type: 'system' },
+                'assign_ticket': { icon: '🎟️', title: 'Ticket Assigned', type: 'purchase' },
             };
+
+            console.log('Tool called:', tool, 'Result:', result);
 
             const mapping = toolMappings[tool] || { icon: '⚡', title: tool, type: 'query' };
 
