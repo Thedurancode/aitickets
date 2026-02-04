@@ -579,6 +579,11 @@
             to { opacity: 1; transform: scale(1); }
         }
 
+        @keyframes slideOut {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(100%); }
+        }
+
         .checkin-avatar {
             width: 45px;
             height: 45px;
@@ -1381,8 +1386,19 @@
                 if (data.success && result.success) {
                     stats.checkIns++;
                     updateStat('checkins', stats.checkIns);
-                    const name = result.guest_name || result.attendee_name || args.name || 'Guest';
-                    addCheckIn(name, result.tier_name || 'General');
+                    const name = result.guest?.name || result.guest_name || args.name || 'Guest';
+                    const tier = result.ticket?.tier || result.tier_name || 'General';
+                    addCheckIn(name, tier);
+                }
+            }
+
+            // Special handling for check-outs
+            if (tool === 'check_out_by_name') {
+                if (data.success && result.success) {
+                    stats.checkIns = Math.max(0, stats.checkIns - 1);
+                    updateStat('checkins', stats.checkIns);
+                    const name = result.guest?.name || args.name || 'Guest';
+                    removeCheckIn(name);
                 }
             }
 
@@ -1704,6 +1720,7 @@
 
             const item = document.createElement('div');
             item.className = 'checkin-item';
+            item.setAttribute('data-name', name.toLowerCase());
             item.innerHTML = `
                 <div class="checkin-avatar">${initials}</div>
                 <div>
@@ -1722,6 +1739,29 @@
             // Keep only last 5
             while (list.children.length > 5) {
                 list.removeChild(list.lastChild);
+            }
+        }
+
+        // Remove check-in (for checkout)
+        function removeCheckIn(name) {
+            const list = document.getElementById('checkin-list');
+            const nameLower = name.toLowerCase();
+
+            // Find and remove matching item
+            const items = list.querySelectorAll('.checkin-item');
+            for (const item of items) {
+                const itemName = item.getAttribute('data-name') || item.querySelector('.checkin-name')?.textContent?.toLowerCase();
+                if (itemName && itemName.includes(nameLower)) {
+                    item.style.animation = 'slideOut 0.3s ease-out';
+                    setTimeout(() => {
+                        item.remove();
+                        // Show placeholder if list is empty
+                        if (list.children.length === 0) {
+                            list.innerHTML = '<div style="color: #666; text-align: center; padding: 40px;">No check-ins yet</div>';
+                        }
+                    }, 300);
+                    break;
+                }
             }
         }
 
