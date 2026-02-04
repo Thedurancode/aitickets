@@ -241,6 +241,19 @@ async def list_tools():
             },
         ),
         Tool(
+            name="assign_ticket",
+            description="Assign a ticket to a customer for an event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_goer_id": {"type": "integer", "description": "Customer ID"},
+                    "ticket_tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                    "quantity": {"type": "integer", "description": "Number of tickets (default 1)"},
+                },
+                "required": ["event_goer_id", "ticket_tier_id"],
+            },
+        ),
+        Tool(
             name="check_in_ticket",
             description="Validate and check in a ticket by QR token (for scanning)",
             inputSchema={
@@ -822,6 +835,56 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             }
             for c in customers
         ]
+
+    elif name == "assign_ticket":
+        import secrets
+
+        # Get customer
+        customer = db.query(EventGoer).filter(EventGoer.id == arguments["event_goer_id"]).first()
+        if not customer:
+            return {"error": "Customer not found"}
+
+        # Get ticket tier
+        tier = db.query(TicketTier).filter(TicketTier.id == arguments["ticket_tier_id"]).first()
+        if not tier:
+            return {"error": "Ticket tier not found"}
+
+        quantity = arguments.get("quantity", 1)
+
+        # Check availability
+        remaining = tier.quantity_available - tier.quantity_sold
+        if remaining < quantity:
+            return {"error": f"Only {remaining} tickets remaining"}
+
+        # Create tickets
+        tickets = []
+        for _ in range(quantity):
+            ticket = Ticket(
+                ticket_tier_id=tier.id,
+                event_goer_id=customer.id,
+                qr_code_token=secrets.token_urlsafe(16),
+                status=TicketStatus.PAID,
+                purchased_at=datetime.utcnow(),
+            )
+            db.add(ticket)
+            tickets.append(ticket)
+
+        tier.quantity_sold += quantity
+        db.commit()
+
+        # Refresh to get IDs
+        for t in tickets:
+            db.refresh(t)
+
+        event = tier.event
+        return {
+            "success": True,
+            "message": f"Assigned {quantity} ticket(s) to {customer.name}",
+            "customer": customer.name,
+            "event": event.name if event else "Unknown",
+            "tier": tier.name,
+            "tickets": [{"id": t.id, "qr_token": t.qr_code_token} for t in tickets],
+        }
 
     elif name == "check_in_ticket":
         ticket = (
