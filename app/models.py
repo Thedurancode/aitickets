@@ -127,6 +127,8 @@ class EventGoer(Base):
 
     tickets = relationship("Ticket", back_populates="event_goer", cascade="all, delete-orphan")
     notifications = relationship("Notification", back_populates="event_goer", cascade="all, delete-orphan")
+    notes = relationship("CustomerNote", back_populates="event_goer", cascade="all, delete-orphan")
+    preferences = relationship("CustomerPreference", back_populates="event_goer", uselist=False, cascade="all, delete-orphan")
 
 
 class Ticket(Base):
@@ -199,3 +201,53 @@ class MarketingCampaign(Base):
     scheduled_at = Column(DateTime(timezone=True), nullable=True)
     sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class CustomerNote(Base):
+    """Store notes about customers from AI agent conversations."""
+    __tablename__ = "customer_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False)
+    note_type = Column(String(50), nullable=False)  # preference, interaction, issue, vip, etc.
+    note = Column(Text, nullable=False)
+    created_by = Column(String(100), default="ai_agent")  # ai_agent, staff, system
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event_goer = relationship("EventGoer", back_populates="notes")
+
+
+class CustomerPreference(Base):
+    """Store customer preferences for personalization."""
+    __tablename__ = "customer_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, unique=True)
+
+    # Seating preferences
+    preferred_section = Column(String(100), nullable=True)  # e.g., "lower bowl", "courtside"
+    accessibility_required = Column(Boolean, default=False)
+    accessibility_notes = Column(Text, nullable=True)
+
+    # Communication preferences
+    preferred_language = Column(String(20), default="en")
+    preferred_contact_method = Column(String(20), default="sms")  # sms, email, phone
+
+    # Interests
+    favorite_teams = Column(Text, nullable=True)  # JSON list
+    favorite_event_types = Column(Text, nullable=True)  # JSON list: concerts, sports, comedy
+
+    # VIP status
+    is_vip = Column(Boolean, default=False)
+    vip_tier = Column(String(50), nullable=True)  # gold, platinum, etc.
+
+    # Stats
+    total_spent_cents = Column(Integer, default=0)
+    total_events_attended = Column(Integer, default=0)
+    first_purchase_date = Column(DateTime(timezone=True), nullable=True)
+    last_interaction_date = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    event_goer = relationship("EventGoer", back_populates="preferences")

@@ -1,9 +1,10 @@
 import json
+import random
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from sqlalchemy.orm import Session, joinedload
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import sys
 from pathlib import Path
@@ -12,13 +13,21 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.database import SessionLocal, init_db
+from app.config import get_settings
 from app.models import (
     Venue, Event, TicketTier, Ticket, EventGoer, TicketStatus,
     Notification, NotificationChannel, NotificationType, EventStatus,
+    CustomerNote, CustomerPreference,
 )
+
+settings = get_settings()
 
 # Initialize the MCP server
 server = Server("event-tickets")
+
+# Phone verification storage (in production, use Redis)
+# Format: {phone: {"code": "123456", "expires": datetime, "verified": bool}}
+phone_verifications: dict[str, dict] = {}
 
 
 def get_db():
@@ -318,6 +327,140 @@ async def list_tools():
                     "marketing_opt_in": {"type": "boolean", "description": "Receive marketing communications"},
                 },
                 "required": ["event_goer_id"],
+            },
+        ),
+        # ============== Phone Verification Tools ==============
+        Tool(
+            name="send_verification_code",
+            description="Send a 6-digit verification code via SMS to verify a phone number",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "Phone number to verify (e.g., +14165551234)"},
+                },
+                "required": ["phone"],
+            },
+        ),
+        Tool(
+            name="verify_phone_code",
+            description="Verify the 6-digit code the customer received",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "Phone number being verified"},
+                    "code": {"type": "string", "description": "The 6-digit code from the customer"},
+                },
+                "required": ["phone", "code"],
+            },
+        ),
+        Tool(
+            name="check_phone_verified",
+            description="Check if a phone number has been verified in this session",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "Phone number to check"},
+                },
+                "required": ["phone"],
+            },
+        ),
+        # ============== Purchase Tools ==============
+        Tool(
+            name="send_purchase_link",
+            description="Send a ticket purchase link via SMS to a VERIFIED phone number. Must verify phone first with send_verification_code.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "Phone number to send SMS to (must be verified first)"},
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "tier_id": {"type": "integer", "description": "Specific ticket tier ID (optional)"},
+                },
+                "required": ["phone", "event_id"],
+            },
+        ),
+        Tool(
+            name="lookup_customer",
+            description="Find a customer by phone number or email",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "Phone number to search"},
+                    "email": {"type": "string", "description": "Email to search"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_customer_tickets",
+            description="Get all tickets for a customer",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_goer_id": {"type": "integer", "description": "The customer ID"},
+                    "phone": {"type": "string", "description": "Or lookup by phone number"},
+                    "email": {"type": "string", "description": "Or lookup by email"},
+                },
+                "required": [],
+            },
+        ),
+        # ============== Customer Memory Tools ==============
+        Tool(
+            name="get_customer_profile",
+            description="Get full customer profile including history, preferences, and notes. Use this when a returning customer calls.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "phone": {"type": "string", "description": "Customer phone number"},
+                    "email": {"type": "string", "description": "Or customer email"},
+                    "event_goer_id": {"type": "integer", "description": "Or customer ID"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="add_customer_note",
+            description="Add a note about a customer for future reference. Use this to remember important details from conversations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_goer_id": {"type": "integer", "description": "Customer ID"},
+                    "phone": {"type": "string", "description": "Or customer phone"},
+                    "note": {"type": "string", "description": "The note to save (e.g., 'Prefers aisle seats', 'Celebrating birthday', 'Had issue with parking last time')"},
+                    "note_type": {"type": "string", "description": "Type: preference, interaction, issue, vip, birthday, dietary, accessibility"},
+                },
+                "required": ["note"],
+            },
+        ),
+        Tool(
+            name="update_customer_preferences",
+            description="Update customer preferences for personalization",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_goer_id": {"type": "integer", "description": "Customer ID"},
+                    "phone": {"type": "string", "description": "Or customer phone"},
+                    "preferred_section": {"type": "string", "description": "Preferred seating section"},
+                    "accessibility_required": {"type": "boolean", "description": "Needs accessible seating"},
+                    "accessibility_notes": {"type": "string", "description": "Accessibility details"},
+                    "preferred_language": {"type": "string", "description": "Preferred language (en, fr, es)"},
+                    "preferred_contact_method": {"type": "string", "description": "sms, email, or phone"},
+                    "is_vip": {"type": "boolean", "description": "Mark as VIP customer"},
+                    "vip_tier": {"type": "string", "description": "VIP tier: gold, platinum"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_customer_notes",
+            description="Get all notes about a customer",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_goer_id": {"type": "integer", "description": "Customer ID"},
+                    "phone": {"type": "string", "description": "Or customer phone"},
+                    "note_type": {"type": "string", "description": "Filter by type (optional)"},
+                },
+                "required": [],
             },
         ),
     ]
@@ -749,6 +892,404 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "sms_opt_in": event_goer.sms_opt_in,
             "marketing_opt_in": event_goer.marketing_opt_in,
             "message": "Preferences updated successfully",
+        }
+
+    # ============== Phone Verification Tools ==============
+    elif name == "send_verification_code":
+        from app.services.sms import send_sms
+
+        phone = arguments["phone"]
+
+        # Generate 6-digit code
+        code = str(random.randint(100000, 999999))
+
+        # Store with 10-minute expiration
+        phone_verifications[phone] = {
+            "code": code,
+            "expires": datetime.utcnow() + timedelta(minutes=10),
+            "verified": False,
+        }
+
+        message = f"Your verification code is: {code}\n\nThis code expires in 10 minutes."
+        result = send_sms(to_phone=phone, message=message)
+
+        if result.get("success"):
+            return {
+                "success": True,
+                "phone": phone,
+                "message": "Verification code sent. Ask the customer to read the 6-digit code.",
+                "expires_in": "10 minutes",
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get("error", "Failed to send SMS"),
+            }
+
+    elif name == "verify_phone_code":
+        phone = arguments["phone"]
+        code = arguments["code"].strip()
+
+        if phone not in phone_verifications:
+            return {
+                "verified": False,
+                "message": "No verification code was sent to this number. Send a code first.",
+            }
+
+        verification = phone_verifications[phone]
+
+        # Check expiration
+        if datetime.utcnow() > verification["expires"]:
+            del phone_verifications[phone]
+            return {
+                "verified": False,
+                "message": "Code expired. Please send a new verification code.",
+            }
+
+        # Check code
+        if verification["code"] != code:
+            return {
+                "verified": False,
+                "message": "Incorrect code. Please try again.",
+            }
+
+        # Mark as verified
+        phone_verifications[phone]["verified"] = True
+
+        return {
+            "verified": True,
+            "phone": phone,
+            "message": "Phone number verified! You can now send purchase links to this number.",
+        }
+
+    elif name == "check_phone_verified":
+        phone = arguments["phone"]
+
+        if phone not in phone_verifications:
+            return {"verified": False, "message": "Phone not verified"}
+
+        verification = phone_verifications[phone]
+
+        if datetime.utcnow() > verification["expires"]:
+            del phone_verifications[phone]
+            return {"verified": False, "message": "Verification expired"}
+
+        return {
+            "verified": verification["verified"],
+            "message": "Phone is verified" if verification["verified"] else "Phone not yet verified",
+        }
+
+    # ============== Purchase Tools ==============
+    elif name == "send_purchase_link":
+        from app.services.sms import send_sms
+
+        phone = arguments["phone"]
+
+        # Check if phone is verified
+        if phone not in phone_verifications or not phone_verifications[phone].get("verified"):
+            return {
+                "success": False,
+                "error": "Phone not verified. Please verify the phone number first using send_verification_code.",
+            }
+
+        event = (
+            db.query(Event)
+            .options(joinedload(Event.venue), joinedload(Event.ticket_tiers))
+            .filter(Event.id == arguments["event_id"])
+            .first()
+        )
+        if not event:
+            return {"error": "Event not found"}
+
+        phone = arguments["phone"]
+        tier_id = arguments.get("tier_id")
+
+        # Build purchase URL
+        base_url = settings.base_url or "https://ai-tickets.fly.dev"
+        if tier_id:
+            purchase_url = f"{base_url}/events/{event.id}/purchase?tier={tier_id}"
+        else:
+            purchase_url = f"{base_url}/events/{event.id}/purchase"
+
+        # Get price info
+        if tier_id:
+            tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+            price_info = f"${tier.price / 100:.0f}" if tier else ""
+        else:
+            min_price = min([t.price for t in event.ticket_tiers]) if event.ticket_tiers else 0
+            price_info = f"from ${min_price / 100:.0f}"
+
+        message = (
+            f"🎟️ {event.name}\n"
+            f"📅 {event.event_date} at {event.event_time}\n"
+            f"📍 {event.venue.name}\n"
+            f"💰 Tickets {price_info}\n\n"
+            f"Buy now: {purchase_url}"
+        )
+
+        result = send_sms(to_phone=phone, message=message)
+
+        return {
+            "success": result.get("success", False),
+            "phone": phone,
+            "event": event.name,
+            "purchase_url": purchase_url,
+            "message": "Purchase link sent via SMS" if result.get("success") else result.get("error", "Failed to send SMS"),
+        }
+
+    elif name == "lookup_customer":
+        query = db.query(EventGoer)
+
+        if arguments.get("phone"):
+            query = query.filter(EventGoer.phone == arguments["phone"])
+        elif arguments.get("email"):
+            query = query.filter(EventGoer.email == arguments["email"])
+        else:
+            return {"error": "Please provide phone or email"}
+
+        customer = query.first()
+        if not customer:
+            return {"found": False, "message": "Customer not found"}
+
+        return {
+            "found": True,
+            "customer": {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "phone": customer.phone,
+                "created_at": customer.created_at,
+            },
+        }
+
+    elif name == "get_customer_tickets":
+        # Find customer
+        customer = None
+        if arguments.get("event_goer_id"):
+            customer = db.query(EventGoer).filter(EventGoer.id == arguments["event_goer_id"]).first()
+        elif arguments.get("phone"):
+            customer = db.query(EventGoer).filter(EventGoer.phone == arguments["phone"]).first()
+        elif arguments.get("email"):
+            customer = db.query(EventGoer).filter(EventGoer.email == arguments["email"]).first()
+
+        if not customer:
+            return {"found": False, "message": "Customer not found"}
+
+        # Get their tickets
+        tickets = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue)
+            )
+            .filter(Ticket.event_goer_id == customer.id)
+            .all()
+        )
+
+        return {
+            "found": True,
+            "customer": {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "phone": customer.phone,
+            },
+            "tickets": [
+                {
+                    "ticket_id": t.id,
+                    "event_name": t.ticket_tier.event.name,
+                    "event_date": str(t.ticket_tier.event.event_date),
+                    "event_time": t.ticket_tier.event.event_time,
+                    "venue": t.ticket_tier.event.venue.name,
+                    "tier": t.ticket_tier.name,
+                    "status": t.status.value,
+                    "qr_token": t.qr_code_token,
+                }
+                for t in tickets
+            ],
+        }
+
+    # ============== Customer Memory Tools ==============
+    elif name == "get_customer_profile":
+        # Find customer
+        customer = None
+        if arguments.get("event_goer_id"):
+            customer = db.query(EventGoer).filter(EventGoer.id == arguments["event_goer_id"]).first()
+        elif arguments.get("phone"):
+            customer = db.query(EventGoer).filter(EventGoer.phone == arguments["phone"]).first()
+        elif arguments.get("email"):
+            customer = db.query(EventGoer).filter(EventGoer.email == arguments["email"]).first()
+
+        if not customer:
+            return {"found": False, "message": "Customer not found. This may be a new customer."}
+
+        # Get preferences
+        prefs = db.query(CustomerPreference).filter(CustomerPreference.event_goer_id == customer.id).first()
+
+        # Get notes
+        notes = db.query(CustomerNote).filter(CustomerNote.event_goer_id == customer.id).order_by(CustomerNote.created_at.desc()).limit(10).all()
+
+        # Get ticket history
+        tickets = (
+            db.query(Ticket)
+            .options(joinedload(Ticket.ticket_tier).joinedload(TicketTier.event))
+            .filter(Ticket.event_goer_id == customer.id)
+            .order_by(Ticket.purchased_at.desc())
+            .limit(10)
+            .all()
+        )
+
+        # Calculate stats
+        total_spent = sum(t.ticket_tier.price for t in tickets if t.status in [TicketStatus.PAID, TicketStatus.CHECKED_IN])
+        events_attended = len([t for t in tickets if t.status == TicketStatus.CHECKED_IN])
+
+        return {
+            "found": True,
+            "customer": {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "phone": customer.phone,
+                "member_since": str(customer.created_at)[:10] if customer.created_at else None,
+            },
+            "preferences": {
+                "preferred_section": prefs.preferred_section if prefs else None,
+                "accessibility_required": prefs.accessibility_required if prefs else False,
+                "accessibility_notes": prefs.accessibility_notes if prefs else None,
+                "preferred_language": prefs.preferred_language if prefs else "en",
+                "preferred_contact_method": prefs.preferred_contact_method if prefs else "sms",
+                "is_vip": prefs.is_vip if prefs else False,
+                "vip_tier": prefs.vip_tier if prefs else None,
+            } if prefs else None,
+            "stats": {
+                "total_spent": f"${total_spent / 100:.2f}",
+                "total_spent_cents": total_spent,
+                "events_attended": events_attended,
+                "total_tickets": len(tickets),
+            },
+            "notes": [
+                {
+                    "type": n.note_type,
+                    "note": n.note,
+                    "date": str(n.created_at)[:10],
+                }
+                for n in notes
+            ],
+            "recent_tickets": [
+                {
+                    "event": t.ticket_tier.event.name,
+                    "date": t.ticket_tier.event.event_date,
+                    "tier": t.ticket_tier.name,
+                    "status": t.status.value,
+                }
+                for t in tickets[:5]
+            ],
+        }
+
+    elif name == "add_customer_note":
+        # Find customer
+        customer = None
+        if arguments.get("event_goer_id"):
+            customer = db.query(EventGoer).filter(EventGoer.id == arguments["event_goer_id"]).first()
+        elif arguments.get("phone"):
+            customer = db.query(EventGoer).filter(EventGoer.phone == arguments["phone"]).first()
+
+        if not customer:
+            return {"error": "Customer not found"}
+
+        note = CustomerNote(
+            event_goer_id=customer.id,
+            note_type=arguments.get("note_type", "interaction"),
+            note=arguments["note"],
+            created_by="ai_agent",
+        )
+        db.add(note)
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Note saved for {customer.name}",
+            "note_type": note.note_type,
+            "note": note.note,
+        }
+
+    elif name == "update_customer_preferences":
+        # Find customer
+        customer = None
+        if arguments.get("event_goer_id"):
+            customer = db.query(EventGoer).filter(EventGoer.id == arguments["event_goer_id"]).first()
+        elif arguments.get("phone"):
+            customer = db.query(EventGoer).filter(EventGoer.phone == arguments["phone"]).first()
+
+        if not customer:
+            return {"error": "Customer not found"}
+
+        # Get or create preferences
+        prefs = db.query(CustomerPreference).filter(CustomerPreference.event_goer_id == customer.id).first()
+        if not prefs:
+            prefs = CustomerPreference(event_goer_id=customer.id)
+            db.add(prefs)
+
+        # Update fields
+        if "preferred_section" in arguments:
+            prefs.preferred_section = arguments["preferred_section"]
+        if "accessibility_required" in arguments:
+            prefs.accessibility_required = arguments["accessibility_required"]
+        if "accessibility_notes" in arguments:
+            prefs.accessibility_notes = arguments["accessibility_notes"]
+        if "preferred_language" in arguments:
+            prefs.preferred_language = arguments["preferred_language"]
+        if "preferred_contact_method" in arguments:
+            prefs.preferred_contact_method = arguments["preferred_contact_method"]
+        if "is_vip" in arguments:
+            prefs.is_vip = arguments["is_vip"]
+        if "vip_tier" in arguments:
+            prefs.vip_tier = arguments["vip_tier"]
+
+        prefs.last_interaction_date = datetime.utcnow()
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Preferences updated for {customer.name}",
+            "preferences": {
+                "preferred_section": prefs.preferred_section,
+                "accessibility_required": prefs.accessibility_required,
+                "preferred_language": prefs.preferred_language,
+                "is_vip": prefs.is_vip,
+                "vip_tier": prefs.vip_tier,
+            },
+        }
+
+    elif name == "get_customer_notes":
+        # Find customer
+        customer = None
+        if arguments.get("event_goer_id"):
+            customer = db.query(EventGoer).filter(EventGoer.id == arguments["event_goer_id"]).first()
+        elif arguments.get("phone"):
+            customer = db.query(EventGoer).filter(EventGoer.phone == arguments["phone"]).first()
+
+        if not customer:
+            return {"error": "Customer not found"}
+
+        query = db.query(CustomerNote).filter(CustomerNote.event_goer_id == customer.id)
+
+        if arguments.get("note_type"):
+            query = query.filter(CustomerNote.note_type == arguments["note_type"])
+
+        notes = query.order_by(CustomerNote.created_at.desc()).all()
+
+        return {
+            "customer": customer.name,
+            "notes": [
+                {
+                    "id": n.id,
+                    "type": n.note_type,
+                    "note": n.note,
+                    "created_by": n.created_by,
+                    "date": str(n.created_at),
+                }
+                for n in notes
+            ],
         }
 
     return {"error": f"Unknown tool: {name}"}
