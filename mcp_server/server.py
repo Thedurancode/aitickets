@@ -277,6 +277,18 @@ async def list_tools():
             },
         ),
         Tool(
+            name="check_out_by_name",
+            description="Reverse a check-in for a guest (undo check-in).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Guest's full name"},
+                    "event_id": {"type": "integer", "description": "Event ID (optional)"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
             name="find_guest",
             description="Search for a guest by name to see their tickets",
             inputSchema={
@@ -1009,6 +1021,56 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "venue": ticket.ticket_tier.event.venue.name,
                 "tier": ticket.ticket_tier.name,
                 "status": "checked_in",
+            },
+        }
+
+    elif name == "check_out_by_name":
+        guest_name = arguments["name"].strip().lower()
+        event_id = arguments.get("event_id")
+
+        # Build query for checked-in tickets
+        query = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
+                joinedload(Ticket.event_goer),
+            )
+            .join(EventGoer)
+            .join(TicketTier)
+            .filter(Ticket.status == TicketStatus.CHECKED_IN)
+        )
+
+        if event_id:
+            query = query.filter(TicketTier.event_id == event_id)
+
+        tickets = query.all()
+        matching_tickets = [
+            t for t in tickets
+            if guest_name in t.event_goer.name.lower()
+        ]
+
+        if not matching_tickets:
+            return {
+                "success": False,
+                "message": f"No checked-in tickets found for '{arguments['name']}'.",
+            }
+
+        # Undo check-in - set back to PAID
+        ticket = matching_tickets[0]
+        ticket.status = TicketStatus.PAID
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"{ticket.event_goer.name} has been checked out.",
+            "guest": {
+                "name": ticket.event_goer.name,
+                "email": ticket.event_goer.email,
+            },
+            "ticket": {
+                "event": ticket.ticket_tier.event.name,
+                "tier": ticket.ticket_tier.name,
+                "status": "paid",
             },
         }
 
