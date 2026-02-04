@@ -2101,12 +2101,20 @@
         // Load contacts list
         async function loadContactsList(grid) {
             try {
+                console.log('Loading contacts from:', `${API_URL}/tools/list_customers`);
                 const res = await fetch(`${API_URL}/tools/list_customers`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ arguments: {} })
                 });
+
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+                }
+
                 const data = await res.json();
+                console.log('Contacts response:', data);
+
                 const contacts = data.result || [];
                 allContactsData = contacts;
 
@@ -2129,7 +2137,8 @@
                     `;
                 }).join('');
             } catch (err) {
-                grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">⚠️</div>Failed to load contacts</div>';
+                console.error('Failed to load contacts:', err);
+                grid.innerHTML = `<div class="list-empty"><div class="list-empty-icon">⚠️</div>Failed to load contacts: ${err.message}</div>`;
             }
         }
 
