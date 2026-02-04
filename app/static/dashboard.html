@@ -1662,7 +1662,7 @@
                         if (item.event_date) {
                             row += `<span class="result-data-icon">📅</span>`;
                             row += `<span class="result-highlight">${item.name}</span>`;
-                            row += `<span class="result-data-label" style="margin-left:auto;">${item.event_date}</span>`;
+                            row += `<span class="result-data-label" style="margin-left:auto;">${formatShortDate(item.event_date)}</span>`;
                         } else if (item.price !== undefined) {
                             row += `<span class="result-data-icon">🎫</span>`;
                             row += `<span class="result-data-value">${item.name}</span>`;
@@ -1682,8 +1682,7 @@
             } else {
                 // Single object
                 if (data.name) rows.push(`<div class="result-data-row"><span class="result-data-icon">✨</span><span class="result-highlight">${data.name}</span></div>`);
-                if (data.event_date) rows.push(`<div class="result-data-row"><span class="result-data-icon">📅</span><span class="result-data-label">Date</span><span class="result-data-value">${data.event_date}</span></div>`);
-                if (data.event_time) rows.push(`<div class="result-data-row"><span class="result-data-icon">🕐</span><span class="result-data-label">Time</span><span class="result-data-value">${data.event_time}</span></div>`);
+                if (data.event_date) rows.push(`<div class="result-data-row"><span class="result-data-icon">📅</span><span class="result-data-label">When</span><span class="result-data-value">${formatFriendlyDate(data.event_date, data.event_time)}</span></div>`);
                 if (data.venue_name) rows.push(`<div class="result-data-row"><span class="result-data-icon">📍</span><span class="result-data-label">Venue</span><span class="result-data-value">${data.venue_name}</span></div>`);
                 if (data.email) rows.push(`<div class="result-data-row"><span class="result-data-icon">✉️</span><span class="result-data-label">Email</span><span class="result-data-value">${data.email}</span></div>`);
                 if (data.phone) rows.push(`<div class="result-data-row"><span class="result-data-icon">📱</span><span class="result-data-label">Phone</span><span class="result-data-value">${data.phone}</span></div>`);
@@ -1828,6 +1827,73 @@
             }
         }
 
+        // Format date in friendly NY style (e.g., "Thursday" or "Next Saturday, Apr 10")
+        function formatFriendlyDate(dateStr, timeStr) {
+            if (!dateStr) return 'TBD';
+
+            try {
+                const eventDate = new Date(dateStr + 'T12:00:00');
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate());
+
+                const diffDays = Math.floor((eventDay - today) / (1000 * 60 * 60 * 24));
+
+                const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+                const dayName = dayNames[eventDate.getDay()];
+                const monthName = monthNames[eventDate.getMonth()];
+                const dayNum = eventDate.getDate();
+
+                // Format time (e.g., "7:30 PM")
+                let formattedTime = '';
+                if (timeStr) {
+                    const [hours, minutes] = timeStr.split(':');
+                    const hour = parseInt(hours);
+                    const ampm = hour >= 12 ? 'PM' : 'AM';
+                    const hour12 = hour % 12 || 12;
+                    formattedTime = ` • ${hour12}:${minutes} ${ampm}`;
+                }
+
+                if (diffDays === 0) {
+                    return `TONIGHT${formattedTime}`;
+                } else if (diffDays === 1) {
+                    return `Tomorrow${formattedTime}`;
+                } else if (diffDays > 1 && diffDays <= 6) {
+                    return `This ${dayName}${formattedTime}`;
+                } else if (diffDays > 6 && diffDays <= 13) {
+                    return `Next ${dayName}, ${monthName} ${dayNum}${formattedTime}`;
+                } else {
+                    return `${dayName}, ${monthName} ${dayNum}${formattedTime}`;
+                }
+            } catch (e) {
+                return dateStr;
+            }
+        }
+
+        // Short friendly date for ticker
+        function formatShortDate(dateStr) {
+            if (!dateStr) return 'TBD';
+            try {
+                const eventDate = new Date(dateStr + 'T12:00:00');
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const eventDay = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate());
+                const diffDays = Math.floor((eventDay - today) / (1000 * 60 * 60 * 24));
+
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+                if (diffDays === 0) return 'TONIGHT';
+                if (diffDays === 1) return 'Tomorrow';
+                if (diffDays <= 6) return dayNames[eventDate.getDay()];
+                return `${monthNames[eventDate.getMonth()]} ${eventDate.getDate()}`;
+            } catch (e) {
+                return dateStr;
+            }
+        }
+
         // Update ticker with real event data
         function updateTicker(events) {
             const ticker = document.getElementById('ticker');
@@ -1835,7 +1901,8 @@
 
             let tickerHtml = '';
             events.forEach(event => {
-                tickerHtml += `<div class="ticker-item">🎟️ <span>${event.name}</span> - ${event.event_date} at ${event.event_time}</div>`;
+                const friendlyDate = formatShortDate(event.event_date);
+                tickerHtml += `<div class="ticker-item">🎟️ <span>${event.name}</span> • ${friendlyDate}</div>`;
             });
 
             // Add venue info if available
@@ -1853,8 +1920,8 @@
             currentEventData = event;
 
             document.getElementById('event-name').textContent = event.name || 'No Event';
-            document.getElementById('event-info').textContent =
-                `📅 ${event.event_date || 'TBD'} • ${event.event_time || 'TBD'}`;
+            const friendlyDate = formatFriendlyDate(event.event_date, event.event_time);
+            document.getElementById('event-info').textContent = `📅 ${friendlyDate}`;
             document.getElementById('event-venue').textContent =
                 `📍 ${event.venue_name || 'Venue TBD'}`;
 
@@ -1982,18 +2049,20 @@
                     return;
                 }
 
-                grid.innerHTML = events.map((event, i) => `
+                grid.innerHTML = events.map((event, i) => {
+                    const friendlyDate = formatFriendlyDate(event.event_date, event.event_time);
+                    return `
                     <div class="list-event-card" onclick="viewEventDetail(${i})">
                         <div class="list-event-image" style="background: linear-gradient(135deg, #ce1126 ${i * 10}%, #8b0000);display:flex;align-items:center;justify-content:center;font-size:3em;">
                             🏀
                         </div>
                         <div class="list-event-info">
                             <div class="list-event-name">${event.name}</div>
-                            <div class="list-event-meta">📅 ${event.event_date || 'TBD'} • 🕐 ${event.event_time || 'TBD'}</div>
+                            <div class="list-event-meta">📅 ${friendlyDate}</div>
                             <div class="list-event-venue">📍 ${event.venue_name || 'Venue TBD'}</div>
                         </div>
                     </div>
-                `).join('');
+                `}).join('');
             } catch (err) {
                 grid.innerHTML = '<div class="list-empty"><div class="list-empty-icon">⚠️</div>Failed to load events</div>';
             }
