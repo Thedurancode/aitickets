@@ -209,6 +209,15 @@ async def list_tools():
             },
         ),
         Tool(
+            name="get_all_sales",
+            description="Get total sales across all events",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
             name="list_event_goers",
             description="List attendees for an event",
             inputSchema={
@@ -759,6 +768,51 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "total_revenue_cents": total_revenue,
             "tickets_checked_in": checked_in,
             "tiers": tiers_data,
+        }
+
+    elif name == "get_all_sales":
+        events = db.query(Event).options(joinedload(Event.ticket_tiers)).all()
+
+        grand_total_sold = 0
+        grand_total_revenue = 0
+        grand_checked_in = 0
+        events_data = []
+
+        for event in events:
+            event_sold = 0
+            event_revenue = 0
+            event_checked_in = 0
+
+            for tier in event.ticket_tiers:
+                event_sold += tier.quantity_sold
+                event_revenue += tier.price * tier.quantity_sold
+                event_checked_in += (
+                    db.query(Ticket)
+                    .filter(Ticket.ticket_tier_id == tier.id, Ticket.status == TicketStatus.CHECKED_IN)
+                    .count()
+                )
+
+            grand_total_sold += event_sold
+            grand_total_revenue += event_revenue
+            grand_checked_in += event_checked_in
+
+            if event_sold > 0:  # Only include events with sales
+                events_data.append({
+                    "event_id": event.id,
+                    "event_name": event.name,
+                    "event_date": event.event_date,
+                    "tickets_sold": event_sold,
+                    "revenue_cents": event_revenue,
+                    "checked_in": event_checked_in,
+                })
+
+        return {
+            "total_tickets_sold": grand_total_sold,
+            "total_revenue_cents": grand_total_revenue,
+            "total_revenue_dollars": grand_total_revenue / 100,
+            "total_checked_in": grand_checked_in,
+            "events_with_sales": len(events_data),
+            "events": events_data,
         }
 
     elif name == "list_event_goers":
