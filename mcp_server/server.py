@@ -232,6 +232,15 @@ async def list_tools():
             },
         ),
         Tool(
+            name="list_customers",
+            description="List all registered customers/contacts",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
             name="check_in_ticket",
             description="Validate and check in a ticket by QR token (for scanning)",
             inputSchema={
@@ -798,6 +807,21 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "phone": customer.phone,
             }
         }
+
+    elif name == "list_customers":
+        customers = db.query(EventGoer).order_by(EventGoer.created_at.desc()).all()
+        return [
+            {
+                "id": c.id,
+                "name": c.name,
+                "email": c.email,
+                "phone": c.phone,
+                "email_opt_in": c.email_opt_in,
+                "sms_opt_in": c.sms_opt_in,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in customers
+        ]
 
     elif name == "check_in_ticket":
         ticket = (

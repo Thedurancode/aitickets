@@ -1461,7 +1461,7 @@
             if (isRefreshing) return;
             isRefreshing = true;
             try {
-                const res = await fetch(`${API_URL}/tools/list_event_goers`, {
+                const res = await fetch(`${API_URL}/tools/list_customers`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ arguments: {} })
@@ -1760,7 +1760,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ arguments: {} })
                     }),
-                    fetch(`${API_URL}/tools/list_event_goers`, {
+                    fetch(`${API_URL}/tools/list_customers`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ arguments: {} })
@@ -2101,7 +2101,7 @@
         // Load contacts list
         async function loadContactsList(grid) {
             try {
-                const res = await fetch(`${API_URL}/tools/list_event_goers`, {
+                const res = await fetch(`${API_URL}/tools/list_customers`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ arguments: {} })
