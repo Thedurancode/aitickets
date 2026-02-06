@@ -578,6 +578,20 @@ async def list_tools():
             },
         ),
         Tool(
+            name="update_campaign",
+            description="Update a draft campaign's message, subject, or name before sending. Campaign must be in 'draft' status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "The campaign ID to update"},
+                    "name": {"type": "string", "description": "New campaign name (optional)"},
+                    "subject": {"type": "string", "description": "New email subject line (optional)"},
+                    "content": {"type": "string", "description": "New message content (optional)"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
             name="send_campaign",
             description="Send an existing marketing campaign to its targeted recipients. Campaign must be in 'draft' status.",
             inputSchema={
@@ -1878,6 +1892,34 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "sent_at": str(c.sent_at) if c.sent_at else None,
             })
         return results
+
+    elif name == "update_campaign":
+        campaign = db.query(MarketingCampaign).filter(MarketingCampaign.id == arguments["campaign_id"]).first()
+        if not campaign:
+            return {"error": "Campaign not found"}
+        if campaign.status != "draft":
+            return {"error": f"Campaign '{campaign.name}' is '{campaign.status}' and cannot be edited. Only draft campaigns can be updated."}
+
+        if "name" in arguments:
+            campaign.name = arguments["name"]
+        if "subject" in arguments:
+            campaign.subject = arguments["subject"]
+        if "content" in arguments:
+            campaign.content = arguments["content"]
+
+        db.commit()
+        db.refresh(campaign)
+
+        return {
+            "success": True,
+            "campaign_id": campaign.id,
+            "name": campaign.name,
+            "subject": campaign.subject,
+            "content": campaign.content[:100] + ("..." if len(campaign.content) > 100 else ""),
+            "status": campaign.status,
+            "message": f"Campaign '{campaign.name}' updated. Use send_campaign to send it.",
+            "next_actions": ["send_campaign"],
+        }
 
     elif name == "send_campaign":
         from app.services.notifications import send_marketing_campaign
