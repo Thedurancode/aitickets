@@ -1,11 +1,13 @@
+import json
 from datetime import datetime, timezone
 from typing import Optional
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
     Event, EventGoer, Ticket, TicketTier, Notification,
     NotificationType, NotificationChannel, NotificationStatus, TicketStatus,
-    EventUpdate, MarketingCampaign,
+    EventUpdate, MarketingCampaign, CustomerPreference, event_category_link,
 )
 from app.services.email import send_ticket_email
 from app.services.sms import (
@@ -476,6 +478,67 @@ def send_marketing_campaign(
             .distinct()
         )
         query = query.filter(EventGoer.id.in_(event_goer_ids))
+
+    # Segment targeting
+    segments = {}
+    if campaign.target_segments:
+        try:
+            segments = json.loads(campaign.target_segments)
+        except (json.JSONDecodeError, TypeError):
+            segments = {}
+
+    # VIP filter
+    if segments.get("is_vip"):
+        vip_goer_ids = db.query(CustomerPreference.event_goer_id).filter(CustomerPreference.is_vip == True)
+        if segments.get("vip_tier"):
+            vip_goer_ids = vip_goer_ids.filter(CustomerPreference.vip_tier == segments["vip_tier"])
+        query = query.filter(EventGoer.id.in_(vip_goer_ids))
+
+    # Min events attended filter (calculated on-the-fly from tickets)
+    if segments.get("min_events"):
+        min_events = int(segments["min_events"])
+        attended_subq = (
+            db.query(
+                Ticket.event_goer_id,
+                func.count(func.distinct(TicketTier.event_id)).label("event_count")
+            )
+            .join(TicketTier)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .group_by(Ticket.event_goer_id)
+            .having(func.count(func.distinct(TicketTier.event_id)) >= min_events)
+            .subquery()
+        )
+        query = query.filter(EventGoer.id.in_(db.query(attended_subq.c.event_goer_id)))
+
+    # Min spent filter (calculated on-the-fly from ticket prices)
+    if segments.get("min_spent_cents"):
+        min_spent = int(segments["min_spent_cents"])
+        spent_subq = (
+            db.query(
+                Ticket.event_goer_id,
+                func.sum(TicketTier.price).label("total_spent")
+            )
+            .join(TicketTier)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .group_by(Ticket.event_goer_id)
+            .having(func.sum(TicketTier.price) >= min_spent)
+            .subquery()
+        )
+        query = query.filter(EventGoer.id.in_(db.query(spent_subq.c.event_goer_id)))
+
+    # Category filter (attended events in these categories)
+    if segments.get("category_ids"):
+        category_ids = segments["category_ids"]
+        category_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .join(Event, TicketTier.event_id == Event.id)
+            .join(event_category_link, Event.id == event_category_link.c.event_id)
+            .filter(event_category_link.c.category_id.in_(category_ids))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(category_goer_ids))
 
     recipients = query.all()
 

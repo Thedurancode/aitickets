@@ -548,7 +548,7 @@ async def list_tools():
         # ============== Marketing Campaign Tools ==============
         Tool(
             name="create_campaign",
-            description="Create a marketing campaign as a draft. Use send_campaign to send it, or use quick_send_campaign for one-step create+send.",
+            description="Create a marketing campaign as a draft. Supports segment targeting (VIPs, repeat customers, high spenders, category fans). Use send_campaign to send it, or use quick_send_campaign for one-step create+send.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -557,6 +557,11 @@ async def list_tools():
                     "content": {"type": "string", "description": "Message content (used for both email body and SMS)"},
                     "target_all": {"type": "boolean", "description": "True to target ALL marketing opted-in users (default false)"},
                     "target_event_id": {"type": "integer", "description": "Target attendees of a specific event who are marketing opted-in"},
+                    "target_vip": {"type": "boolean", "description": "Target only VIP customers"},
+                    "target_vip_tier": {"type": "string", "description": "Target specific VIP tier (e.g. gold, platinum). Requires target_vip=true"},
+                    "target_min_events": {"type": "integer", "description": "Target customers who attended at least this many events (e.g. 3 for repeat customers)"},
+                    "target_min_spent_cents": {"type": "integer", "description": "Target customers who spent at least this amount in cents (e.g. 50000 for $500+)"},
+                    "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Target customers who attended events in these category IDs. Use list_categories to find IDs."},
                 },
                 "required": ["name", "subject", "content"],
             },
@@ -587,7 +592,7 @@ async def list_tools():
         ),
         Tool(
             name="quick_send_campaign",
-            description="One-step: create AND immediately send a marketing blast. Use when someone says 'send an email to all Jazz Night attendees' or 'blast all customers about our sale'.",
+            description="One-step: create AND immediately send a marketing blast. Supports segment targeting. Use when someone says 'blast all VIP customers' or 'email repeat customers about our sale'.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -596,6 +601,11 @@ async def list_tools():
                     "content": {"type": "string", "description": "Message content"},
                     "target_all": {"type": "boolean", "description": "True to send to ALL marketing opted-in users"},
                     "target_event_id": {"type": "integer", "description": "Send to attendees of a specific event only"},
+                    "target_vip": {"type": "boolean", "description": "Target only VIP customers"},
+                    "target_vip_tier": {"type": "string", "description": "Target specific VIP tier (e.g. gold, platinum)"},
+                    "target_min_events": {"type": "integer", "description": "Target customers who attended at least this many events"},
+                    "target_min_spent_cents": {"type": "integer", "description": "Target customers who spent at least this amount in cents"},
+                    "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Target customers who attended events in these category IDs"},
                     "use_email": {"type": "boolean", "description": "Send via email (default true)"},
                     "use_sms": {"type": "boolean", "description": "Also send via SMS (default false)"},
                 },
@@ -857,19 +867,29 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                     ],
                 },
             "marketing_campaigns": {
-                    "description": "Send promotional emails/SMS blasts to opted-in customers",
+                    "description": "Send promotional emails/SMS blasts with segment targeting (VIPs, repeat customers, high spenders, category fans)",
                     "steps": [
                         "1. For quick blasts: use quick_send_campaign (creates + sends in one step)",
                         "2. For planned campaigns: create_campaign first, then send_campaign",
-                        "3. Target by specific event (target_event_id) or all opted-in users (target_all=true)",
-                        "4. Only recipients with marketing_opt_in=True will receive messages",
-                        "5. SMS only goes to recipients with sms_opt_in=True and a phone number",
+                        "3. Target by specific event (target_event_id), all opted-in users (target_all=true), or segments",
+                        "4. Segment filters: target_vip, target_min_events, target_min_spent_cents, target_category_ids",
+                        "5. Combine segments with AND logic: e.g., VIP customers who attended 3+ events",
+                        "6. Only recipients with marketing_opt_in=True will receive messages",
+                        "7. SMS only goes to recipients with sms_opt_in=True and a phone number",
+                        "8. Use list_categories to find category IDs for category targeting",
                     ],
                     "tools": {
-                        "quick_send_campaign": "One step: creates + sends. Use when user says 'send email to all Jazz Night attendees'.",
+                        "quick_send_campaign": "One step: creates + sends. Use when user says 'blast all VIP customers' or 'email repeat customers'.",
                         "create_campaign": "Creates a draft campaign for review before sending.",
                         "send_campaign": "Sends an existing draft campaign.",
                         "list_campaigns": "View all campaigns and their send status.",
+                    },
+                    "segment_examples": {
+                        "VIP blast": "quick_send_campaign with target_vip=true",
+                        "Repeat customers": "quick_send_campaign with target_min_events=3",
+                        "High spenders ($500+)": "quick_send_campaign with target_min_spent_cents=50000",
+                        "Concert fans": "quick_send_campaign with target_category_ids=[id] (use list_categories first)",
+                        "VIP high spenders": "quick_send_campaign with target_vip=true + target_min_spent_cents=50000",
                     },
                 },
             "error_recovery": {
@@ -1770,13 +1790,23 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         target_all = arguments.get("target_all", False)
         target_event_id = arguments.get("target_event_id")
 
-        if not target_all and not target_event_id:
-            return {"error": "Must specify either target_all=true or target_event_id. Who should receive this campaign?"}
+        # Build segments from arguments
+        segments = _build_segments(arguments)
+
+        if not target_all and not target_event_id and not segments:
+            return {"error": "Must specify targeting: target_all=true, target_event_id, or segment filters (target_vip, target_min_events, target_min_spent_cents, target_category_ids)"}
 
         if target_event_id:
             event = db.query(Event).filter(Event.id == target_event_id).first()
             if not event:
                 return {"error": f"Event {target_event_id} not found"}
+
+        # Validate category IDs exist
+        if segments.get("category_ids"):
+            for cat_id in segments["category_ids"]:
+                cat = db.query(EventCategory).filter(EventCategory.id == cat_id).first()
+                if not cat:
+                    return {"error": f"Category {cat_id} not found. Use list_categories to see available categories."}
 
         campaign = MarketingCampaign(
             name=arguments["name"],
@@ -1784,13 +1814,16 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             content=arguments["content"],
             target_all=target_all,
             target_event_id=target_event_id,
+            target_segments=json.dumps(segments) if segments else None,
             status="draft",
         )
         db.add(campaign)
         db.commit()
         db.refresh(campaign)
 
-        # Count potential recipients for preview
+        # Count potential recipients (uses same filtering as send_marketing_campaign)
+        from app.services.notifications import send_marketing_campaign as _smc
+        # Build the same query the service would use for an accurate count
         recipient_query = db.query(EventGoer).filter(EventGoer.marketing_opt_in == True)
         if target_event_id:
             event_goer_ids = (
@@ -1801,7 +1834,10 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 .distinct()
             )
             recipient_query = recipient_query.filter(EventGoer.id.in_(event_goer_ids))
+        recipient_query = _apply_segment_filters(db, recipient_query, segments)
         potential_recipients = recipient_query.count()
+
+        target_desc = _describe_campaign_target(target_all, target_event_id, segments)
 
         return {
             "success": True,
@@ -1809,7 +1845,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "name": campaign.name,
             "subject": campaign.subject,
             "status": campaign.status,
-            "target": "all opted-in users" if target_all else f"event #{target_event_id} attendees",
+            "target": target_desc,
+            "segment_description": _describe_segments(segments) if segments else None,
             "potential_recipients": potential_recipients,
             "message": f"Campaign '{campaign.name}' created as draft with {potential_recipients} potential recipients. Use send_campaign to send it.",
             "next_actions": ["send_campaign", "list_campaigns"],
@@ -1821,20 +1858,26 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             query = query.filter(MarketingCampaign.status == arguments["status"])
         campaigns = query.order_by(MarketingCampaign.created_at.desc()).all()
 
-        return [
-            {
+        results = []
+        for c in campaigns:
+            segs = {}
+            if c.target_segments:
+                try:
+                    segs = json.loads(c.target_segments)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            results.append({
                 "id": c.id,
                 "name": c.name,
                 "subject": c.subject,
                 "status": c.status,
-                "target": "all opted-in" if c.target_all else f"event #{c.target_event_id}",
+                "target": _describe_campaign_target(c.target_all, c.target_event_id, segs),
                 "total_recipients": c.total_recipients,
                 "sent_count": c.sent_count,
                 "created_at": str(c.created_at),
                 "sent_at": str(c.sent_at) if c.sent_at else None,
-            }
-            for c in campaigns
-        ]
+            })
+        return results
 
     elif name == "send_campaign":
         from app.services.notifications import send_marketing_campaign
@@ -1865,21 +1908,33 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         target_all = arguments.get("target_all", False)
         target_event_id = arguments.get("target_event_id")
 
-        if not target_all and not target_event_id:
-            return {"error": "Must specify either target_all=true or target_event_id. Who should receive this?"}
+        # Build segments from arguments
+        segments = _build_segments(arguments)
+
+        if not target_all and not target_event_id and not segments:
+            return {"error": "Must specify targeting: target_all=true, target_event_id, or segment filters (target_vip, target_min_events, target_min_spent_cents, target_category_ids)"}
 
         if target_event_id:
             event = db.query(Event).filter(Event.id == target_event_id).first()
             if not event:
                 return {"error": f"Event {target_event_id} not found"}
 
+        # Validate category IDs
+        if segments.get("category_ids"):
+            for cat_id in segments["category_ids"]:
+                cat = db.query(EventCategory).filter(EventCategory.id == cat_id).first()
+                if not cat:
+                    return {"error": f"Category {cat_id} not found. Use list_categories to see available categories."}
+
         # Auto-generate name if not provided
         campaign_name = arguments.get("name")
         if not campaign_name:
+            parts = []
             if target_event_id and event:
-                campaign_name = f"Blast: {event.name} - {datetime.utcnow().strftime('%b %d')}"
-            else:
-                campaign_name = f"Blast: All Users - {datetime.utcnow().strftime('%b %d')}"
+                parts.append(event.name)
+            if segments:
+                parts.append(_describe_segments(segments))
+            campaign_name = f"Blast: {' - '.join(parts) if parts else 'All Users'} - {datetime.utcnow().strftime('%b %d')}"
 
         campaign = MarketingCampaign(
             name=campaign_name,
@@ -1887,6 +1942,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             content=arguments["content"],
             target_all=target_all,
             target_event_id=target_event_id,
+            target_segments=json.dumps(segments) if segments else None,
             status="draft",
         )
         db.add(campaign)
@@ -2730,6 +2786,108 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
 
 # ============== Helper Functions ==============
+
+
+def _build_segments(arguments: dict) -> dict:
+    """Extract segment targeting params from MCP tool arguments into a JSON-serializable dict."""
+    segments = {}
+    if arguments.get("target_vip"):
+        segments["is_vip"] = True
+    if arguments.get("target_vip_tier"):
+        segments["vip_tier"] = arguments["target_vip_tier"]
+    if arguments.get("target_min_events"):
+        segments["min_events"] = arguments["target_min_events"]
+    if arguments.get("target_min_spent_cents"):
+        segments["min_spent_cents"] = arguments["target_min_spent_cents"]
+    if arguments.get("target_category_ids"):
+        segments["category_ids"] = arguments["target_category_ids"]
+    return segments
+
+
+def _describe_segments(segments: dict) -> str:
+    """Return a human-readable description of segment filters."""
+    parts = []
+    if segments.get("is_vip"):
+        tier_label = f" ({segments['vip_tier']})" if segments.get("vip_tier") else ""
+        parts.append(f"VIPs{tier_label}")
+    if segments.get("min_events"):
+        parts.append(f"{segments['min_events']}+ events attended")
+    if segments.get("min_spent_cents"):
+        parts.append(f"${segments['min_spent_cents'] / 100:.0f}+ spent")
+    if segments.get("category_ids"):
+        parts.append(f"categories {segments['category_ids']}")
+    return ", ".join(parts)
+
+
+def _describe_campaign_target(target_all: bool, target_event_id, segments: dict) -> str:
+    """Return a human-readable target description for a campaign."""
+    parts = []
+    if target_all:
+        parts.append("all opted-in")
+    if target_event_id:
+        parts.append(f"event #{target_event_id}")
+    seg_desc = _describe_segments(segments) if segments else ""
+    if seg_desc:
+        parts.append(seg_desc)
+    return " + ".join(parts) if parts else "no target"
+
+
+def _apply_segment_filters(db, query, segments: dict):
+    """Apply segment filters to an EventGoer query. Mirrors the logic in send_marketing_campaign()."""
+    from sqlalchemy import func
+
+    if segments.get("is_vip"):
+        vip_goer_ids = db.query(CustomerPreference.event_goer_id).filter(CustomerPreference.is_vip == True)
+        if segments.get("vip_tier"):
+            vip_goer_ids = vip_goer_ids.filter(CustomerPreference.vip_tier == segments["vip_tier"])
+        query = query.filter(EventGoer.id.in_(vip_goer_ids))
+
+    if segments.get("min_events"):
+        min_events = int(segments["min_events"])
+        attended_subq = (
+            db.query(
+                Ticket.event_goer_id,
+                func.count(func.distinct(TicketTier.event_id)).label("event_count")
+            )
+            .join(TicketTier)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .group_by(Ticket.event_goer_id)
+            .having(func.count(func.distinct(TicketTier.event_id)) >= min_events)
+            .subquery()
+        )
+        query = query.filter(EventGoer.id.in_(db.query(attended_subq.c.event_goer_id)))
+
+    if segments.get("min_spent_cents"):
+        min_spent = int(segments["min_spent_cents"])
+        spent_subq = (
+            db.query(
+                Ticket.event_goer_id,
+                func.sum(TicketTier.price).label("total_spent")
+            )
+            .join(TicketTier)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .group_by(Ticket.event_goer_id)
+            .having(func.sum(TicketTier.price) >= min_spent)
+            .subquery()
+        )
+        query = query.filter(EventGoer.id.in_(db.query(spent_subq.c.event_goer_id)))
+
+    if segments.get("category_ids"):
+        category_ids = segments["category_ids"]
+        from app.models import event_category_link
+        category_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .join(Event, TicketTier.event_id == Event.id)
+            .join(event_category_link, Event.id == event_category_link.c.event_id)
+            .filter(event_category_link.c.category_id.in_(category_ids))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(category_goer_ids))
+
+    return query
+
 
 def _venue_to_dict(venue: Venue) -> dict:
     return {

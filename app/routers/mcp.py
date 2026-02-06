@@ -479,6 +479,11 @@ async def voice_action(request: Request):
         "show campaigns": "list_campaigns",
         "campaigns": "list_campaigns",
         "marketing campaigns": "list_campaigns",
+        # Segment targeting shortcuts
+        "vip blast": "quick_send_campaign",
+        "blast vips": "quick_send_campaign",
+        "blast high spenders": "quick_send_campaign",
+        "blast repeat customers": "quick_send_campaign",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -607,7 +612,8 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
         if isinstance(result, dict):
             if result.get("error"):
                 return f"Could not create campaign: {result['error']}"
-            return f"Campaign '{result.get('name', '')}' created as a draft with {result.get('potential_recipients', 0)} potential recipients. Say 'send campaign' to send it."
+            segment_desc = f" targeting {result['segment_description']}" if result.get("segment_description") else ""
+            return f"Campaign '{result.get('name', '')}' created as a draft{segment_desc} with {result.get('potential_recipients', 0)} potential recipients. Say 'send campaign' to send it."
 
     elif tool_name == "list_campaigns":
         if isinstance(result, list):

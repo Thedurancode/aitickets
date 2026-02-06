@@ -45,3 +45,9 @@ def init_db():
         run_categories_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_segments import run_migration as run_segments_migration
+        run_segments_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

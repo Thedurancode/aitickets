@@ -218,6 +218,7 @@ class MarketingCampaign(Base):
     # Targeting
     target_all = Column(Boolean, default=False)  # Send to all opted-in users
     target_event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # Send to attendees of specific event
+    target_segments = Column(Text, nullable=True)  # JSON: {"is_vip": true, "min_events": 3, "min_spent_cents": 50000, "category_ids": [1,2]}
 
     # Stats
     total_recipients = Column(Integer, default=0)

@@ -314,6 +314,7 @@ class MarketingCampaignCreate(BaseModel):
     content: str
     target_all: bool = False
     target_event_id: Optional[int] = None
+    target_segments: Optional[str] = None
     scheduled_at: Optional[datetime] = None
 
 
@@ -324,6 +325,7 @@ class MarketingCampaignResponse(BaseModel):
     content: str
     target_all: bool
     target_event_id: Optional[int] = None
+    target_segments: Optional[str] = None
     total_recipients: int
     sent_count: int
     status: str
