@@ -801,6 +801,11 @@ async def voice_action(request: Request):
 def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     """Generate a speech-friendly response for voice agents."""
 
+    # Handle errors for any tool
+    if isinstance(result, dict) and result.get("error"):
+        return f"Sorry, {result['error']}"
+
+    # ============== Event Tools ==============
     if tool_name == "list_events":
         if isinstance(result, list):
             if len(result) == 0:
@@ -811,37 +816,27 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             else:
                 return f"There are {len(result)} events. The first one is {result[0]['name']} on {result[0]['event_date']}."
 
-    elif tool_name == "list_venues":
+    elif tool_name == "create_event":
+        if isinstance(result, dict):
+            return f"Event '{result.get('name', '')}' created for {result.get('event_date', '')} at {result.get('event_time', '')}."
+
+    elif tool_name == "get_event":
+        if isinstance(result, dict):
+            tiers = result.get("ticket_tiers", [])
+            tier_info = f" with {len(tiers)} ticket tiers" if tiers else ""
+            return f"{result.get('name', 'Event')}, {result.get('event_date', '')} at {result.get('event_time', '')}{tier_info}. Status: {result.get('status', 'scheduled')}."
+
+    elif tool_name == "update_event":
+        if isinstance(result, dict):
+            return f"Event '{result.get('name', '')}' has been updated."
+
+    elif tool_name == "get_events_by_venue":
         if isinstance(result, list):
             if len(result) == 0:
-                return "There are no venues registered."
+                return "This venue has no events."
             elif len(result) == 1:
-                return f"There is 1 venue: {result[0]['name']}."
-            else:
-                return f"There are {len(result)} venues. Including {result[0]['name']} and {result[1]['name'] if len(result) > 1 else ''}."
-
-    elif tool_name == "check_in_ticket":
-        if result.get("valid"):
-            ticket = result.get("ticket", {})
-            return f"Welcome! {ticket.get('attendee_name', 'Guest')} is checked in for {ticket.get('event_name', 'the event')}."
-        else:
-            return f"Check-in failed: {result.get('message', 'Invalid ticket')}"
-
-    elif tool_name == "get_event_sales":
-        total = result.get("total_tickets_sold", 0)
-        revenue = result.get("total_revenue_cents", 0) / 100
-        return f"Event {result.get('event_name', '')} has sold {total} tickets for ${revenue:.2f} total revenue."
-
-    elif tool_name == "send_event_reminders":
-        sent = result.get("email_sent", 0) + result.get("sms_sent", 0)
-        return f"Sent {sent} reminders for {result.get('event_name', 'the event')}."
-
-    elif tool_name == "get_ticket_status":
-        if result.get("found"):
-            ticket = result.get("ticket", {})
-            return f"Ticket found. Status: {ticket.get('status')} for {ticket.get('event_name', 'event')}."
-        else:
-            return "Ticket not found."
+                return f"This venue has 1 event: {result[0]['name']} on {result[0]['event_date']}."
+            return f"This venue has {len(result)} events. The first is {result[0]['name']} on {result[0]['event_date']}."
 
     elif tool_name == "search_events":
         if isinstance(result, dict):
@@ -853,6 +848,66 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                 return f"Found {count} matching events. The first is {events[0]['name']}."
             return "No events found matching your search."
 
+    elif tool_name == "send_event_update":
+        if isinstance(result, dict):
+            total = result.get("total_recipients", 0)
+            return f"Event update sent to {total} attendees."
+
+    elif tool_name == "cancel_event":
+        if isinstance(result, dict):
+            total = result.get("total_recipients", 0)
+            return f"Event cancelled. Notifications sent to {total} ticket holders."
+
+    # ============== Venue Tools ==============
+    elif tool_name == "list_venues":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "There are no venues registered."
+            elif len(result) == 1:
+                return f"There is 1 venue: {result[0]['name']}."
+            else:
+                return f"There are {len(result)} venues. Including {result[0]['name']} and {result[1]['name']}."
+
+    elif tool_name == "create_venue":
+        if isinstance(result, dict):
+            return f"Venue '{result.get('name', '')}' created at {result.get('address', '')}."
+
+    elif tool_name == "get_venue":
+        if isinstance(result, dict):
+            event_count = len(result.get("events", []))
+            return f"{result.get('name', 'Venue')} at {result.get('address', '')}. {event_count} events."
+
+    elif tool_name == "update_venue":
+        if isinstance(result, dict):
+            return f"Venue '{result.get('name', '')}' has been updated."
+
+    # ============== Customer Tools ==============
+    elif tool_name == "register_customer":
+        if isinstance(result, dict):
+            customer = result.get("customer", {})
+            return f"{customer.get('name', 'Customer')} registered with email {customer.get('email', '')}."
+
+    elif tool_name == "get_customer_profile":
+        if isinstance(result, dict):
+            if not result.get("found"):
+                return result.get("message", "Customer not found.")
+            customer = result.get("customer", {})
+            stats = result.get("stats", {})
+            prefs = result.get("preferences", {})
+            vip_label = " VIP" if prefs.get("is_vip") else ""
+            return f"{customer.get('name', 'Customer')},{vip_label}. {stats.get('total_spent', '$0')} spent across {stats.get('events_attended', 0)} events, {stats.get('total_tickets', 0)} tickets total."
+
+    elif tool_name == "lookup_customer":
+        if isinstance(result, dict):
+            if not result.get("found"):
+                return result.get("message", "Customer not found.")
+            customer = result.get("customer", {})
+            return f"Found {customer.get('name', 'customer')}. Email: {customer.get('email', 'none')}."
+
+    elif tool_name == "update_customer":
+        if isinstance(result, dict):
+            return f"Customer '{result.get('name', '')}' has been updated."
+
     elif tool_name == "search_customers":
         if isinstance(result, dict):
             if result.get("found"):
@@ -863,10 +918,50 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                 return f"Found {count} matching customers."
             return "No customers found matching your search."
 
-    elif tool_name == "get_ticket_availability":
-        if isinstance(result, dict) and not result.get("error"):
-            remaining = result.get("total_remaining", 0)
-            return f"{result.get('event_name', 'The event')} has {remaining} tickets remaining."
+    elif tool_name == "list_customers":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "There are no registered customers."
+            return f"There are {len(result)} customers."
+
+    elif tool_name == "list_event_goers":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "There are no attendees."
+            return f"There are {len(result)} attendees."
+
+    elif tool_name == "get_customer_tickets":
+        if isinstance(result, dict):
+            if not result.get("found"):
+                return result.get("message", "Customer not found.")
+            customer = result.get("customer", {})
+            tickets = result.get("tickets", [])
+            if len(tickets) == 0:
+                return f"{customer.get('name', 'Customer')} has no tickets."
+            return f"{customer.get('name', 'Customer')} has {len(tickets)} tickets. Most recent: {tickets[0].get('event_name', 'event')}, status {tickets[0].get('status', 'unknown')}."
+
+    elif tool_name == "add_customer_note":
+        if isinstance(result, dict):
+            return f"Note saved. {result.get('note_type', 'general')} note added."
+
+    elif tool_name == "get_customer_notes":
+        if isinstance(result, dict):
+            notes = result.get("notes", [])
+            if len(notes) == 0:
+                return f"No notes for {result.get('customer', 'this customer')}."
+            return f"{result.get('customer', 'Customer')} has {len(notes)} notes. Latest: {notes[0].get('note', '')[:80]}."
+
+    elif tool_name == "update_customer_preferences":
+        if isinstance(result, dict):
+            return result.get("message", "Preferences updated.")
+
+    # ============== Check-in Tools ==============
+    elif tool_name == "check_in_ticket":
+        if isinstance(result, dict):
+            if result.get("valid"):
+                ticket = result.get("ticket", {})
+                return f"Welcome! {ticket.get('attendee_name', 'Guest')} is checked in for {ticket.get('event_name', 'the event')}."
+            return f"Check-in failed: {result.get('message', 'Invalid ticket')}"
 
     elif tool_name == "check_in_by_name":
         if isinstance(result, dict):
@@ -880,17 +975,166 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                 return result.get("message", "Guest checked out successfully.")
             return result.get("message", "Check-out failed.")
 
+    elif tool_name == "find_guest":
+        if isinstance(result, dict):
+            if not result.get("found"):
+                return result.get("message", "Guest not found.")
+            count = result.get("count", 0)
+            guests = result.get("guests", [])
+            if count == 1:
+                g = guests[0]
+                return f"Found {g['name']} for {g.get('event', 'event')}. Ticket status: {g.get('status', 'unknown')}."
+            return f"Found {count} guests matching that name."
+
+    elif tool_name == "assign_ticket":
+        if isinstance(result, dict):
+            if result.get("success"):
+                count = len(result.get("tickets", []))
+                return f"{count} ticket{'s' if count != 1 else ''} assigned to {result.get('customer', 'customer')} for {result.get('event', 'event')}."
+            return result.get("message", "Could not assign ticket.")
+
+    # ============== Ticket & Sales Tools ==============
+    elif tool_name == "get_ticket_status":
+        if isinstance(result, dict):
+            if result.get("found"):
+                ticket = result.get("ticket", {})
+                return f"Ticket for {ticket.get('event_name', 'event')}. Status: {ticket.get('status', 'unknown')}."
+            return "Ticket not found."
+
+    elif tool_name == "get_ticket_availability":
+        if isinstance(result, dict):
+            remaining = result.get("total_remaining", 0)
+            return f"{result.get('event_name', 'The event')} has {remaining} tickets remaining."
+
+    elif tool_name == "get_event_sales":
+        if isinstance(result, dict):
+            total = result.get("total_tickets_sold", 0)
+            revenue = result.get("total_revenue_cents", 0) / 100
+            return f"{result.get('event_name', 'Event')} has sold {total} tickets for ${revenue:.2f} total revenue."
+
+    elif tool_name == "get_all_sales":
+        if isinstance(result, dict):
+            total = result.get("total_tickets_sold", 0)
+            revenue = result.get("total_revenue_dollars", 0)
+            events = result.get("events_with_sales", 0)
+            return f"Total across {events} events: {total} tickets sold for ${revenue:.2f} revenue."
+
+    elif tool_name == "list_ticket_tiers":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "No ticket tiers for this event."
+            names = [f"{t['name']} at ${t.get('price_cents', 0) / 100:.2f}" for t in result[:3]]
+            return f"{len(result)} tiers: {', '.join(names)}."
+
+    elif tool_name == "create_ticket_tier":
+        if isinstance(result, dict):
+            price = result.get("price_cents", result.get("price", 0)) / 100
+            return f"Tier '{result.get('name', '')}' created at ${price:.2f} with {result.get('quantity_available', 0)} tickets."
+
+    elif tool_name == "sync_tiers_to_stripe":
+        if isinstance(result, dict):
+            return f"Stripe sync complete. {result.get('synced', 0)} tiers synced."
+
+    # ============== Payment & Link Tools ==============
+    elif tool_name == "email_payment_link":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return f"Payment link sent to {result.get('customer', 'customer')} at {result.get('email', 'their email')} for {result.get('event', 'the event')}. {result.get('total', '')}."
+            return result.get("error", "Could not send payment link.")
+
+    elif tool_name == "send_ticket_link":
+        if isinstance(result, dict):
+            if result.get("success"):
+                customer = result.get("customer", {})
+                return f"Purchase link sent to {customer.get('name', 'customer')} for {result.get('event', 'the event')}."
+            return result.get("error", "Could not send ticket link.")
+
+    elif tool_name == "send_purchase_link":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return f"Purchase link sent to {result.get('phone', 'the phone number')} for {result.get('event', 'the event')}."
+            return result.get("error", "Could not send purchase link.")
+
+    elif tool_name == "create_payment_link":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return f"Payment link created for {result.get('event', 'the event')}, {result.get('tier', 'tier')}. Total: {result.get('total_display', '')}."
+            return result.get("error", "Could not create payment link.")
+
+    elif tool_name == "send_purchase_email":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return f"Purchase email sent to {result.get('email', 'the customer')} for {result.get('event', 'the event')}."
+            return result.get("error", "Could not send purchase email.")
+
+    # ============== Notification Tools ==============
+    elif tool_name == "send_event_reminders":
+        if isinstance(result, dict):
+            sent = result.get("email_sent", 0) + result.get("sms_sent", 0)
+            return f"Sent {sent} reminders for {result.get('event_name', 'the event')}."
+
+    elif tool_name == "send_sms_ticket":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return "Ticket sent via SMS."
+            return result.get("error", "Could not send SMS ticket.")
+
+    elif tool_name == "get_notification_history":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "No notification history found."
+            return f"Found {len(result)} notifications in history."
+
+    elif tool_name == "get_attendee_preferences":
+        if isinstance(result, dict):
+            prefs = []
+            if result.get("email_opt_in"):
+                prefs.append("email")
+            if result.get("sms_opt_in"):
+                prefs.append("SMS")
+            if result.get("marketing_opt_in"):
+                prefs.append("marketing")
+            return f"{result.get('name', 'Attendee')} is opted in to: {', '.join(prefs) if prefs else 'nothing'}."
+
+    elif tool_name == "update_attendee_preferences":
+        if isinstance(result, dict):
+            return result.get("message", "Preferences updated.")
+
+    # ============== Phone Verification ==============
+    elif tool_name == "send_verification_code":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return f"Verification code sent to {result.get('phone', 'the phone number')}. {result.get('expires_in', '')}."
+            return result.get("error", "Could not send verification code.")
+
+    elif tool_name == "verify_phone_code":
+        if isinstance(result, dict):
+            if result.get("verified"):
+                return f"Phone number {result.get('phone', '')} verified successfully."
+            return result.get("message", "Verification failed.")
+
+    # ============== Category Tools ==============
+    elif tool_name == "list_categories":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "There are no event categories yet."
+            names = [c["name"] for c in result[:5]]
+            if len(result) == 1:
+                return f"There is 1 category: {names[0]}."
+            return f"There are {len(result)} categories: {', '.join(names)}."
+
+    elif tool_name == "create_category":
+        if isinstance(result, dict):
+            return f"Category '{result.get('name', '')}' created."
+
+    # ============== Campaign Tools ==============
     elif tool_name == "create_campaign":
         if isinstance(result, dict):
-            if result.get("error"):
-                return f"Could not create campaign: {result['error']}"
             segment_desc = f" targeting {result['segment_description']}" if result.get("segment_description") else ""
             return f"Campaign '{result.get('name', '')}' created as a draft{segment_desc} with {result.get('potential_recipients', 0)} potential recipients. Say 'send campaign' to send it."
 
     elif tool_name == "update_campaign":
         if isinstance(result, dict):
-            if result.get("error"):
-                return f"Could not update campaign: {result['error']}"
             return f"Campaign '{result.get('name', '')}' updated. Say 'send campaign' when you're ready to send it."
 
     elif tool_name == "list_campaigns":
@@ -903,12 +1147,14 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
 
     elif tool_name in ("send_campaign", "quick_send_campaign"):
         if isinstance(result, dict):
-            if result.get("error"):
-                return f"Could not send campaign: {result['error']}"
             total = result.get("total_recipients", 0)
             emails = result.get("email_sent", 0)
             sms = result.get("sms_sent", 0)
             return f"Marketing blast sent! Reached {total} recipients with {emails} emails and {sms} SMS messages."
+
+    # ============== Dashboard ==============
+    elif tool_name == "refresh_dashboard":
+        return "Dashboard refreshed."
 
     # Default response
     return "Done."
