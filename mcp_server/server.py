@@ -875,6 +875,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             return {"error": "Event not found"}
 
         total_sold = 0
+        total_available = 0
         total_revenue = 0
         tiers_data = []
         checked_in = 0
@@ -882,6 +883,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         for tier in event.ticket_tiers:
             tier_revenue = tier.price * tier.quantity_sold
             total_sold += tier.quantity_sold
+            total_available += tier.quantity_available
             total_revenue += tier_revenue
 
             # Count checked in tickets for this tier
@@ -896,6 +898,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "tier_id": tier.id,
                 "tier_name": tier.name,
                 "price_cents": tier.price,
+                "quantity_available": tier.quantity_available,
                 "quantity_sold": tier.quantity_sold,
                 "revenue_cents": tier_revenue,
                 "checked_in": tier_checked_in,
@@ -904,6 +907,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         return {
             "event_id": event.id,
             "event_name": event.name,
+            "total_available": total_available,
             "total_tickets_sold": total_sold,
             "total_revenue_cents": total_revenue,
             "tickets_checked_in": checked_in,
