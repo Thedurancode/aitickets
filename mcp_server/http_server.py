@@ -740,6 +740,19 @@ async def voice_action(request: Request):
         "event types": "list_categories",
         "event categories": "list_categories",
         "categories": "list_categories",
+        # Marketing campaigns
+        "send marketing": "quick_send_campaign",
+        "send blast": "quick_send_campaign",
+        "marketing blast": "quick_send_campaign",
+        "email blast": "quick_send_campaign",
+        "sms blast": "quick_send_campaign",
+        "send campaign": "send_campaign",
+        "create campaign": "create_campaign",
+        "new campaign": "create_campaign",
+        "list campaigns": "list_campaigns",
+        "show campaigns": "list_campaigns",
+        "campaigns": "list_campaigns",
+        "marketing campaigns": "list_campaigns",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -858,6 +871,29 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             if result.get("success"):
                 return result.get("message", "Guest checked out successfully.")
             return result.get("message", "Check-out failed.")
+
+    elif tool_name == "create_campaign":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Could not create campaign: {result['error']}"
+            return f"Campaign '{result.get('name', '')}' created as a draft with {result.get('potential_recipients', 0)} potential recipients. Say 'send campaign' to send it."
+
+    elif tool_name == "list_campaigns":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "There are no marketing campaigns."
+            draft_count = len([c for c in result if c.get("status") == "draft"])
+            sent_count = len([c for c in result if c.get("status") == "sent"])
+            return f"There are {len(result)} campaigns. {draft_count} drafts and {sent_count} sent."
+
+    elif tool_name in ("send_campaign", "quick_send_campaign"):
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Could not send campaign: {result['error']}"
+            total = result.get("total_recipients", 0)
+            emails = result.get("email_sent", 0)
+            sms = result.get("sms_sent", 0)
+            return f"Marketing blast sent! Reached {total} recipients with {emails} emails and {sms} SMS messages."
 
     # Default response
     return "Done."

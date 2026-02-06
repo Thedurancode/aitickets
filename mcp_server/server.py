@@ -18,6 +18,7 @@ from app.models import (
     Venue, Event, TicketTier, Ticket, EventGoer, TicketStatus,
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference, EventCategory,
+    MarketingCampaign,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -544,6 +545,63 @@ async def list_tools():
                 "required": ["event_goer_id"],
             },
         ),
+        # ============== Marketing Campaign Tools ==============
+        Tool(
+            name="create_campaign",
+            description="Create a marketing campaign as a draft. Use send_campaign to send it, or use quick_send_campaign for one-step create+send.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Campaign name (internal reference)"},
+                    "subject": {"type": "string", "description": "Email subject line"},
+                    "content": {"type": "string", "description": "Message content (used for both email body and SMS)"},
+                    "target_all": {"type": "boolean", "description": "True to target ALL marketing opted-in users (default false)"},
+                    "target_event_id": {"type": "integer", "description": "Target attendees of a specific event who are marketing opted-in"},
+                },
+                "required": ["name", "subject", "content"],
+            },
+        ),
+        Tool(
+            name="list_campaigns",
+            description="List all marketing campaigns with their status (draft, sending, sent)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["draft", "scheduled", "sending", "sent"], "description": "Filter by status (optional)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="send_campaign",
+            description="Send an existing marketing campaign to its targeted recipients. Campaign must be in 'draft' status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "The campaign ID to send"},
+                    "use_email": {"type": "boolean", "description": "Send via email (default true)"},
+                    "use_sms": {"type": "boolean", "description": "Also send via SMS (default false)"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="quick_send_campaign",
+            description="One-step: create AND immediately send a marketing blast. Use when someone says 'send an email to all Jazz Night attendees' or 'blast all customers about our sale'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Campaign name (auto-generated if not provided)"},
+                    "subject": {"type": "string", "description": "Email subject line"},
+                    "content": {"type": "string", "description": "Message content"},
+                    "target_all": {"type": "boolean", "description": "True to send to ALL marketing opted-in users"},
+                    "target_event_id": {"type": "integer", "description": "Send to attendees of a specific event only"},
+                    "use_email": {"type": "boolean", "description": "Send via email (default true)"},
+                    "use_sms": {"type": "boolean", "description": "Also send via SMS (default false)"},
+                },
+                "required": ["subject", "content"],
+            },
+        ),
         # ============== Phone Verification Tools ==============
         Tool(
             name="send_verification_code",
@@ -798,6 +856,22 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                         "4. Use create_category to add new categories (admin only)",
                     ],
                 },
+            "marketing_campaigns": {
+                    "description": "Send promotional emails/SMS blasts to opted-in customers",
+                    "steps": [
+                        "1. For quick blasts: use quick_send_campaign (creates + sends in one step)",
+                        "2. For planned campaigns: create_campaign first, then send_campaign",
+                        "3. Target by specific event (target_event_id) or all opted-in users (target_all=true)",
+                        "4. Only recipients with marketing_opt_in=True will receive messages",
+                        "5. SMS only goes to recipients with sms_opt_in=True and a phone number",
+                    ],
+                    "tools": {
+                        "quick_send_campaign": "One step: creates + sends. Use when user says 'send email to all Jazz Night attendees'.",
+                        "create_campaign": "Creates a draft campaign for review before sending.",
+                        "send_campaign": "Sends an existing draft campaign.",
+                        "list_campaigns": "View all campaigns and their send status.",
+                    },
+                },
             "error_recovery": {
                 "customer_not_found": "Use register_customer to create them, then retry",
                 "event_not_found": "Use search_events with a partial name to find the correct event_id",
@@ -810,6 +884,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "After check-in or purchase, use add_customer_note to record preferences or issues",
                 "Use search_events instead of list_events when the customer names a specific event",
                 "Prefer email_payment_link over manual steps — it handles lookup, Stripe link, and email in one call",
+                "For marketing blasts, prefer quick_send_campaign — it handles create + send in one call",
             ],
         }
 
@@ -1689,6 +1764,145 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "marketing_opt_in": event_goer.marketing_opt_in,
             "message": "Preferences updated successfully",
         }
+
+    # ============== Marketing Campaign Tools ==============
+    elif name == "create_campaign":
+        target_all = arguments.get("target_all", False)
+        target_event_id = arguments.get("target_event_id")
+
+        if not target_all and not target_event_id:
+            return {"error": "Must specify either target_all=true or target_event_id. Who should receive this campaign?"}
+
+        if target_event_id:
+            event = db.query(Event).filter(Event.id == target_event_id).first()
+            if not event:
+                return {"error": f"Event {target_event_id} not found"}
+
+        campaign = MarketingCampaign(
+            name=arguments["name"],
+            subject=arguments["subject"],
+            content=arguments["content"],
+            target_all=target_all,
+            target_event_id=target_event_id,
+            status="draft",
+        )
+        db.add(campaign)
+        db.commit()
+        db.refresh(campaign)
+
+        # Count potential recipients for preview
+        recipient_query = db.query(EventGoer).filter(EventGoer.marketing_opt_in == True)
+        if target_event_id:
+            event_goer_ids = (
+                db.query(Ticket.event_goer_id)
+                .join(TicketTier)
+                .filter(TicketTier.event_id == target_event_id)
+                .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+                .distinct()
+            )
+            recipient_query = recipient_query.filter(EventGoer.id.in_(event_goer_ids))
+        potential_recipients = recipient_query.count()
+
+        return {
+            "success": True,
+            "campaign_id": campaign.id,
+            "name": campaign.name,
+            "subject": campaign.subject,
+            "status": campaign.status,
+            "target": "all opted-in users" if target_all else f"event #{target_event_id} attendees",
+            "potential_recipients": potential_recipients,
+            "message": f"Campaign '{campaign.name}' created as draft with {potential_recipients} potential recipients. Use send_campaign to send it.",
+            "next_actions": ["send_campaign", "list_campaigns"],
+        }
+
+    elif name == "list_campaigns":
+        query = db.query(MarketingCampaign)
+        if arguments.get("status"):
+            query = query.filter(MarketingCampaign.status == arguments["status"])
+        campaigns = query.order_by(MarketingCampaign.created_at.desc()).all()
+
+        return [
+            {
+                "id": c.id,
+                "name": c.name,
+                "subject": c.subject,
+                "status": c.status,
+                "target": "all opted-in" if c.target_all else f"event #{c.target_event_id}",
+                "total_recipients": c.total_recipients,
+                "sent_count": c.sent_count,
+                "created_at": str(c.created_at),
+                "sent_at": str(c.sent_at) if c.sent_at else None,
+            }
+            for c in campaigns
+        ]
+
+    elif name == "send_campaign":
+        from app.services.notifications import send_marketing_campaign
+
+        campaign = db.query(MarketingCampaign).filter(MarketingCampaign.id == arguments["campaign_id"]).first()
+        if not campaign:
+            return {"error": "Campaign not found"}
+        if campaign.status == "sent":
+            return {"error": f"Campaign '{campaign.name}' has already been sent"}
+        if campaign.status == "sending":
+            return {"error": f"Campaign '{campaign.name}' is currently being sent"}
+
+        channels = []
+        if arguments.get("use_email", True):
+            channels.append(NotificationChannel.EMAIL)
+        if arguments.get("use_sms", False):
+            channels.append(NotificationChannel.SMS)
+
+        if not channels:
+            return {"error": "At least one channel (email or sms) must be enabled"}
+
+        result = send_marketing_campaign(db=db, campaign_id=arguments["campaign_id"], channels=channels)
+        return result
+
+    elif name == "quick_send_campaign":
+        from app.services.notifications import send_marketing_campaign
+
+        target_all = arguments.get("target_all", False)
+        target_event_id = arguments.get("target_event_id")
+
+        if not target_all and not target_event_id:
+            return {"error": "Must specify either target_all=true or target_event_id. Who should receive this?"}
+
+        if target_event_id:
+            event = db.query(Event).filter(Event.id == target_event_id).first()
+            if not event:
+                return {"error": f"Event {target_event_id} not found"}
+
+        # Auto-generate name if not provided
+        campaign_name = arguments.get("name")
+        if not campaign_name:
+            if target_event_id and event:
+                campaign_name = f"Blast: {event.name} - {datetime.utcnow().strftime('%b %d')}"
+            else:
+                campaign_name = f"Blast: All Users - {datetime.utcnow().strftime('%b %d')}"
+
+        campaign = MarketingCampaign(
+            name=campaign_name,
+            subject=arguments["subject"],
+            content=arguments["content"],
+            target_all=target_all,
+            target_event_id=target_event_id,
+            status="draft",
+        )
+        db.add(campaign)
+        db.commit()
+        db.refresh(campaign)
+
+        channels = []
+        if arguments.get("use_email", True):
+            channels.append(NotificationChannel.EMAIL)
+        if arguments.get("use_sms", False):
+            channels.append(NotificationChannel.SMS)
+
+        result = send_marketing_campaign(db=db, campaign_id=campaign.id, channels=channels)
+        result["campaign_name"] = campaign_name
+        result["message"] = f"Campaign '{campaign_name}' created and sent to {result.get('total_recipients', 0)} recipients"
+        return result
 
     # ============== Phone Verification Tools ==============
     elif name == "send_verification_code":
