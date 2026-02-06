@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Raptors Tickets - Live Operations</title>
+    <title>Tickets - Live Operations</title>
     <style>
         * {
             margin: 0;
@@ -1122,7 +1122,7 @@
 <body>
     <header class="header">
         <div class="logo">
-            <img src="https://upload.wikimedia.org/wikipedia/en/3/36/Toronto_Raptors_logo.svg" alt="Raptors" class="logo-img">
+            <img src="" alt="" class="logo-img">
         </div>
         <div class="header-right">
             <div class="live-indicator">
@@ -1823,7 +1823,7 @@
         async function loadInitialData() {
             try {
                 // Fetch events, venues, and contacts in parallel
-                const [eventsRes, venuesRes, contactsRes] = await Promise.all([
+                const [eventsRes, venuesRes, contactsRes, brandingRes] = await Promise.all([
                     fetch(`${API_URL}/tools/list_events`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1838,12 +1838,28 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ arguments: {} })
+                    }),
+                    fetch(`${API_URL}/tools/get_branding`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ arguments: {} })
                     })
                 ]);
 
                 const events = await eventsRes.json();
                 const venues = await venuesRes.json();
                 const contacts = await contactsRes.json();
+                const branding = await brandingRes.json();
+
+                // Apply branding
+                if (branding.result) {
+                    document.title = `${branding.result.org_name} - Live Operations`;
+                    const logoImg = document.querySelector('.logo-img');
+                    if (logoImg) {
+                        logoImg.src = branding.result.org_logo_url;
+                        logoImg.alt = branding.result.org_name;
+                    }
+                }
 
                 // Update event count
                 if (events.result) {

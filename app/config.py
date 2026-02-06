@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     base_url: str = "http://localhost:8000"
     uploads_dir: str = "uploads"
 
+    # Branding
+    org_name: str = "Toronto Raptors"
+    org_color: str = "#CE1141"
+    org_logo_url: str = "https://upload.wikimedia.org/wikipedia/en/3/36/Toronto_Raptors_logo.svg"
+
     # Notifications
     reminder_hours_before: int = 24
 

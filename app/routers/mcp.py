@@ -421,6 +421,13 @@ async def voice_action(request: Request):
         "check in": "check_in_ticket",
         "check_in": "check_in_ticket",
         "checkin": "check_in_ticket",
+        "check in by name": "check_in_by_name",
+        "check in guest": "check_in_by_name",
+        "check out": "check_out_by_name",
+        "check_out": "check_out_by_name",
+        "checkout": "check_out_by_name",
+        "undo check in": "check_out_by_name",
+        "undo checkin": "check_out_by_name",
         "send reminder": "send_event_reminders",
         "send_reminder": "send_event_reminders",
         "ticket status": "get_ticket_status",
@@ -428,6 +435,31 @@ async def voice_action(request: Request):
         "event sales": "get_event_sales",
         "event_sales": "get_event_sales",
         "sales": "get_event_sales",
+        # Search
+        "find event": "search_events",
+        "search events": "search_events",
+        "search event": "search_events",
+        "book ticket": "search_events",
+        "buy ticket": "search_events",
+        "buy tickets": "search_events",
+        "purchase ticket": "search_events",
+        "get tickets": "search_events",
+        "find customer": "search_customers",
+        "search customer": "search_customers",
+        "search customers": "search_customers",
+        "look up guest": "find_guest",
+        "lookup guest": "find_guest",
+        "find guest": "find_guest",
+        # Availability
+        "availability": "get_ticket_availability",
+        "how many tickets": "get_ticket_availability",
+        "tickets left": "get_ticket_availability",
+        "tickets available": "get_ticket_availability",
+        "tickets remaining": "get_ticket_availability",
+        # Customer
+        "customer profile": "get_customer_profile",
+        "customer info": "get_customer_profile",
+        "customer details": "get_customer_profile",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -505,6 +537,43 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             return f"Ticket found. Status: {ticket.get('status')} for {ticket.get('event_name', 'event')}."
         else:
             return "Ticket not found."
+
+    elif tool_name == "search_events":
+        if isinstance(result, dict):
+            if result.get("found"):
+                count = result.get("count", 0)
+                events = result.get("events", [])
+                if count == 1:
+                    return f"Found 1 event: {events[0]['name']} on {events[0]['event_date']}."
+                return f"Found {count} matching events. The first is {events[0]['name']}."
+            return "No events found matching your search."
+
+    elif tool_name == "search_customers":
+        if isinstance(result, dict):
+            if result.get("found"):
+                count = result.get("count", 0)
+                customers = result.get("customers", [])
+                if count == 1:
+                    return f"Found {customers[0]['name']}."
+                return f"Found {count} matching customers."
+            return "No customers found matching your search."
+
+    elif tool_name == "get_ticket_availability":
+        if isinstance(result, dict) and not result.get("error"):
+            remaining = result.get("total_remaining", 0)
+            return f"{result.get('event_name', 'The event')} has {remaining} tickets remaining."
+
+    elif tool_name == "check_in_by_name":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return result.get("message", "Guest checked in successfully.")
+            return result.get("message", "Check-in failed.")
+
+    elif tool_name == "check_out_by_name":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return result.get("message", "Guest checked out successfully.")
+            return result.get("message", "Check-out failed.")
 
     return "Done."
 

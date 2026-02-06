@@ -76,6 +76,17 @@ def normalize_phone(phone: str) -> str:
 async def list_tools():
     """List all available tools."""
     return [
+        # Agent guidance tools
+        Tool(
+            name="get_agent_instructions",
+            description="CALL THIS FIRST. Returns system instructions, workflows, and tool selection guidance for the AI agent.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="get_branding",
+            description="Get organization branding configuration (name, color, logo URL)",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
         # Venue tools
         Tool(
             name="list_venues",
@@ -191,6 +202,21 @@ async def list_tools():
                     "venue_id": {"type": "integer", "description": "The venue ID"},
                 },
                 "required": ["venue_id"],
+            },
+        ),
+        Tool(
+            name="search_events",
+            description="Search events by name, date range, or status. Use this when you don't know the event ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search by event name (partial match)"},
+                    "date_from": {"type": "string", "description": "Start date filter YYYY-MM-DD"},
+                    "date_to": {"type": "string", "description": "End date filter YYYY-MM-DD"},
+                    "status": {"type": "string", "enum": ["scheduled", "postponed", "cancelled"], "description": "Filter by event status"},
+                    "venue_id": {"type": "integer", "description": "Filter by venue ID"},
+                },
+                "required": [],
             },
         ),
         # Ticket tier tools
@@ -319,6 +345,19 @@ async def list_tools():
             inputSchema={
                 "type": "object",
                 "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="search_customers",
+            description="Search customers by name, VIP status, or marketing opt-in. Use this to find customers without exact email/phone.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search by name (partial match)"},
+                    "is_vip": {"type": "boolean", "description": "Filter VIP customers only"},
+                    "marketing_opt_in": {"type": "boolean", "description": "Filter by marketing opt-in status"},
+                },
                 "required": [],
             },
         ),
@@ -693,8 +732,65 @@ async def call_tool(name: str, arguments: dict):
 async def _execute_tool(name: str, arguments: dict, db: Session):
     """Execute a tool and return the result."""
 
+    # ============== Agent Guidance Tools ==============
+    if name == "get_agent_instructions":
+        return {
+            "role": f"{settings.org_name} event ticketing operations assistant",
+            "core_workflows": {
+                "ticket_purchase": {
+                    "steps": [
+                        "1. Find or register the customer (search_customers, lookup_customer, or register_customer)",
+                        "2. Find the event (search_events or list_events)",
+                        "3. Check availability (get_ticket_availability)",
+                        "4. Send purchase link via preferred channel",
+                    ],
+                    "purchase_tools": {
+                        "email_payment_link": "Best for email delivery. Finds customer by name, creates Stripe link, emails it. One step.",
+                        "send_ticket_link": "Best for SMS delivery. Finds customer, updates phone if needed, sends SMS with purchase link.",
+                        "create_payment_link": "Returns the URL only (to share manually or paste in chat). No delivery.",
+                        "send_purchase_link": "SMS delivery but requires phone verification first. Prefer send_ticket_link instead.",
+                    },
+                },
+                "check_in": {
+                    "steps": [
+                        "1. Try check_in_by_name (most common - guest gives their name)",
+                        "2. If QR code available, use check_in_ticket with qr_token",
+                        "3. If wrong check-in, use check_out_by_name to reverse",
+                    ],
+                },
+                "customer_lookup": {
+                    "steps": [
+                        "1. get_customer_profile — full history, notes, preferences (use for returning customers)",
+                        "2. search_customers — fuzzy name search across all customers",
+                        "3. lookup_customer — exact phone or email match",
+                        "4. find_guest — search by name within ticket holders only",
+                    ],
+                },
+            },
+            "error_recovery": {
+                "customer_not_found": "Use register_customer to create them, then retry",
+                "event_not_found": "Use search_events with a partial name to find the correct event_id",
+                "phone_not_verified": "Use send_ticket_link instead (no verification needed)",
+                "multiple_matches": "Ask the user to clarify which match they mean",
+                "stripe_error": "Check if tier has been synced to Stripe with sync_tiers_to_stripe",
+            },
+            "best_practices": [
+                "Always call get_customer_profile for returning customers — it loads history and preferences",
+                "After check-in or purchase, use add_customer_note to record preferences or issues",
+                "Use search_events instead of list_events when the customer names a specific event",
+                "Prefer email_payment_link over manual steps — it handles lookup, Stripe link, and email in one call",
+            ],
+        }
+
+    elif name == "get_branding":
+        return {
+            "org_name": settings.org_name,
+            "org_color": settings.org_color,
+            "org_logo_url": settings.org_logo_url,
+        }
+
     # ============== Venue Tools ==============
-    if name == "list_venues":
+    elif name == "list_venues":
         venues = db.query(Venue).all()
         return [_venue_to_dict(v) for v in venues]
 
@@ -800,6 +896,27 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             return {"error": "Venue not found"}
         events = db.query(Event).filter(Event.venue_id == arguments["venue_id"]).all()
         return [_event_to_dict(e) for e in events]
+
+    elif name == "search_events":
+        query = db.query(Event).options(joinedload(Event.venue))
+        if arguments.get("query"):
+            query = query.filter(Event.name.ilike(f"%{arguments['query'].strip()}%"))
+        if arguments.get("status"):
+            query = query.filter(Event.status == arguments["status"])
+        if arguments.get("venue_id"):
+            query = query.filter(Event.venue_id == arguments["venue_id"])
+        if arguments.get("date_from"):
+            query = query.filter(Event.event_date >= arguments["date_from"])
+        if arguments.get("date_to"):
+            query = query.filter(Event.event_date <= arguments["date_to"])
+        events = query.all()
+        if not events:
+            return {"found": False, "message": "No events match your search", "count": 0}
+        return {
+            "found": True,
+            "count": len(events),
+            "events": [{**_event_to_dict(e), "venue": _venue_to_dict(e.venue)} for e in events],
+        }
 
     # ============== Ticket Tier Tools ==============
     elif name == "list_ticket_tiers":
@@ -1051,7 +1168,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "name": customer.name,
                 "email": customer.email,
                 "phone": customer.phone,
-            }
+            },
+            "next_actions": ["search_events", "get_ticket_availability", "email_payment_link"],
         }
 
     elif name == "update_customer":
@@ -1098,6 +1216,26 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             }
             for c in customers
         ]
+
+    elif name == "search_customers":
+        query = db.query(EventGoer)
+        if arguments.get("query"):
+            query = query.filter(EventGoer.name.ilike(f"%{arguments['query'].strip()}%"))
+        if arguments.get("marketing_opt_in") is not None:
+            query = query.filter(EventGoer.marketing_opt_in == arguments["marketing_opt_in"])
+        if arguments.get("is_vip") is not None:
+            query = query.join(CustomerPreference).filter(CustomerPreference.is_vip == arguments["is_vip"])
+        customers = query.order_by(EventGoer.created_at.desc()).limit(50).all()
+        if not customers:
+            return {"found": False, "message": "No customers match your search", "count": 0}
+        return {
+            "found": True,
+            "count": len(customers),
+            "customers": [
+                {"id": c.id, "name": c.name, "email": c.email, "phone": c.phone, "marketing_opt_in": c.marketing_opt_in}
+                for c in customers
+            ],
+        }
 
     elif name == "assign_ticket":
         import secrets
@@ -1147,6 +1285,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "event": event.name if event else "Unknown",
             "tier": tier.name,
             "tickets": [{"id": t.id, "qr_token": t.qr_code_token} for t in tickets],
+            "next_actions": ["send_sms_ticket", "send_purchase_email"],
         }
 
     elif name == "check_in_ticket":
@@ -1184,6 +1323,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "valid": True,
             "message": "Ticket validated successfully - Welcome!",
             "ticket": _ticket_to_dict(ticket),
+            "next_actions": ["get_customer_profile", "add_customer_note"],
         }
 
     elif name == "get_ticket_status":
@@ -1273,6 +1413,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "tier": ticket.ticket_tier.name,
                 "status": "checked_in",
             },
+            "next_actions": ["get_customer_profile", "add_customer_note"],
         }
 
     elif name == "check_out_by_name":
@@ -1720,14 +1861,14 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
     .container {{ max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
-    .header {{ background: linear-gradient(135deg, #CE1141 0%, #000000 100%); padding: 40px 30px; text-align: center; }}
+    .header {{ background: linear-gradient(135deg, {settings.org_color} 0%, #000000 100%); padding: 40px 30px; text-align: center; }}
     .header h1 {{ color: #fff; margin: 0; font-size: 28px; }}
     .header p {{ color: rgba(255,255,255,0.9); margin: 10px 0 0; }}
     .content {{ padding: 30px; }}
     .event-card {{ background: #f8f8f8; border-radius: 8px; padding: 20px; margin: 20px 0; }}
     .event-card h2 {{ margin: 0 0 15px; color: #333; }}
     .event-card p {{ margin: 5px 0; color: #666; }}
-    .btn {{ display: inline-block; background: #CE1141; color: #fff !important; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin: 20px 0; }}
+    .btn {{ display: inline-block; background: {settings.org_color}; color: #fff !important; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin: 20px 0; }}
     .footer {{ text-align: center; padding: 20px; color: #999; font-size: 12px; background: #f8f8f8; }}
   </style>
 </head>
@@ -1735,7 +1876,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
   <div class="container">
     <div class="header">
       <h1>🎟️ Your Tickets Await!</h1>
-      <p>Toronto Raptors</p>
+      <p>{settings.org_name}</p>
     </div>
     <div class="content">
       <p>Hey {customer.name.split()[0]},</p>
@@ -1754,7 +1895,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
       </p>
     </div>
     <div class="footer">
-      Toronto Raptors Ticket Office<br>
+      {settings.org_name} Ticket Office<br>
       {event.venue.name}, {event.venue.address}
     </div>
   </div>
@@ -1768,7 +1909,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         resend.api_key = settings.resend_api_key
         try:
             resend.Emails.send({
-                "from": "Raptors Tickets <onboarding@resend.dev>",
+                "from": f"{settings.org_name} Tickets <{settings.from_email}>",
                 "to": [customer.email],
                 "subject": f"🎟️ Your {event.name} Tickets",
                 "html": html_content,
@@ -1787,6 +1928,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "total": total_display,
             "payment_link": payment_link.url,
             "actions": actions,
+            "next_actions": ["add_customer_note", "get_customer_profile"],
         }
 
     elif name == "create_payment_link":
@@ -1884,15 +2026,15 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
     .container {{ max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
-    .header {{ background: linear-gradient(135deg, #CE1141 0%, #000000 100%); padding: 40px 30px; text-align: center; }}
+    .header {{ background: linear-gradient(135deg, {settings.org_color} 0%, #000000 100%); padding: 40px 30px; text-align: center; }}
     .header h1 {{ color: #fff; margin: 0; font-size: 28px; }}
     .header p {{ color: rgba(255,255,255,0.9); margin: 10px 0 0; }}
     .content {{ padding: 30px; }}
     .event-card {{ background: #f8f8f8; border-radius: 8px; padding: 20px; margin: 20px 0; }}
     .event-card h2 {{ margin: 0 0 15px; color: #333; }}
     .event-card p {{ margin: 5px 0; color: #666; }}
-    .btn {{ display: inline-block; background: #CE1141; color: #fff !important; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin: 20px 0; }}
-    .btn:hover {{ background: #a50d33; }}
+    .btn {{ display: inline-block; background: {settings.org_color}; color: #fff !important; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin: 20px 0; }}
+    .btn:hover {{ opacity: 0.9; }}
     .footer {{ text-align: center; padding: 20px; color: #999; font-size: 12px; background: #f8f8f8; }}
   </style>
 </head>
@@ -1900,7 +2042,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
   <div class="container">
     <div class="header">
       <h1>🎟️ Your Tickets Await!</h1>
-      <p>Toronto Raptors</p>
+      <p>{settings.org_name}</p>
     </div>
     <div class="content">
       <p>Hey {name},</p>
@@ -1924,7 +2066,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
       </p>
     </div>
     <div class="footer">
-      Toronto Raptors Ticket Office<br>
+      {settings.org_name} Ticket Office<br>
       {event.venue.name}, {event.venue.address}
     </div>
   </div>
@@ -1940,7 +2082,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         try:
             result = resend.Emails.send({
-                "from": "Raptors Tickets <onboarding@resend.dev>",
+                "from": f"{settings.org_name} Tickets <{settings.from_email}>",
                 "to": [to_email],
                 "subject": f"🎟️ Your {event.name} Tickets",
                 "html": html_content,
@@ -2201,6 +2343,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 }
                 for t in tickets[:5]
             ],
+            "next_actions": ["search_events", "email_payment_link", "add_customer_note"],
         }
 
     elif name == "add_customer_note":
