@@ -106,6 +106,10 @@ class TicketTier(Base):
     quantity_available = Column(Integer, nullable=False)
     quantity_sold = Column(Integer, default=0)
 
+    # Stripe integration
+    stripe_product_id = Column(String(255), nullable=True, index=True)
+    stripe_price_id = Column(String(255), nullable=True, index=True)
+
     event = relationship("Event", back_populates="ticket_tiers")
     tickets = relationship("Ticket", back_populates="ticket_tier", cascade="all, delete-orphan")
 

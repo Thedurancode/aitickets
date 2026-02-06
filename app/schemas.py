@@ -94,6 +94,8 @@ class TicketTierResponse(TicketTierBase):
     id: int
     event_id: int
     quantity_sold: int
+    stripe_product_id: Optional[str] = None
+    stripe_price_id: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -1327,6 +1327,20 @@
                 console.log('Keepalive received');
             });
 
+            eventSource.addEventListener('refresh', (e) => {
+                console.log('Refresh command received');
+                const data = JSON.parse(e.data);
+                if (data.type === 'full') {
+                    // Full page reload
+                    window.location.reload();
+                } else {
+                    // Soft refresh - reload data without page reload
+                    addActivity('system', 'Dashboard Refreshed', data.message || 'Data reloaded', '🔄');
+                    loadInitialData();
+                    refreshTicker();
+                }
+            });
+
             eventSource.onerror = () => {
                 statusEl.className = 'connection-status disconnected';
                 statusEl.innerHTML = '<div class="live-dot" style="background: #ff0000;"></div><span>Reconnecting...</span>';
@@ -1611,6 +1625,16 @@
                         return `${result.length} venue(s)` + (result[0] ? `: ${result[0].name}` : '');
                     }
                     break;
+                case 'create_event':
+                    return result.name ? `Created: ${result.name}` : 'Event created';
+                case 'update_event':
+                    return result.name ? `Updated: ${result.name}` : 'Event updated';
+                case 'register_customer':
+                    return result.name ? `Registered: ${result.name}` : 'Customer registered';
+                case 'assign_ticket':
+                    return result.success ? `Ticket assigned successfully` : (result.message || 'Ticket assigned');
+                case 'get_all_sales':
+                    return `Total: ${result.total_tickets_sold || 0} tickets - $${((result.total_revenue_cents || 0)/100).toLocaleString()}`;
                 default:
                     if (typeof result === 'object') {
                         return result.message || result.name || JSON.stringify(result).slice(0, 50);

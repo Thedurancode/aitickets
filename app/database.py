@@ -30,5 +30,12 @@ def get_db():
 
 
 def init_db():
-    """Initialize the database, creating all tables."""
+    """Initialize the database, creating all tables and running migrations."""
     Base.metadata.create_all(bind=engine)
+
+    # Run migrations for existing databases
+    try:
+        from app.migrations.add_stripe_columns import run_migration
+        run_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

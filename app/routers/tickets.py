@@ -20,6 +20,7 @@ from app.schemas import (
 )
 from app.config import get_settings
 from app.services.qrcode import generate_qr_code
+from app.services.stripe_sync import get_stripe_checkout_line_item
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
@@ -93,21 +94,12 @@ def create_checkout_session(
         db.refresh(t)
 
     try:
+        # Use synced Stripe price if available, otherwise inline pricing
+        line_item = get_stripe_checkout_line_item(tier, purchase.quantity)
+
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=["card"],
-            line_items=[
-                {
-                    "price_data": {
-                        "currency": "usd",
-                        "product_data": {
-                            "name": f"{event.name} - {tier.name}",
-                            "description": tier.description or f"Ticket for {event.name}",
-                        },
-                        "unit_amount": tier.price,
-                    },
-                    "quantity": purchase.quantity,
-                }
-            ],
+            line_items=[line_item],
             mode="payment",
             success_url=f"{settings.base_url}/purchase-success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{settings.base_url}/purchase-cancelled",
@@ -115,6 +107,7 @@ def create_checkout_session(
                 "ticket_ids": ",".join(str(tid) for tid in ticket_ids),
                 "event_id": str(event_id),
                 "tier_id": str(tier.id),
+                "stripe_product_id": tier.stripe_product_id or "",
             },
             customer_email=purchase.email,
         )

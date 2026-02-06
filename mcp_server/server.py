@@ -19,6 +19,10 @@ from app.models import (
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference,
 )
+from app.services.stripe_sync import (
+    create_stripe_product_for_tier,
+    sync_existing_tiers_to_stripe,
+)
 
 settings = get_settings()
 
@@ -33,6 +37,37 @@ phone_verifications: dict[str, dict] = {}
 def get_db():
     """Get a database session."""
     return SessionLocal()
+
+
+def normalize_phone(phone: str) -> str:
+    """
+    Normalize phone number to E.164 format.
+    Adds +1 for US numbers if not present.
+    """
+    if not phone:
+        return phone
+
+    # Remove all non-digit characters except +
+    cleaned = ''.join(c for c in phone if c.isdigit() or c == '+')
+
+    # If already has +, assume it's correct
+    if cleaned.startswith('+'):
+        return cleaned
+
+    # Remove leading 1 if present (US country code without +)
+    if cleaned.startswith('1') and len(cleaned) == 11:
+        cleaned = cleaned[1:]
+
+    # US number: 10 digits, add +1
+    if len(cleaned) == 10:
+        return f"+1{cleaned}"
+
+    # If 11 digits starting with 1, format as +1
+    if len(cleaned) == 11 and cleaned.startswith('1'):
+        return f"+{cleaned}"
+
+    # Return as-is if we can't determine format
+    return cleaned
 
 
 # ============== Venue Tools ==============
@@ -218,6 +253,29 @@ async def list_tools():
             },
         ),
         Tool(
+            name="refresh_dashboard",
+            description="Send a refresh command to the TV dashboard. Use 'full' for page reload or 'soft' to just reload data.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "enum": ["full", "soft"], "description": "Type of refresh: 'full' reloads the page, 'soft' reloads data only", "default": "soft"},
+                    "message": {"type": "string", "description": "Optional message to display"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="sync_tiers_to_stripe",
+            description="Sync existing ticket tiers to Stripe. Creates Stripe products/prices for tiers that haven't been synced yet.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to sync (optional, syncs all if not provided)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="list_event_goers",
             description="List attendees for an event",
             inputSchema={
@@ -239,6 +297,20 @@ async def list_tools():
                     "phone": {"type": "string", "description": "Customer's phone number (optional)"},
                 },
                 "required": ["name", "email"],
+            },
+        ),
+        Tool(
+            name="update_customer",
+            description="Update a customer's info (email, phone, name)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "customer_id": {"type": "integer", "description": "Customer ID"},
+                    "name": {"type": "string", "description": "New name (optional)"},
+                    "email": {"type": "string", "description": "New email (optional)"},
+                    "phone": {"type": "string", "description": "New phone (optional)"},
+                },
+                "required": ["customer_id"],
             },
         ),
         Tool(
@@ -454,6 +526,65 @@ async def list_tools():
                 "type": "object",
                 "properties": {
                     "phone": {"type": "string", "description": "Phone number to send SMS to (must be verified first)"},
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "tier_id": {"type": "integer", "description": "Specific ticket tier ID (optional)"},
+                },
+                "required": ["phone", "event_id"],
+            },
+        ),
+        Tool(
+            name="email_payment_link",
+            description="Smart tool: Find customer by name, create a payment link, and email it to them. Say 'email payment link to Ed Duran for 2 VIP tickets to Bulls game'",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Customer name to find"},
+                    "email": {"type": "string", "description": "Or customer email directly"},
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID (optional)"},
+                    "quantity": {"type": "integer", "description": "Number of tickets", "default": 1},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="create_payment_link",
+            description="Create a permanent Stripe Payment Link for tickets. These links don't expire and are more reliable than checkout sessions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                    "quantity": {"type": "integer", "description": "Number of tickets", "default": 1},
+                },
+                "required": ["event_id", "tier_id"],
+            },
+        ),
+        Tool(
+            name="send_purchase_email",
+            description="Send a beautiful purchase link email to a customer",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "to_email": {"type": "string", "description": "Email address to send to"},
+                    "name": {"type": "string", "description": "Customer's name"},
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                    "quantity": {"type": "integer", "description": "Number of tickets", "default": 1},
+                    "checkout_url": {"type": "string", "description": "Stripe checkout URL (optional - will create new if not provided)"},
+                },
+                "required": ["to_email", "name", "event_id"],
+            },
+        ),
+        Tool(
+            name="send_ticket_link",
+            description="Smart tool: Find customer by name/email, update their phone if needed, and send a payment link via SMS. Handles everything in one step.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Customer name to search for"},
+                    "email": {"type": "string", "description": "Customer email to search for"},
+                    "phone": {"type": "string", "description": "Phone number to send SMS to (will update customer's phone if different)"},
                     "event_id": {"type": "integer", "description": "The event ID"},
                     "tier_id": {"type": "integer", "description": "Specific ticket tier ID (optional)"},
                 },
@@ -692,7 +823,16 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         db.add(tier)
         db.commit()
         db.refresh(tier)
-        return _tier_to_dict(tier)
+
+        # Sync to Stripe automatically
+        stripe_result = create_stripe_product_for_tier(db, tier, event)
+        db.refresh(tier)
+
+        result = _tier_to_dict(tier)
+        result["stripe_synced"] = stripe_result.get("success", False)
+        if stripe_result.get("error"):
+            result["stripe_error"] = stripe_result["error"]
+        return result
 
     elif name == "get_ticket_availability":
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
@@ -815,6 +955,23 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "events": events_data,
         }
 
+    elif name == "refresh_dashboard":
+        # This tool signals a refresh - the actual broadcast happens in http_server.py
+        # We return data that will be broadcast via SSE
+        refresh_type = arguments.get("type", "soft")
+        message = arguments.get("message", "Dashboard refresh triggered")
+        return {
+            "success": True,
+            "type": refresh_type,
+            "message": message,
+            "action": "refresh",
+        }
+
+    elif name == "sync_tiers_to_stripe":
+        event_id = arguments.get("event_id")
+        result = sync_existing_tiers_to_stripe(db, event_id)
+        return result
+
     elif name == "list_event_goers":
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
         if not event:
@@ -867,13 +1024,16 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 }
             }
 
+        # Normalize phone number (add +1 for US)
+        phone = normalize_phone(arguments.get("phone")) if arguments.get("phone") else None
+
         # Create new customer
         customer = EventGoer(
             name=arguments["name"],
             email=arguments["email"],
-            phone=arguments.get("phone"),
+            phone=phone,
             email_opt_in=True,
-            sms_opt_in=bool(arguments.get("phone")),
+            sms_opt_in=bool(phone),
         )
         db.add(customer)
         db.commit()
@@ -882,6 +1042,36 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         return {
             "success": True,
             "message": f"Customer {customer.name} registered successfully",
+            "customer": {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "phone": customer.phone,
+            }
+        }
+
+    elif name == "update_customer":
+        customer = db.query(EventGoer).filter(EventGoer.id == arguments["customer_id"]).first()
+        if not customer:
+            return {"error": "Customer not found"}
+
+        updates = []
+        if arguments.get("name"):
+            customer.name = arguments["name"]
+            updates.append(f"name → {arguments['name']}")
+        if arguments.get("email"):
+            customer.email = arguments["email"]
+            updates.append(f"email → {arguments['email']}")
+        if arguments.get("phone"):
+            customer.phone = normalize_phone(arguments["phone"])
+            updates.append(f"phone → {customer.phone}")
+
+        db.commit()
+        db.refresh(customer)
+
+        return {
+            "success": True,
+            "message": f"Updated {customer.name}: {', '.join(updates)}",
             "customer": {
                 "id": customer.id,
                 "name": customer.name,
@@ -1439,6 +1629,428 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "message": "Purchase link sent via SMS" if result.get("success") else result.get("error", "Failed to send SMS"),
         }
 
+    elif name == "email_payment_link":
+        import stripe
+        import resend
+
+        stripe.api_key = settings.stripe_secret_key
+
+        event_id = arguments["event_id"]
+        tier_id = arguments.get("tier_id")
+        quantity = arguments.get("quantity", 1)
+        customer_name = arguments.get("name", "").strip().lower()
+        customer_email = arguments.get("email", "").strip().lower()
+
+        actions = []
+
+        # Step 1: Find customer
+        customer = None
+        if customer_email:
+            customer = db.query(EventGoer).filter(EventGoer.email.ilike(customer_email)).first()
+        if not customer and customer_name:
+            customers = db.query(EventGoer).all()
+            for c in customers:
+                if customer_name in c.name.lower():
+                    customer = c
+                    break
+
+        if not customer:
+            return {"error": f"Customer '{customer_name or customer_email}' not found. Use register_customer first."}
+
+        actions.append(f"Found: {customer.name} ({customer.email})")
+
+        # Step 2: Get event and tier
+        event = db.query(Event).options(joinedload(Event.venue), joinedload(Event.ticket_tiers)).filter(Event.id == event_id).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        # Get tier (use first if not specified)
+        tier = None
+        if tier_id:
+            tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+        elif event.ticket_tiers:
+            tier = event.ticket_tiers[0]
+
+        if not tier:
+            return {"error": "No ticket tier found"}
+
+        # Step 3: Create Payment Link
+        try:
+            payment_link = stripe.PaymentLink.create(
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": tier.price,
+                        "product_data": {
+                            "name": f"{event.name} - {tier.name}",
+                            "description": f"{event.event_date} at {event.event_time} | {event.venue.name}",
+                        },
+                    },
+                    "quantity": quantity,
+                }],
+                metadata={
+                    "event_id": str(event_id),
+                    "tier_id": str(tier.id),
+                    "customer_id": str(customer.id),
+                },
+            )
+            actions.append(f"Created payment link: {payment_link.url}")
+        except stripe.error.StripeError as e:
+            return {"error": f"Stripe error: {e}"}
+
+        # Step 4: Format date
+        from datetime import datetime as dt
+        try:
+            event_date_obj = dt.strptime(event.event_date, "%Y-%m-%d")
+            friendly_date = event_date_obj.strftime("%A, %B %d, %Y")
+        except:
+            friendly_date = event.event_date
+
+        total_display = f"${tier.price * quantity / 100:.2f}"
+
+        # Step 5: Send email
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
+    .container {{ max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+    .header {{ background: linear-gradient(135deg, #CE1141 0%, #000000 100%); padding: 40px 30px; text-align: center; }}
+    .header h1 {{ color: #fff; margin: 0; font-size: 28px; }}
+    .header p {{ color: rgba(255,255,255,0.9); margin: 10px 0 0; }}
+    .content {{ padding: 30px; }}
+    .event-card {{ background: #f8f8f8; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+    .event-card h2 {{ margin: 0 0 15px; color: #333; }}
+    .event-card p {{ margin: 5px 0; color: #666; }}
+    .btn {{ display: inline-block; background: #CE1141; color: #fff !important; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin: 20px 0; }}
+    .footer {{ text-align: center; padding: 20px; color: #999; font-size: 12px; background: #f8f8f8; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎟️ Your Tickets Await!</h1>
+      <p>Toronto Raptors</p>
+    </div>
+    <div class="content">
+      <p>Hey {customer.name.split()[0]},</p>
+      <p>Your tickets are ready to purchase!</p>
+      <div class="event-card">
+        <h2>🏀 {event.name}</h2>
+        <p>📅 {friendly_date} at {event.event_time}</p>
+        <p>📍 {event.venue.name}</p>
+        <p>🎫 {quantity}x {tier.name} — <strong>{total_display}</strong></p>
+      </div>
+      <center>
+        <a href="{payment_link.url}" class="btn">Complete Purchase →</a>
+      </center>
+      <p style="color:#666; font-size:14px; margin-top:30px;">
+        This is a secure Stripe checkout. Your payment info is never stored on our servers.
+      </p>
+    </div>
+    <div class="footer">
+      Toronto Raptors Ticket Office<br>
+      {event.venue.name}, {event.venue.address}
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+        if not settings.resend_api_key:
+            return {"error": "Resend not configured", "payment_link": payment_link.url}
+
+        resend.api_key = settings.resend_api_key
+        try:
+            resend.Emails.send({
+                "from": "Raptors Tickets <onboarding@resend.dev>",
+                "to": [customer.email],
+                "subject": f"🎟️ Your {event.name} Tickets",
+                "html": html_content,
+            })
+            actions.append(f"Emailed to {customer.email}")
+        except Exception as e:
+            return {"error": f"Email failed: {e}", "payment_link": payment_link.url}
+
+        return {
+            "success": True,
+            "customer": customer.name,
+            "email": customer.email,
+            "event": event.name,
+            "tier": tier.name,
+            "quantity": quantity,
+            "total": total_display,
+            "payment_link": payment_link.url,
+            "actions": actions,
+        }
+
+    elif name == "create_payment_link":
+        import stripe
+        stripe.api_key = settings.stripe_secret_key
+
+        event_id = arguments["event_id"]
+        tier_id = arguments["tier_id"]
+        quantity = arguments.get("quantity", 1)
+
+        # Get event and tier
+        event = db.query(Event).options(joinedload(Event.venue)).filter(Event.id == event_id).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+        if not tier:
+            return {"error": "Ticket tier not found"}
+
+        try:
+            # Create Payment Link via Stripe API
+            payment_link = stripe.PaymentLink.create(
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": tier.price,
+                        "product_data": {
+                            "name": f"{event.name} - {tier.name}",
+                            "description": f"{event.event_date} at {event.event_time} | {event.venue.name}",
+                        },
+                    },
+                    "quantity": quantity,
+                }],
+                metadata={
+                    "event_id": str(event_id),
+                    "tier_id": str(tier_id),
+                    "event_name": event.name,
+                },
+            )
+
+            return {
+                "success": True,
+                "url": payment_link.url,
+                "event": event.name,
+                "tier": tier.name,
+                "quantity": quantity,
+                "total_cents": tier.price * quantity,
+                "total_display": f"${tier.price * quantity / 100:.2f}",
+            }
+        except stripe.error.StripeError as e:
+            return {"success": False, "error": str(e)}
+
+    elif name == "send_purchase_email":
+        import resend
+
+        to_email = arguments["to_email"]
+        name = arguments["name"]
+        event_id = arguments["event_id"]
+        tier_id = arguments.get("tier_id")
+        quantity = arguments.get("quantity", 1)
+        checkout_url = arguments.get("checkout_url")
+
+        # Get event details
+        event = (
+            db.query(Event)
+            .options(joinedload(Event.venue), joinedload(Event.ticket_tiers))
+            .filter(Event.id == event_id)
+            .first()
+        )
+        if not event:
+            return {"error": "Event not found"}
+
+        # Get tier info
+        tier = None
+        if tier_id:
+            tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+
+        tier_name = tier.name if tier else "General Admission"
+        price_cents = (tier.price if tier else event.ticket_tiers[0].price) * quantity
+        price_display = f"${price_cents / 100:.2f}"
+
+        # Format date nicely
+        from datetime import datetime as dt
+        try:
+            event_date_obj = dt.strptime(event.event_date, "%Y-%m-%d")
+            friendly_date = event_date_obj.strftime("%A, %B %d, %Y")
+        except:
+            friendly_date = event.event_date
+
+        # Build email HTML
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }}
+    .container {{ max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+    .header {{ background: linear-gradient(135deg, #CE1141 0%, #000000 100%); padding: 40px 30px; text-align: center; }}
+    .header h1 {{ color: #fff; margin: 0; font-size: 28px; }}
+    .header p {{ color: rgba(255,255,255,0.9); margin: 10px 0 0; }}
+    .content {{ padding: 30px; }}
+    .event-card {{ background: #f8f8f8; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+    .event-card h2 {{ margin: 0 0 15px; color: #333; }}
+    .event-card p {{ margin: 5px 0; color: #666; }}
+    .btn {{ display: inline-block; background: #CE1141; color: #fff !important; padding: 16px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin: 20px 0; }}
+    .btn:hover {{ background: #a50d33; }}
+    .footer {{ text-align: center; padding: 20px; color: #999; font-size: 12px; background: #f8f8f8; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎟️ Your Tickets Await!</h1>
+      <p>Toronto Raptors</p>
+    </div>
+    <div class="content">
+      <p>Hey {name},</p>
+      <p>Your tickets are ready to purchase!</p>
+
+      <div class="event-card">
+        <h2>🏀 {event.name}</h2>
+        <p>📅 {friendly_date} at {event.event_time}</p>
+        <p>📍 {event.venue.name}</p>
+        <p>🎫 {quantity}x {tier_name} — <strong>{price_display}</strong></p>
+      </div>
+
+      <center>
+        <a href="{checkout_url}" class="btn">
+          Complete Purchase →
+        </a>
+      </center>
+
+      <p style="color:#666; font-size:14px; margin-top:30px;">
+        This is a secure Stripe checkout. Your payment info is never stored on our servers.
+      </p>
+    </div>
+    <div class="footer">
+      Toronto Raptors Ticket Office<br>
+      {event.venue.name}, {event.venue.address}
+    </div>
+  </div>
+</body>
+</html>
+"""
+
+        # Send email via Resend
+        if not settings.resend_api_key:
+            return {"error": "Resend API key not configured"}
+
+        resend.api_key = settings.resend_api_key
+
+        try:
+            result = resend.Emails.send({
+                "from": "Raptors Tickets <onboarding@resend.dev>",
+                "to": [to_email],
+                "subject": f"🎟️ Your {event.name} Tickets",
+                "html": html_content,
+            })
+            return {
+                "success": True,
+                "message": f"Email sent to {to_email}",
+                "email_id": result.get("id"),
+                "event": event.name,
+                "checkout_url": checkout_url,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    elif name == "send_ticket_link":
+        from app.services.sms import send_sms
+
+        phone = normalize_phone(arguments["phone"])
+        event_id = arguments["event_id"]
+        tier_id = arguments.get("tier_id")
+        customer_name = arguments.get("name", "").strip().lower()
+        customer_email = arguments.get("email", "").strip().lower()
+
+        actions_taken = []
+
+        # Step 1: Find the customer
+        customer = None
+        if customer_email:
+            customer = db.query(EventGoer).filter(EventGoer.email.ilike(customer_email)).first()
+        if not customer and customer_name:
+            # Search by name (partial match)
+            customers = db.query(EventGoer).all()
+            for c in customers:
+                if customer_name in c.name.lower():
+                    customer = c
+                    break
+
+        if not customer:
+            return {
+                "success": False,
+                "error": f"Customer not found. Please provide name or email to find them.",
+                "suggestion": "Use register_customer to create a new customer first."
+            }
+
+        actions_taken.append(f"Found customer: {customer.name} ({customer.email})")
+
+        # Step 2: Check/update phone number
+        old_phone = customer.phone
+        if customer.phone != phone:
+            customer.phone = phone
+            customer.sms_opt_in = True
+            db.commit()
+            if old_phone:
+                actions_taken.append(f"Updated phone from {old_phone} to {phone}")
+            else:
+                actions_taken.append(f"Added phone number: {phone}")
+        else:
+            actions_taken.append(f"Phone already set to {phone}")
+
+        # Step 3: Get event info
+        event = (
+            db.query(Event)
+            .options(joinedload(Event.venue), joinedload(Event.ticket_tiers))
+            .filter(Event.id == event_id)
+            .first()
+        )
+        if not event:
+            return {"success": False, "error": "Event not found", "actions": actions_taken}
+
+        # Step 4: Build purchase URL
+        base_url = settings.base_url or "https://ai-tickets.fly.dev"
+        if tier_id:
+            purchase_url = f"{base_url}/events/{event.id}/purchase?tier={tier_id}"
+        else:
+            purchase_url = f"{base_url}/events/{event.id}/purchase"
+
+        # Get price info
+        if tier_id:
+            tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+            price_info = f"${tier.price / 100:.0f}" if tier else ""
+        else:
+            min_price = min([t.price for t in event.ticket_tiers]) if event.ticket_tiers else 0
+            price_info = f"from ${min_price / 100:.0f}"
+
+        # Step 5: Send SMS
+        message = (
+            f"🎟️ {event.name}\n"
+            f"📅 {event.event_date} at {event.event_time}\n"
+            f"📍 {event.venue.name}\n"
+            f"💰 Tickets {price_info}\n\n"
+            f"Buy now: {purchase_url}"
+        )
+
+        sms_result = send_sms(to_phone=phone, message=message)
+
+        if sms_result.get("success"):
+            actions_taken.append(f"Sent purchase link via SMS to {phone}")
+        else:
+            actions_taken.append(f"Failed to send SMS: {sms_result.get('error', 'Unknown error')}")
+
+        return {
+            "success": sms_result.get("success", False),
+            "customer": {
+                "id": customer.id,
+                "name": customer.name,
+                "email": customer.email,
+                "phone": customer.phone,
+            },
+            "event": event.name,
+            "purchase_url": purchase_url,
+            "actions": actions_taken,
+            "message": "Purchase link sent!" if sms_result.get("success") else sms_result.get("error", "Failed to send SMS"),
+        }
+
     elif name == "lookup_customer":
         query = db.query(EventGoer)
 
@@ -1741,6 +2353,8 @@ def _tier_to_dict(tier: TicketTier) -> dict:
         "quantity_available": tier.quantity_available,
         "quantity_sold": tier.quantity_sold,
         "tickets_remaining": tier.quantity_available - tier.quantity_sold,
+        "stripe_product_id": tier.stripe_product_id,
+        "stripe_price_id": tier.stripe_price_id,
     }
 
 

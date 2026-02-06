@@ -1,80 +1,43 @@
 """
-HTTP/SSE Transport for MCP Server
+MCP/SSE Router for Voice Agent Integration
 
-Exposes MCP tools via HTTP endpoints with SSE support for streaming.
-Compatible with voice agents, LLM function calling, and other HTTP clients.
-
-Usage:
-    python -m mcp_server.http_server --port 3001
+Exposes MCP tools via HTTP endpoints with SSE support for real-time streaming.
+Compatible with ElevenLabs, voice agents, and LLM function calling.
 
 Endpoints:
-    GET  /                  - Server info
-    GET  /tools             - List available tools
-    POST /tools/{name}      - Call a tool
-    GET  /sse               - SSE stream for real-time updates
-    POST /chat              - Chat endpoint with function calling format
+    GET  /mcp/tools         - List available tools
+    POST /mcp/tools/{name}  - Call a tool
+    GET  /mcp/sse           - SSE stream for real-time updates
+    POST /mcp/message       - MCP JSON-RPC messages
+    POST /mcp/voice/action  - Simplified voice agent endpoint
 """
 
 import json
 import asyncio
-import argparse
+import uuid
 from datetime import datetime
 from typing import Optional, AsyncGenerator
-from contextlib import asynccontextmanager
-import uuid
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
-
-import sys
 from pathlib import Path
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from app.database import SessionLocal, init_db
+from app.database import SessionLocal
 from mcp_server.server import list_tools, _execute_tool
+
+
+router = APIRouter(prefix="/mcp", tags=["MCP"])
 
 
 # ============== Pydantic Models ==============
 
 class ToolCallRequest(BaseModel):
     arguments: dict = {}
-
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-
-class FunctionCall(BaseModel):
-    name: str
-    arguments: dict
-
-
-class ChatRequest(BaseModel):
-    messages: list[ChatMessage]
-    functions: Optional[list[dict]] = None
-    function_call: Optional[str | dict] = None
-    stream: bool = False
-
-
-class SessionState:
-    """Track session state for stateful interactions."""
-    def __init__(self):
-        self.context: dict = {}
-        self.last_event_id: Optional[int] = None
-        self.last_venue_id: Optional[int] = None
-        self.last_ticket_id: Optional[int] = None
-        self.created_at: datetime = datetime.utcnow()
-
-
-# Session storage (in production, use Redis)
-sessions: dict[str, SessionState] = {}
 
 
 # ============== SSE Event Queue ==============
@@ -109,78 +72,34 @@ class SSEManager:
 
 sse_manager = SSEManager()
 
-
-# ============== FastAPI App ==============
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Initialize database on startup."""
-    init_db()
-    yield
-
-
-app = FastAPI(
-    title="Event Tickets MCP Server (HTTP/SSE)",
-    description="HTTP transport for MCP tools - compatible with voice agents and LLM function calling",
-    version="1.0.0",
-    lifespan=lifespan,
-)
-
-# Enable CORS for voice agents
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Store pending responses for MCP sessions
+mcp_sessions: dict[str, asyncio.Queue] = {}
 
 
 # ============== Endpoints ==============
 
-@app.get("/")
-async def root():
-    """Server info and available endpoints."""
+@router.get("")
+async def mcp_info():
+    """MCP server info and available endpoints."""
     return {
         "name": "event-tickets-mcp",
         "version": "1.0.0",
         "transport": "http/sse",
         "endpoints": {
-            "dashboard": "/dashboard",
-            "tools": "/tools",
-            "call_tool": "/tools/{tool_name}",
-            "sse_stream": "/sse",
-            "mcp_sse": "/mcp/sse",
+            "tools": "/mcp/tools",
+            "call_tool": "/mcp/tools/{tool_name}",
+            "sse_stream": "/mcp/sse",
             "mcp_message": "/mcp/message",
-            "chat": "/chat",
-            "openai_functions": "/v1/chat/completions",
+            "voice_action": "/mcp/voice/action",
+            "dashboard": "/mcp/dashboard",
         },
-        "docs": "/docs",
     }
 
 
-@app.get("/health")
-async def health():
-    """Health check endpoint."""
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
-
-
-@app.post("/admin/migrate")
-async def run_migrations():
-    """Run database migrations to add new columns."""
-    try:
-        from app.migrations.add_stripe_columns import run_migration
-        results = run_migration()
-        return {"success": True, "message": "Migrations completed", "details": results}
-    except Exception as e:
-        import traceback
-        return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
-
-
-@app.get("/dashboard", response_class=HTMLResponse)
+@router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     """Serve the real-time TV-style operations dashboard."""
-    dashboard_path = Path(__file__).parent.parent / "app" / "static" / "dashboard.html"
+    dashboard_path = Path(__file__).parent.parent / "static" / "dashboard.html"
     if dashboard_path.exists():
         return HTMLResponse(content=dashboard_path.read_text(), status_code=200)
     else:
@@ -190,7 +109,7 @@ async def dashboard():
         )
 
 
-@app.get("/tools")
+@router.get("/tools")
 async def get_tools():
     """List all available MCP tools."""
     tools = await list_tools()
@@ -206,7 +125,7 @@ async def get_tools():
     }
 
 
-@app.get("/tools/openai")
+@router.get("/tools/openai")
 async def get_tools_openai_format():
     """List tools in OpenAI function calling format."""
     tools = await list_tools()
@@ -222,34 +141,14 @@ async def get_tools_openai_format():
     }
 
 
-@app.post("/tools/{tool_name}")
-async def call_tool(tool_name: str, request: ToolCallRequest, session_id: Optional[str] = None):
-    """
-    Call a specific MCP tool.
-
-    Supports session context for stateful interactions.
-    """
+@router.post("/tools/{tool_name}")
+async def call_tool(tool_name: str, request: ToolCallRequest):
+    """Call a specific MCP tool."""
     db = SessionLocal()
     try:
-        # Get or create session
-        if session_id and session_id in sessions:
-            session = sessions[session_id]
-        else:
-            session = None
-
-        # Execute tool
         result = await _execute_tool(tool_name, request.arguments, db)
 
-        # Update session context
-        if session:
-            if "event_id" in request.arguments:
-                session.last_event_id = request.arguments["event_id"]
-            if "venue_id" in request.arguments:
-                session.last_venue_id = request.arguments["venue_id"]
-            if "ticket_id" in request.arguments:
-                session.last_ticket_id = request.arguments["ticket_id"]
-
-        # Broadcast event via SSE with full result
+        # Broadcast event via SSE
         await sse_manager.broadcast("tool_called", {
             "tool": tool_name,
             "arguments": request.arguments,
@@ -277,32 +176,9 @@ async def call_tool(tool_name: str, request: ToolCallRequest, session_id: Option
         db.close()
 
 
-@app.post("/tools/{tool_name}/stream")
-async def call_tool_stream(tool_name: str, request: ToolCallRequest):
-    """
-    Call a tool with SSE streaming response.
-
-    Useful for long-running operations like sending bulk notifications.
-    """
-    async def generate() -> AsyncGenerator[str, None]:
-        db = SessionLocal()
-        try:
-            yield f"data: {json.dumps({'status': 'started', 'tool': tool_name})}\n\n"
-
-            result = await _execute_tool(tool_name, request.arguments, db)
-
-            yield f"data: {json.dumps({'status': 'completed', 'result': result}, default=str)}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'status': 'error', 'error': str(e)})}\n\n"
-        finally:
-            db.close()
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
-
-
 # ============== SSE Stream ==============
 
-@app.get("/sse")
+@router.get("/sse")
 async def sse_stream(request: Request, session_id: Optional[str] = None):
     """
     Server-Sent Events stream for real-time updates.
@@ -311,7 +187,7 @@ async def sse_stream(request: Request, session_id: Optional[str] = None):
     - tool_called: When any tool is executed
     - ticket_purchased: When a ticket is purchased
     - check_in: When a ticket is checked in
-    - notification_sent: When a notification is sent
+    - refresh: Dashboard refresh command
     """
     if not session_id:
         session_id = str(uuid.uuid4())
@@ -327,12 +203,10 @@ async def sse_stream(request: Request, session_id: Optional[str] = None):
 
         try:
             while True:
-                # Check if client disconnected
                 if await request.is_disconnected():
                     break
 
                 try:
-                    # Wait for events with timeout
                     message = await asyncio.wait_for(queue.get(), timeout=30.0)
                     yield {
                         "event": message["type"],
@@ -352,12 +226,8 @@ async def sse_stream(request: Request, session_id: Optional[str] = None):
 
 # ============== MCP Protocol SSE Transport ==============
 
-# Store pending responses for MCP sessions
-mcp_sessions: dict[str, asyncio.Queue] = {}
-
-
-@app.get("/mcp/sse")
-async def mcp_sse_stream(request: Request):
+@router.get("/protocol/sse")
+async def mcp_protocol_sse_stream(request: Request):
     """
     MCP Protocol SSE Transport endpoint.
 
@@ -389,7 +259,6 @@ async def mcp_sse_stream(request: Request):
                         "data": json.dumps(message, default=str),
                     }
                 except asyncio.TimeoutError:
-                    # Send keepalive ping
                     yield {
                         "event": "ping",
                         "data": "",
@@ -401,7 +270,7 @@ async def mcp_sse_stream(request: Request):
     return EventSourceResponse(event_generator())
 
 
-@app.post("/mcp/message")
+@router.post("/message")
 async def mcp_message(request: Request, session_id: Optional[str] = None):
     """
     Handle MCP JSON-RPC messages.
@@ -411,7 +280,6 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
     - tools/list
     - tools/call
     """
-    # Auto-create session if needed (for clients that POST without SSE)
     if not session_id:
         session_id = str(uuid.uuid4())
     if session_id not in mcp_sessions:
@@ -441,7 +309,6 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
         }
 
     elif method == "notifications/initialized":
-        # Client acknowledged initialization - no response needed
         return {"ok": True}
 
     elif method == "tools/list":
@@ -469,7 +336,6 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
         try:
             result = await _execute_tool(tool_name, arguments, db)
 
-            # Broadcast to dashboard via SSE
             await sse_manager.broadcast("tool_called", {
                 "tool": tool_name,
                 "arguments": arguments,
@@ -477,7 +343,6 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
                 "result": result,
             })
 
-            # Special handling for refresh_dashboard tool
             if tool_name == "refresh_dashboard" and result.get("success"):
                 await sse_manager.broadcast("refresh", {
                     "type": result.get("type", "soft"),
@@ -519,7 +384,6 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
             }
         }
 
-    # Queue response for SSE and also return directly
     if response:
         if session_id in mcp_sessions:
             await mcp_sessions[session_id].put(response)
@@ -528,147 +392,9 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
     return {"ok": True}
 
 
-# ============== Session Management ==============
+# ============== Voice Agent Endpoint ==============
 
-@app.post("/sessions")
-async def create_session():
-    """Create a new session for stateful interactions."""
-    session_id = str(uuid.uuid4())
-    sessions[session_id] = SessionState()
-    return {
-        "session_id": session_id,
-        "created_at": sessions[session_id].created_at.isoformat(),
-    }
-
-
-@app.get("/sessions/{session_id}")
-async def get_session(session_id: str):
-    """Get session context."""
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    session = sessions[session_id]
-    return {
-        "session_id": session_id,
-        "context": session.context,
-        "last_event_id": session.last_event_id,
-        "last_venue_id": session.last_venue_id,
-        "last_ticket_id": session.last_ticket_id,
-        "created_at": session.created_at.isoformat(),
-    }
-
-
-@app.delete("/sessions/{session_id}")
-async def delete_session(session_id: str):
-    """Delete a session."""
-    if session_id in sessions:
-        del sessions[session_id]
-    return {"deleted": True}
-
-
-@app.post("/refresh")
-async def refresh_dashboard(full: bool = False, message: str = None):
-    """
-    Send a refresh command to all connected dashboards.
-
-    Args:
-        full: If true, triggers a full page reload. Otherwise, soft refresh.
-        message: Optional message to display in the activity feed.
-    """
-    await sse_manager.broadcast("refresh", {
-        "type": "full" if full else "soft",
-        "message": message or ("Full refresh triggered" if full else "Data refreshed"),
-        "timestamp": datetime.utcnow().isoformat(),
-    })
-    return {
-        "success": True,
-        "type": "full" if full else "soft",
-        "message": "Refresh command sent to all connected dashboards",
-    }
-
-
-# ============== OpenAI-Compatible Chat Endpoint ==============
-
-@app.post("/v1/chat/completions")
-async def chat_completions(request: ChatRequest):
-    """
-    OpenAI-compatible chat completions endpoint with function calling.
-
-    This allows voice agents that use OpenAI's API format to work directly.
-    """
-    # Get available tools
-    tools = await list_tools()
-    tool_map = {tool.name: tool for tool in tools}
-
-    # Check if function calling is requested
-    if request.function_call:
-        # Determine which function to call
-        if isinstance(request.function_call, dict):
-            function_name = request.function_call.get("name")
-        elif request.function_call == "auto":
-            # Simple heuristic: look for tool names in the last message
-            last_message = request.messages[-1].content.lower() if request.messages else ""
-            function_name = None
-            for tool in tools:
-                if tool.name.replace("_", " ") in last_message:
-                    function_name = tool.name
-                    break
-        else:
-            function_name = None
-
-        if function_name and function_name in tool_map:
-            db = SessionLocal()
-            try:
-                # Extract arguments from message (simplified)
-                result = await _execute_tool(function_name, {}, db)
-
-                return {
-                    "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
-                    "object": "chat.completion",
-                    "created": int(datetime.utcnow().timestamp()),
-                    "model": "mcp-event-tickets",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {
-                                "role": "assistant",
-                                "content": None,
-                                "function_call": {
-                                    "name": function_name,
-                                    "arguments": json.dumps({}),
-                                },
-                            },
-                            "finish_reason": "function_call",
-                        }
-                    ],
-                    "function_result": result,
-                }
-            finally:
-                db.close()
-
-    # Return available functions if no specific call
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
-        "object": "chat.completion",
-        "created": int(datetime.utcnow().timestamp()),
-        "model": "mcp-event-tickets",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "I have access to event ticket management tools. What would you like to do?",
-                },
-                "finish_reason": "stop",
-            }
-        ],
-        "available_functions": [tool.name for tool in tools],
-    }
-
-
-# ============== Voice Agent Specific Endpoints ==============
-
-@app.post("/voice/action")
+@router.post("/voice/action")
 async def voice_action(request: Request):
     """
     Simplified endpoint for voice agents.
@@ -705,15 +431,12 @@ async def voice_action(request: Request):
     }
 
     tool_name = action_map.get(action.lower(), action)
-
-    # Extract arguments
     arguments = {k: v for k, v in body.items() if k != "action"}
 
     db = SessionLocal()
     try:
         result = await _execute_tool(tool_name, arguments, db)
 
-        # Format response for voice
         if "error" in result:
             return {
                 "success": False,
@@ -721,7 +444,6 @@ async def voice_action(request: Request):
                 "data": result,
             }
 
-        # Generate speech-friendly response
         speech = _generate_speech_response(tool_name, result)
 
         return {
@@ -784,44 +506,33 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
         else:
             return "Ticket not found."
 
-    # Default response
     return "Done."
 
 
-# ============== Main ==============
-
-def main():
-    import uvicorn
-
-    parser = argparse.ArgumentParser(description="MCP HTTP/SSE Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=3001, help="Port to bind to")
-    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
-
-    args = parser.parse_args()
-
-    print(f"""
-╔════════════════════════════════════════════════════════════╗
-║         Event Tickets MCP Server (HTTP/SSE)                ║
-╠════════════════════════════════════════════════════════════╣
-║  Endpoints:                                                ║
-║    GET  /tools          - List available tools             ║
-║    POST /tools/{{name}}   - Call a tool                     ║
-║    GET  /sse            - SSE stream for real-time         ║
-║    POST /voice/action   - Voice agent endpoint             ║
-║    POST /v1/chat/completions - OpenAI compatible           ║
-║                                                            ║
-║  Docs: http://{args.host}:{args.port}/docs                          ║
-╚════════════════════════════════════════════════════════════╝
-    """)
-
-    uvicorn.run(
-        "mcp_server.http_server:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-    )
+@router.post("/refresh")
+async def refresh_dashboard(full: bool = False, message: str = None):
+    """
+    Send a refresh command to all connected dashboards.
+    """
+    await sse_manager.broadcast("refresh", {
+        "type": "full" if full else "soft",
+        "message": message or ("Full refresh triggered" if full else "Data refreshed"),
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+    return {
+        "success": True,
+        "type": "full" if full else "soft",
+        "message": "Refresh command sent to all connected dashboards",
+    }
 
 
-if __name__ == "__main__":
-    main()
+@router.post("/admin/migrate")
+async def run_migrations():
+    """Run database migrations to add new columns."""
+    try:
+        from app.migrations.add_stripe_columns import run_migration
+        results = run_migration()
+        return {"success": True, "message": "Migrations completed", "details": results}
+    except Exception as e:
+        import traceback
+        return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
