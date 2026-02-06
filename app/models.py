@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Table
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import enum
@@ -44,6 +44,26 @@ class EventStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+event_category_link = Table(
+    "event_category_link",
+    Base.metadata,
+    Column("event_id", Integer, ForeignKey("events.id"), primary_key=True),
+    Column("category_id", Integer, ForeignKey("event_categories.id"), primary_key=True),
+)
+
+
+class EventCategory(Base):
+    __tablename__ = "event_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    color = Column(String(20), nullable=True)  # Hex color for UI badges
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    events = relationship("Event", secondary=event_category_link, back_populates="categories")
+
+
 class Venue(Base):
     __tablename__ = "venues"
 
@@ -77,6 +97,7 @@ class Event(Base):
     venue = relationship("Venue", back_populates="events")
     ticket_tiers = relationship("TicketTier", back_populates="event", cascade="all, delete-orphan")
     updates = relationship("EventUpdate", back_populates="event", cascade="all, delete-orphan")
+    categories = relationship("EventCategory", secondary=event_category_link, back_populates="events")
 
 
 class EventUpdate(Base):

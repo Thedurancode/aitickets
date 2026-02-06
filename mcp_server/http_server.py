@@ -734,6 +734,12 @@ async def voice_action(request: Request):
         "customer profile": "get_customer_profile",
         "customer info": "get_customer_profile",
         "customer details": "get_customer_profile",
+        # Categories
+        "list categories": "list_categories",
+        "show categories": "list_categories",
+        "event types": "list_categories",
+        "event categories": "list_categories",
+        "categories": "list_categories",
     }
 
     tool_name = action_map.get(action.lower(), action)

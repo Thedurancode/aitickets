@@ -33,6 +33,32 @@ class VenueResponse(VenueBase):
         from_attributes = True
 
 
+# ============== Category Schemas ==============
+
+class EventCategoryBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None  # Hex color e.g. #CE1141
+
+
+class EventCategoryCreate(EventCategoryBase):
+    pass
+
+
+class EventCategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class EventCategoryResponse(EventCategoryBase):
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # ============== Event Schemas ==============
 
 class EventBase(BaseModel):
@@ -44,6 +70,7 @@ class EventBase(BaseModel):
 
 class EventCreate(EventBase):
     venue_id: int
+    category_ids: list[int] = []
 
 
 class EventUpdate(BaseModel):
@@ -52,6 +79,7 @@ class EventUpdate(BaseModel):
     event_date: Optional[str] = None
     event_time: Optional[str] = None
     promo_video_url: Optional[str] = None
+    category_ids: Optional[list[int]] = None
 
 
 class EventResponse(EventBase):
@@ -60,6 +88,7 @@ class EventResponse(EventBase):
     image_url: Optional[str] = None
     promo_video_url: Optional[str] = None
     status: EventStatus = EventStatus.SCHEDULED
+    categories: list[EventCategoryResponse] = []
     created_at: datetime
 
     class Config:

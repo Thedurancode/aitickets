@@ -17,7 +17,7 @@ from app.config import get_settings
 from app.models import (
     Venue, Event, TicketTier, Ticket, EventGoer, TicketStatus,
     Notification, NotificationChannel, NotificationType, EventStatus,
-    CustomerNote, CustomerPreference,
+    CustomerNote, CustomerPreference, EventCategory,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -86,6 +86,25 @@ async def list_tools():
             name="get_branding",
             description="Get organization branding configuration (name, color, logo URL)",
             inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        # Category tools
+        Tool(
+            name="list_categories",
+            description="List all event categories (e.g. Sports, Concerts, Comedy)",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="create_category",
+            description="Create a new event category",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Category name (e.g. Sports, Concerts, Comedy)"},
+                    "description": {"type": "string", "description": "Category description (optional)"},
+                    "color": {"type": "string", "description": "Hex color for UI display (e.g. #CE1141)"},
+                },
+                "required": ["name"],
+            },
         ),
         # Venue tools
         Tool(
@@ -172,6 +191,7 @@ async def list_tools():
                     "description": {"type": "string", "description": "Event description (optional)"},
                     "event_date": {"type": "string", "description": "Date in YYYY-MM-DD format"},
                     "event_time": {"type": "string", "description": "Time in HH:MM format"},
+                    "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of category IDs to assign"},
                 },
                 "required": ["venue_id", "name", "event_date", "event_time"],
             },
@@ -189,6 +209,7 @@ async def list_tools():
                     "event_time": {"type": "string", "description": "New time (optional)"},
                     "image_url": {"type": "string", "description": "Event poster/image URL (optional)"},
                     "promo_video_url": {"type": "string", "description": "YouTube or video URL for event promo (optional)"},
+                    "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of category IDs to assign (replaces existing)"},
                 },
                 "required": ["event_id"],
             },
@@ -215,6 +236,7 @@ async def list_tools():
                     "date_to": {"type": "string", "description": "End date filter YYYY-MM-DD"},
                     "status": {"type": "string", "enum": ["scheduled", "postponed", "cancelled"], "description": "Filter by event status"},
                     "venue_id": {"type": "integer", "description": "Filter by venue ID"},
+                    "category": {"type": "string", "description": "Filter by category name (partial match)"},
                 },
                 "required": [],
             },
@@ -767,6 +789,15 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                     ],
                 },
             },
+            "categories": {
+                    "description": "Events can be tagged with categories (Sports, Concerts, Comedy, etc.)",
+                    "steps": [
+                        "1. Use list_categories to see available categories",
+                        "2. When creating events, pass category_ids to assign categories",
+                        "3. Use search_events with category filter to find events by type",
+                        "4. Use create_category to add new categories (admin only)",
+                    ],
+                },
             "error_recovery": {
                 "customer_not_found": "Use register_customer to create them, then retry",
                 "event_not_found": "Use search_events with a partial name to find the correct event_id",
@@ -788,6 +819,25 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "org_color": settings.org_color,
             "org_logo_url": settings.org_logo_url,
         }
+
+    # ============== Category Tools ==============
+    elif name == "list_categories":
+        categories = db.query(EventCategory).order_by(EventCategory.name).all()
+        return [{"id": c.id, "name": c.name, "description": c.description, "color": c.color} for c in categories]
+
+    elif name == "create_category":
+        existing = db.query(EventCategory).filter(EventCategory.name == arguments["name"]).first()
+        if existing:
+            return {"error": f"Category '{arguments['name']}' already exists"}
+        category = EventCategory(
+            name=arguments["name"],
+            description=arguments.get("description"),
+            color=arguments.get("color"),
+        )
+        db.add(category)
+        db.commit()
+        db.refresh(category)
+        return {"id": category.id, "name": category.name, "description": category.description, "color": category.color}
 
     # ============== Venue Tools ==============
     elif name == "list_venues":
@@ -832,7 +882,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     # ============== Event Tools ==============
     elif name == "list_events":
-        events = db.query(Event).options(joinedload(Event.venue)).all()
+        events = db.query(Event).options(joinedload(Event.venue), joinedload(Event.categories)).all()
         result = []
         for e in events:
             event_dict = _event_to_dict(e)
@@ -843,7 +893,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "get_event":
         event = (
             db.query(Event)
-            .options(joinedload(Event.venue), joinedload(Event.ticket_tiers))
+            .options(joinedload(Event.venue), joinedload(Event.ticket_tiers), joinedload(Event.categories))
             .filter(Event.id == arguments["event_id"])
             .first()
         )
@@ -865,6 +915,10 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             event_date=arguments["event_date"],
             event_time=arguments["event_time"],
         )
+        # Attach categories if provided
+        if arguments.get("category_ids"):
+            categories = db.query(EventCategory).filter(EventCategory.id.in_(arguments["category_ids"])).all()
+            event.categories = categories
         db.add(event)
         db.commit()
         db.refresh(event)
@@ -886,6 +940,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             event.image_url = arguments["image_url"]
         if "promo_video_url" in arguments:
             event.promo_video_url = arguments["promo_video_url"]
+        if "category_ids" in arguments:
+            categories = db.query(EventCategory).filter(EventCategory.id.in_(arguments["category_ids"])).all()
+            event.categories = categories
         db.commit()
         db.refresh(event)
         return _event_to_dict(event)
@@ -898,7 +955,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         return [_event_to_dict(e) for e in events]
 
     elif name == "search_events":
-        query = db.query(Event).options(joinedload(Event.venue))
+        query = db.query(Event).options(joinedload(Event.venue), joinedload(Event.categories))
         if arguments.get("query"):
             query = query.filter(Event.name.ilike(f"%{arguments['query'].strip()}%"))
         if arguments.get("status"):
@@ -909,7 +966,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             query = query.filter(Event.event_date >= arguments["date_from"])
         if arguments.get("date_to"):
             query = query.filter(Event.event_date <= arguments["date_to"])
-        events = query.all()
+        if arguments.get("category"):
+            query = query.join(Event.categories).filter(EventCategory.name.ilike(f"%{arguments['category'].strip()}%"))
+        events = query.unique().all()
         if not events:
             return {"found": False, "message": "No events match your search", "count": 0}
         return {
@@ -2487,6 +2546,9 @@ def _event_to_dict(event: Event) -> dict:
     if event.venue:
         result["venue_name"] = event.venue.name
         result["venue_address"] = event.venue.address
+    # Include categories if loaded
+    if hasattr(event, 'categories') and event.categories:
+        result["categories"] = [{"id": c.id, "name": c.name, "color": c.color} for c in event.categories]
     return result
 
 

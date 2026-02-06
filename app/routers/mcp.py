@@ -460,6 +460,12 @@ async def voice_action(request: Request):
         "customer profile": "get_customer_profile",
         "customer info": "get_customer_profile",
         "customer details": "get_customer_profile",
+        # Categories
+        "list categories": "list_categories",
+        "show categories": "list_categories",
+        "event types": "list_categories",
+        "event categories": "list_categories",
+        "categories": "list_categories",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -574,6 +580,15 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             if result.get("success"):
                 return result.get("message", "Guest checked out successfully.")
             return result.get("message", "Check-out failed.")
+
+    elif tool_name == "list_categories":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "There are no event categories yet."
+            names = [c["name"] for c in result[:5]]
+            if len(result) == 1:
+                return f"There is 1 category: {names[0]}."
+            return f"There are {len(result)} categories: {', '.join(names)}."
 
     return "Done."
 

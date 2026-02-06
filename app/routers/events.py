@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 
 from app.database import get_db
-from app.models import Event, Venue, TicketTier
+from app.models import Event, Venue, TicketTier, EventCategory
 from app.schemas import (
     EventCreate,
     EventUpdate,
@@ -19,9 +19,12 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.get("", response_model=list[EventWithVenueResponse])
-def list_events(db: Session = Depends(get_db)):
-    """List all events with venue information."""
-    events = db.query(Event).options(joinedload(Event.venue)).all()
+def list_events(category: str | None = None, db: Session = Depends(get_db)):
+    """List all events with venue information. Optionally filter by category name."""
+    query = db.query(Event).options(joinedload(Event.venue), joinedload(Event.categories))
+    if category:
+        query = query.join(Event.categories).filter(EventCategory.name.ilike(f"%{category}%"))
+    events = query.all()
     return events
 
 
@@ -30,7 +33,7 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
     """Get event with venue, tiers, and availability."""
     event = (
         db.query(Event)
-        .options(joinedload(Event.venue), joinedload(Event.ticket_tiers))
+        .options(joinedload(Event.venue), joinedload(Event.ticket_tiers), joinedload(Event.categories))
         .filter(Event.id == event_id)
         .first()
     )
@@ -63,6 +66,7 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
         created_at=event.created_at,
         venue=event.venue,
         ticket_tiers=tiers_with_availability,
+        categories=event.categories,
     )
 
 
@@ -74,7 +78,14 @@ def create_event(event: EventCreate, db: Session = Depends(get_db)):
     if not venue:
         raise HTTPException(status_code=404, detail="Venue not found")
 
-    db_event = Event(**event.model_dump())
+    event_data = event.model_dump(exclude={"category_ids"})
+    db_event = Event(**event_data)
+
+    # Attach categories
+    if event.category_ids:
+        categories = db.query(EventCategory).filter(EventCategory.id.in_(event.category_ids)).all()
+        db_event.categories = categories
+
     db.add(db_event)
     db.commit()
     db.refresh(db_event)
@@ -84,11 +95,18 @@ def create_event(event: EventCreate, db: Session = Depends(get_db)):
 @router.put("/{event_id}", response_model=EventResponse)
 def update_event(event_id: int, event: EventUpdate, db: Session = Depends(get_db)):
     """Update an event."""
-    db_event = db.query(Event).filter(Event.id == event_id).first()
+    db_event = db.query(Event).options(joinedload(Event.categories)).filter(Event.id == event_id).first()
     if not db_event:
         raise HTTPException(status_code=404, detail="Event not found")
 
     update_data = event.model_dump(exclude_unset=True)
+
+    # Handle category_ids separately
+    category_ids = update_data.pop("category_ids", None)
+    if category_ids is not None:
+        categories = db.query(EventCategory).filter(EventCategory.id.in_(category_ids)).all()
+        db_event.categories = categories
+
     for field, value in update_data.items():
         setattr(db_event, field, value)
 
