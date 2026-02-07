@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Events{% endblock %} | {{ org_name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: '{{ org_color }}',
+                        'brand-dark': '{{ org_color }}cc',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-fallback {
+            background: linear-gradient(135deg, {{ org_color }}44, {{ org_color }}11);
+        }
+    </style>
+    {% block og_meta %}
+    <meta property="og:title" content="{{ org_name }} Events">
+    <meta property="og:type" content="website">
+    {% endblock %}
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex flex-col">
+    <!-- Navigation -->
+    <nav class="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-4">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <a href="/events" class="flex items-center gap-3 hover:opacity-90 transition-opacity">
+                {% if org_logo_url %}
+                <img src="{{ org_logo_url }}" alt="{{ org_name }}" class="h-10 w-10 object-contain">
+                {% endif %}
+                <span class="text-xl font-bold text-white">{{ org_name }}</span>
+            </a>
+            <a href="/events" class="text-sm text-gray-400 hover:text-white transition-colors">All Events</a>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 border-t border-gray-800 mt-auto py-8">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 text-center text-gray-500 text-sm">
+            &copy; {{ org_name }}. All rights reserved.
+        </div>
+    </footer>
+
+    <!-- Analytics Tracking -->
+    <script>
+        (function() {
+            var params = new URLSearchParams(window.location.search);
+            fetch('/api/analytics/track', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    page: '{{ page_type }}',
+                    event_id: {{ event_id if event_id else 'null' }},
+                    referrer: document.referrer || '',
+                    utm_source: params.get('utm_source') || '',
+                    utm_medium: params.get('utm_medium') || '',
+                    utm_campaign: params.get('utm_campaign') || ''
+                })
+            }).catch(function() {});
+        })();
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

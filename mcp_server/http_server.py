@@ -782,6 +782,13 @@ async def voice_action(request: Request):
         "deactivate promo code": "deactivate_promo_code",
         "disable promo code": "deactivate_promo_code",
         "remove promo code": "deactivate_promo_code",
+        # Analytics
+        "event analytics": "get_event_analytics",
+        "page views": "get_event_analytics",
+        "event page views": "get_event_analytics",
+        "analytics": "get_event_analytics",
+        "traffic": "get_event_analytics",
+        "how many views": "get_event_analytics",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -1211,6 +1218,17 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     elif tool_name == "deactivate_promo_code":
         if isinstance(result, dict):
             return result.get("message", result.get("error", "Could not deactivate promo code."))
+
+    # ============== Analytics ==============
+    elif tool_name == "get_event_analytics":
+        if isinstance(result, dict):
+            views = result.get("total_views", 0)
+            unique = result.get("unique_visitors", 0)
+            days = result.get("period_days", 30)
+            if result.get("event_id"):
+                name = result.get("event_name", "the event")
+                return f"In the last {days} days, {name} had {views} page views from {unique} unique visitors."
+            return f"In the last {days} days, all event pages had {views} total views from {unique} unique visitors."
 
     # ============== Dashboard ==============
     elif tool_name == "refresh_dashboard":

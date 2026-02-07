@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+
+{% block title %}{{ event.name }}{% endblock %}
+
+{% block og_meta %}
+<meta property="og:title" content="{{ event.name }} | {{ org_name }}">
+<meta property="og:description" content="{{ event.description[:160] if event.description else 'Get tickets for ' + event.name }}">
+<meta property="og:type" content="event">
+{% if event.image_url %}
+<meta property="og:image" content="{{ event.image_url }}">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<!-- Back link -->
+<a href="/events" class="inline-flex items-center gap-1 text-gray-400 hover:text-white text-sm mb-6 transition-colors">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+    </svg>
+    All Events
+</a>
+
+{% if event.status.value != "scheduled" %}
+<!-- Status Banner -->
+<div class="mb-6 p-4 rounded-lg border {% if event.status.value == 'cancelled' %}bg-red-900/30 border-red-800 text-red-300{% else %}bg-yellow-900/30 border-yellow-800 text-yellow-300{% endif %}">
+    <span class="font-semibold uppercase">{{ event.status.value }}</span>
+    {% if event.cancellation_reason %}
+    <span class="ml-2">— {{ event.cancellation_reason }}</span>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+    <!-- Left Column: Event Details -->
+    <div class="lg:col-span-2 space-y-6">
+        <!-- Hero Image -->
+        <div class="aspect-[16/9] rounded-xl overflow-hidden">
+            {% if event.image_url %}
+            <img src="{{ event.image_url }}" alt="{{ event.name }}" class="w-full h-full object-cover">
+            {% else %}
+            <div class="w-full h-full gradient-fallback flex items-center justify-center">
+                <span class="text-6xl font-bold text-white/10">{{ event.name[:3] | upper }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Event Info -->
+        <div>
+            <!-- Categories -->
+            {% if event.categories %}
+            <div class="flex flex-wrap gap-2 mb-4">
+                {% for cat in event.categories %}
+                <a href="/events?category={{ cat.name }}" class="px-3 py-1 rounded-full text-xs font-medium hover:opacity-80 transition-opacity"
+                   style="background-color: {{ cat.color or org_color }}33; color: {{ cat.color or org_color }};">
+                    {{ cat.name }}
+                </a>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <h1 class="text-3xl sm:text-4xl font-extrabold mb-4">{{ event.name }}</h1>
+
+            <!-- Date, Time, Venue -->
+            <div class="space-y-3 mb-6">
+                <div class="flex items-center gap-3 text-gray-300">
+                    <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    <span class="text-lg">{{ event.event_date }} at {{ event.event_time }}</span>
+                </div>
+                {% if event.venue %}
+                <div class="flex items-center gap-3 text-gray-300">
+                    <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <div>
+                        <span class="text-lg">{{ event.venue.name }}</span>
+                        {% if event.venue.address %}
+                        <span class="block text-sm text-gray-500">{{ event.venue.address }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Description -->
+            {% if event.description %}
+            <div class="prose prose-invert max-w-none">
+                <p class="text-gray-300 leading-relaxed whitespace-pre-line">{{ event.description }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Promo Video -->
+        {% if event.promo_video_url %}
+        <div class="mt-6">
+            <h2 class="text-xl font-bold mb-4">Preview</h2>
+            <div class="aspect-video rounded-xl overflow-hidden bg-gray-900" id="video-container">
+                <!-- JS will embed the appropriate player -->
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Share -->
+        <div class="flex items-center gap-3 pt-4 border-t border-gray-800">
+            <span class="text-sm text-gray-500">Share:</span>
+            <button onclick="copyLink()" id="copy-btn" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition-colors">
+                Copy Link
+            </button>
+        </div>
+    </div>
+
+    <!-- Right Column: Tickets -->
+    <div class="space-y-4">
+        <div class="sticky top-6">
+            <h2 class="text-xl font-bold mb-4">Tickets</h2>
+
+            {% if event.status.value == "scheduled" %}
+            <!-- Ticket Tiers -->
+            <div class="space-y-3" id="tiers-container">
+                {% for tier in tiers %}
+                <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 tier-card" data-tier-id="{{ tier.id }}" data-price="{{ tier.price_cents }}">
+                    <div class="flex justify-between items-start mb-2">
+                        <h3 class="font-semibold text-lg">{{ tier.name }}</h3>
+                        <div class="text-right">
+                            <span class="text-xl font-bold text-brand original-price">{{ tier.price_display }}</span>
+                            <span class="discounted-price hidden text-xl font-bold text-brand"></span>
+                        </div>
+                    </div>
+                    {% if tier.description %}
+                    <p class="text-sm text-gray-400 mb-3">{{ tier.description }}</p>
+                    {% endif %}
+                    {% if tier.sold_out %}
+                    <div class="text-red-400 font-medium text-sm">Sold Out</div>
+                    {% else %}
+                    <div class="text-xs text-gray-500 mb-3">{{ tier.remaining }} remaining</div>
+                    <button onclick="selectTier({{ tier.id }})" class="w-full bg-brand hover:bg-brand-dark text-white py-2.5 rounded-lg font-medium transition-colors select-btn">
+                        Get Tickets
+                    </button>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Purchase Form (hidden until tier selected) -->
+            <div id="purchase-form" class="hidden mt-4 bg-gray-900 border border-brand/30 rounded-xl p-5 space-y-4">
+                <h3 class="font-semibold" id="selected-tier-name"></h3>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Name</label>
+                    <input type="text" id="buyer-name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Email</label>
+                    <input type="email" id="buyer-email" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand" required>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Quantity</label>
+                    <select id="buyer-qty" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand">
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                    </select>
+                </div>
+
+                <!-- Promo Code -->
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Promo Code (optional)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="promo-code" placeholder="Enter code" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white uppercase focus:outline-none focus:border-brand">
+                        <button onclick="validatePromo()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">Apply</button>
+                    </div>
+                    <div id="promo-result" class="mt-2 text-sm hidden"></div>
+                </div>
+
+                <div id="price-summary" class="text-sm text-gray-400 pt-2 border-t border-gray-800"></div>
+
+                <button onclick="purchase()" id="buy-btn" class="w-full bg-brand hover:bg-brand-dark text-white py-3 rounded-lg font-semibold text-lg transition-colors">
+                    Buy Tickets
+                </button>
+                <div id="purchase-error" class="text-red-400 text-sm hidden"></div>
+                <div id="purchase-success" class="text-green-400 text-sm hidden"></div>
+            </div>
+
+            <!-- Promo Code (quick access for non-selected) -->
+            {% else %}
+            <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 text-center">
+                <p class="text-gray-400">This event is {{ event.status.value }}. Tickets are not available.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var eventId = {{ event.id }};
+var selectedTierId = null;
+var promoDiscount = null;
+
+{% if event.promo_video_url %}
+(function() {
+    var url = "{{ event.promo_video_url }}";
+    var container = document.getElementById('video-container');
+    var ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?]+)/);
+    if (ytMatch) {
+        container.innerHTML = '<iframe src="https://www.youtube.com/embed/' + ytMatch[1] + '" class="w-full h-full" frameborder="0" allowfullscreen></iframe>';
+    } else {
+        container.innerHTML = '<video src="' + url + '" controls class="w-full h-full"></video>';
+    }
+})();
+{% endif %}
+
+function selectTier(tierId) {
+    selectedTierId = tierId;
+    promoDiscount = null;
+    var card = document.querySelector('[data-tier-id="' + tierId + '"]');
+    var tierName = card.querySelector('h3').textContent;
+    var price = parseInt(card.dataset.price);
+
+    document.getElementById('selected-tier-name').textContent = tierName;
+    document.getElementById('purchase-form').classList.remove('hidden');
+    document.getElementById('promo-result').classList.add('hidden');
+    document.getElementById('purchase-error').classList.add('hidden');
+    document.getElementById('purchase-success').classList.add('hidden');
+    document.getElementById('promo-code').value = '';
+    updatePriceSummary(price);
+
+    // Reset all discounted prices
+    document.querySelectorAll('.discounted-price').forEach(function(el) { el.classList.add('hidden'); });
+    document.querySelectorAll('.original-price').forEach(function(el) {
+        el.classList.remove('line-through', 'text-gray-500', 'text-sm');
+    });
+
+    document.getElementById('purchase-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function updatePriceSummary(priceCents) {
+    var qty = parseInt(document.getElementById('buyer-qty').value);
+    var total = priceCents * qty;
+    var summary = document.getElementById('price-summary');
+    if (total === 0) {
+        summary.innerHTML = '<span class="text-green-400 font-medium">Free!</span>';
+    } else {
+        summary.innerHTML = 'Total: <span class="text-white font-semibold">$' + (total / 100).toFixed(2) + '</span>';
+    }
+}
+
+document.getElementById('buyer-qty').addEventListener('change', function() {
+    if (selectedTierId) {
+        var card = document.querySelector('[data-tier-id="' + selectedTierId + '"]');
+        var price = promoDiscount ? promoDiscount.discounted_price_cents : parseInt(card.dataset.price);
+        updatePriceSummary(price);
+    }
+});
+
+function validatePromo() {
+    var code = document.getElementById('promo-code').value.trim();
+    var result = document.getElementById('promo-result');
+    if (!code || !selectedTierId) return;
+
+    result.classList.remove('hidden');
+    result.className = 'mt-2 text-sm text-gray-400';
+    result.textContent = 'Checking...';
+
+    fetch('/api/promo-codes/validate?code=' + encodeURIComponent(code) + '&ticket_tier_id=' + selectedTierId, {
+        method: 'POST'
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.valid) {
+            promoDiscount = data;
+            result.className = 'mt-2 text-sm text-green-400';
+            result.textContent = data.message;
+            updatePriceSummary(data.discounted_price_cents);
+
+            // Update price display on tier card
+            var card = document.querySelector('[data-tier-id="' + selectedTierId + '"]');
+            var orig = card.querySelector('.original-price');
+            var disc = card.querySelector('.discounted-price');
+            orig.classList.add('line-through', 'text-gray-500', 'text-sm');
+            if (data.discounted_price_cents === 0) {
+                disc.textContent = 'Free';
+            } else {
+                disc.textContent = '$' + (data.discounted_price_cents / 100).toFixed(2);
+            }
+            disc.classList.remove('hidden');
+        } else {
+            promoDiscount = null;
+            result.className = 'mt-2 text-sm text-red-400';
+            result.textContent = data.message || 'Invalid promo code';
+            // Reset price
+            var card = document.querySelector('[data-tier-id="' + selectedTierId + '"]');
+            updatePriceSummary(parseInt(card.dataset.price));
+        }
+    })
+    .catch(function() {
+        result.className = 'mt-2 text-sm text-red-400';
+        result.textContent = 'Error validating code';
+    });
+}
+
+function purchase() {
+    var name = document.getElementById('buyer-name').value.trim();
+    var email = document.getElementById('buyer-email').value.trim();
+    var qty = parseInt(document.getElementById('buyer-qty').value);
+    var promoCode = document.getElementById('promo-code').value.trim();
+
+    var errEl = document.getElementById('purchase-error');
+    var successEl = document.getElementById('purchase-success');
+    errEl.classList.add('hidden');
+    successEl.classList.add('hidden');
+
+    if (!name || !email) {
+        errEl.textContent = 'Please fill in your name and email.';
+        errEl.classList.remove('hidden');
+        return;
+    }
+
+    var btn = document.getElementById('buy-btn');
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+
+    var body = {
+        ticket_tier_id: selectedTierId,
+        quantity: qty,
+        name: name,
+        email: email
+    };
+    if (promoCode) body.promo_code = promoCode;
+
+    fetch('/api/tickets/events/' + eventId + '/purchase', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    })
+    .then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })
+    .then(function(res) {
+        if (!res.ok) {
+            errEl.textContent = res.data.detail || 'Purchase failed. Please try again.';
+            errEl.classList.remove('hidden');
+            btn.disabled = false;
+            btn.textContent = 'Buy Tickets';
+            return;
+        }
+
+        if (res.data.checkout_url) {
+            // Redirect to Stripe
+            window.location.href = res.data.checkout_url;
+        } else if (res.data.tickets || res.data.message) {
+            // Free ticket - show success inline
+            successEl.innerHTML = '<div class="p-4 bg-green-900/30 border border-green-800 rounded-lg">' +
+                '<p class="font-semibold text-green-300 mb-1">Tickets confirmed!</p>' +
+                '<p class="text-green-400">' + (res.data.message || 'Check your email for ticket details.') + '</p></div>';
+            successEl.classList.remove('hidden');
+            btn.disabled = true;
+            btn.textContent = 'Purchased!';
+        }
+    })
+    .catch(function() {
+        errEl.textContent = 'Network error. Please try again.';
+        errEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Buy Tickets';
+    });
+}
+
+function copyLink() {
+    navigator.clipboard.writeText(window.location.href).then(function() {
+        var btn = document.getElementById('copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy Link'; }, 2000);
+    });
+}
+</script>
+{% endblock %}

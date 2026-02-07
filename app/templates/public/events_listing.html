@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Upcoming Events{% endblock %}
+
+{% block og_meta %}
+<meta property="og:title" content="Upcoming Events | {{ org_name }}">
+<meta property="og:description" content="Browse upcoming events from {{ org_name }}">
+<meta property="og:type" content="website">
+{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="mb-8">
+    <h1 class="text-3xl sm:text-4xl font-extrabold mb-2">Upcoming Events</h1>
+    <p class="text-gray-400">Find your next experience</p>
+</div>
+
+<!-- Search + Filters -->
+<div class="mb-8 space-y-4">
+    <form method="get" action="/events" class="flex gap-3">
+        <input
+            type="text"
+            name="search"
+            value="{{ search_query or '' }}"
+            placeholder="Search events..."
+            class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+        >
+        {% if selected_category %}
+        <input type="hidden" name="category" value="{{ selected_category }}">
+        {% endif %}
+        <button type="submit" class="bg-brand hover:bg-brand-dark text-white px-6 py-2.5 rounded-lg font-medium transition-colors">
+            Search
+        </button>
+    </form>
+
+    <!-- Category Pills -->
+    {% if categories %}
+    <div class="flex flex-wrap gap-2">
+        <a href="/events{% if search_query %}?search={{ search_query }}{% endif %}"
+           class="px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+                  {% if not selected_category %}bg-brand text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
+            All
+        </a>
+        {% for cat in categories %}
+        <a href="/events?category={{ cat.name }}{% if search_query %}&search={{ search_query }}{% endif %}"
+           class="px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+                  {% if selected_category == cat.name %}text-white{% else %}text-gray-300 hover:opacity-80{% endif %}"
+           style="background-color: {% if selected_category == cat.name %}{{ cat.color or org_color }}{% else %}{{ cat.color or org_color }}33{% endif %};">
+            {{ cat.name }}
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Event Cards Grid -->
+{% if events %}
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    {% for event in events %}
+    <a href="/events/{{ event.id }}" class="group bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-brand/50 transition-all hover:shadow-lg hover:shadow-brand/5">
+        <!-- Image -->
+        <div class="aspect-[16/9] overflow-hidden">
+            {% if event.image_url %}
+            <img src="{{ event.image_url }}" alt="{{ event.name }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+            {% else %}
+            <div class="w-full h-full gradient-fallback flex items-center justify-center">
+                <span class="text-4xl font-bold text-white/20">{{ event.name[:2] | upper }}</span>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Content -->
+        <div class="p-5">
+            <!-- Categories -->
+            {% if event.categories %}
+            <div class="flex flex-wrap gap-1.5 mb-3">
+                {% for cat in event.categories %}
+                <span class="px-2 py-0.5 rounded text-xs font-medium" style="background-color: {{ cat.color or org_color }}33; color: {{ cat.color or org_color }};">
+                    {{ cat.name }}
+                </span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <h2 class="text-lg font-bold mb-2 group-hover:text-brand transition-colors">{{ event.name }}</h2>
+
+            <!-- Date & Time -->
+            <div class="flex items-center gap-2 text-sm text-gray-400 mb-1">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                <span>{{ event.event_date }} at {{ event.event_time }}</span>
+            </div>
+
+            <!-- Venue -->
+            {% if event.venue %}
+            <div class="flex items-center gap-2 text-sm text-gray-400 mb-3">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+                <span>{{ event.venue.name }}</span>
+            </div>
+            {% endif %}
+
+            <!-- Price Range & Availability -->
+            <div class="flex items-center justify-between pt-3 border-t border-gray-800">
+                {% set prices = event.ticket_tiers | map(attribute='price') | list %}
+                {% if prices %}
+                    {% set min_price = prices | min %}
+                    {% if min_price == 0 %}
+                    <span class="text-brand font-semibold">Free</span>
+                    {% else %}
+                    <span class="text-brand font-semibold">From ${{ "%.2f" | format(min_price / 100) }}</span>
+                    {% endif %}
+                {% else %}
+                <span class="text-gray-500">No tickets</span>
+                {% endif %}
+
+                {% set total_remaining = event.ticket_tiers | map(attribute='quantity_available') | sum - event.ticket_tiers | map(attribute='quantity_sold') | sum %}
+                {% if total_remaining > 0 %}
+                <span class="text-xs text-gray-500">{{ total_remaining }} tickets left</span>
+                {% else %}
+                <span class="text-xs text-red-400 font-medium">Sold Out</span>
+                {% endif %}
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% else %}
+<!-- Empty State -->
+<div class="text-center py-20">
+    <div class="text-6xl mb-4 opacity-20">🎪</div>
+    <h2 class="text-xl font-semibold text-gray-400 mb-2">No events found</h2>
+    <p class="text-gray-500 mb-6">
+        {% if search_query or selected_category %}
+        Try adjusting your search or filters.
+        {% else %}
+        Check back soon for upcoming events!
+        {% endif %}
+    </p>
+    {% if search_query or selected_category %}
+    <a href="/events" class="text-brand hover:underline">View all events</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

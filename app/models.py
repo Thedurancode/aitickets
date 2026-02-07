@@ -306,3 +306,18 @@ class PromoCode(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     event = relationship("Event")
+
+
+class PageView(Base):
+    __tablename__ = "page_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # null for listing page
+    page = Column(String(50), nullable=False)  # "listing" or "detail"
+    ip_hash = Column(String(64), nullable=False)
+    user_agent = Column(String(500), nullable=True)
+    referrer = Column(String(500), nullable=True)
+    utm_source = Column(String(100), nullable=True)
+    utm_medium = Column(String(100), nullable=True)
+    utm_campaign = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)

@@ -690,6 +690,19 @@ async def list_tools():
                 "required": ["code"],
             },
         ),
+        # ============== Analytics Tools ==============
+        Tool(
+            name="get_event_analytics",
+            description="Get page view analytics for an event or overall (total views, unique visitors, top referrers, traffic sources)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID (optional — omit for overall analytics across all events)"},
+                    "days": {"type": "integer", "description": "Number of days to look back (default 30)"},
+                },
+                "required": [],
+            },
+        ),
         # ============== Phone Verification Tools ==============
         Tool(
             name="send_verification_code",
@@ -3073,6 +3086,52 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "code": promo.code,
             "message": f"Promo code '{promo.code}' has been deactivated.",
         }
+
+    # ============== Analytics ==============
+    elif name == "get_event_analytics":
+        from app.models import PageView
+        from sqlalchemy import func as sqlfunc
+
+        days = arguments.get("days", 30)
+        event_id = arguments.get("event_id")
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        base_filter = [PageView.created_at >= cutoff]
+        if event_id:
+            base_filter.append(PageView.event_id == event_id)
+
+        total_views = db.query(sqlfunc.count(PageView.id)).filter(*base_filter).scalar()
+        unique_visitors = db.query(sqlfunc.count(sqlfunc.distinct(PageView.ip_hash))).filter(*base_filter).scalar()
+
+        top_referrers = (
+            db.query(PageView.referrer, sqlfunc.count(PageView.id).label("count"))
+            .filter(*base_filter, PageView.referrer != None, PageView.referrer != "")
+            .group_by(PageView.referrer)
+            .order_by(sqlfunc.count(PageView.id).desc())
+            .limit(5)
+            .all()
+        )
+
+        utm_sources = (
+            db.query(PageView.utm_source, sqlfunc.count(PageView.id).label("count"))
+            .filter(*base_filter, PageView.utm_source != None)
+            .group_by(PageView.utm_source)
+            .order_by(sqlfunc.count(PageView.id).desc())
+            .limit(5)
+            .all()
+        )
+
+        result = {
+            "period_days": days,
+            "total_views": total_views,
+            "unique_visitors": unique_visitors,
+            "top_referrers": [{"referrer": r, "count": c} for r, c in top_referrers],
+            "utm_sources": [{"source": s, "count": c} for s, c in utm_sources],
+        }
+        if event_id:
+            event = db.query(Event).filter(Event.id == event_id).first()
+            result["event_id"] = event_id
+            result["event_name"] = event.name if event else "Unknown"
+        return result
 
     return {"error": f"Unknown tool: {name}"}
 
