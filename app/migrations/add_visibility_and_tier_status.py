@@ -19,7 +19,7 @@ def run_migration():
 
         if "is_visible" not in existing_event_columns:
             conn.execute(text(
-                "ALTER TABLE events ADD COLUMN is_visible BOOLEAN DEFAULT 1"
+                "ALTER TABLE events ADD COLUMN is_visible BOOLEAN DEFAULT TRUE"
             ))
             conn.commit()
             results.append("Added is_visible to events")
