@@ -13,6 +13,7 @@ from sqlalchemy import func
 from app.database import get_db
 from app.models import Event, EventCategory, EventStatus, PageView
 from app.config import get_settings
+from app.routers.announcement_queue import queue_announcement
 
 router = APIRouter(tags=["public"])
 
@@ -233,6 +234,16 @@ async def admin_update_event(
 
     db.commit()
     db.refresh(event)
+
+    # Broadcast SSE + queue voice announcement
+    from app.routers.mcp import sse_manager
+    await sse_manager.broadcast("event_updated", {
+        "event_id": event.id,
+        "event_name": event.name,
+        "action": "details_updated",
+    })
+    queue_announcement(event.id, event.name, "details_updated")
+
     return {"success": True, "message": "Event updated"}
 
 
@@ -268,4 +279,14 @@ async def admin_upload_image(
     event.image_url = f"/uploads/{filename}"
     db.commit()
     db.refresh(event)
+
+    # Broadcast SSE + queue voice announcement
+    from app.routers.mcp import sse_manager
+    await sse_manager.broadcast("event_updated", {
+        "event_id": event.id,
+        "event_name": event.name,
+        "action": "image_uploaded",
+    })
+    queue_announcement(event.id, event.name, "image_uploaded")
+
     return {"success": True, "image_url": event.image_url}

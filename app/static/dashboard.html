@@ -1341,6 +1341,19 @@
                 }
             });
 
+            eventSource.addEventListener('event_updated', (e) => {
+                const data = JSON.parse(e.data);
+                const actionLabels = {
+                    'details_updated': 'updated event details for',
+                    'image_uploaded': 'uploaded a new image for',
+                    'visibility_changed': 'changed visibility of',
+                };
+                const label = actionLabels[data.action] || 'updated';
+                addActivity('admin', 'Promoter Update', `Promoter ${label} ${data.event_name}`, '✏️');
+                loadInitialData();
+                refreshTicker();
+            });
+
             eventSource.onerror = () => {
                 statusEl.className = 'connection-status disconnected';
                 statusEl.innerHTML = '<div class="live-dot" style="background: #ff0000;"></div><span>Reconnecting...</span>';

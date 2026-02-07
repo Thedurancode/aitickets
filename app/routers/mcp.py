@@ -578,6 +578,16 @@ async def voice_action(request: Request):
 
         speech = _generate_speech_response(tool_name, result)
 
+        # Prepend any pending announcements from admin page changes
+        from app.routers.announcement_queue import (
+            get_pending_announcements, format_announcement_speech, clear_announcements,
+        )
+        pending = get_pending_announcements()
+        announcement = format_announcement_speech(pending)
+        if announcement:
+            speech = f"{announcement} {speech}"
+            clear_announcements()
+
         return {
             "success": True,
             "speech": speech,

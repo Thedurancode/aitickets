@@ -294,22 +294,5 @@ function saveDetails() {
     });
 }
 
-var isVisible = {{ 'true' if event.is_visible else 'false' }};
-function toggleVisibility() {
-    isVisible = !isVisible;
-    fetch('/events/' + eventId + '/admin', {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({token: token, is_visible: isVisible})
-    })
-    .then(function(r) { return r.json(); })
-    .then(function() {
-        var btn = document.getElementById('visibility-btn');
-        btn.textContent = isVisible ? 'LIVE' : 'HIDDEN';
-        btn.className = 'px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors ' +
-            (isVisible ? 'bg-green-900/50 text-green-400 hover:bg-red-900/50 hover:text-red-400' :
-                         'bg-red-900/50 text-red-400 hover:bg-green-900/50 hover:text-green-400');
-    });
-}
 </script>
 {% endblock %}
