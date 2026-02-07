@@ -531,6 +531,35 @@ async def voice_action(request: Request):
         "upload event image": "send_admin_link",
         "manage event link": "send_admin_link",
         "event admin link": "send_admin_link",
+        # Event visibility
+        "hide event": "set_event_visibility",
+        "hide the event": "set_event_visibility",
+        "make event live": "set_event_visibility",
+        "make event visible": "set_event_visibility",
+        "show event": "set_event_visibility",
+        "publish event": "set_event_visibility",
+        # Bulk ticket controls
+        "turn off all tickets": "toggle_all_tickets",
+        "disable all tickets": "toggle_all_tickets",
+        "pause all tickets": "toggle_all_tickets",
+        "turn on all tickets": "toggle_all_tickets",
+        "enable all tickets": "toggle_all_tickets",
+        "activate all tickets": "toggle_all_tickets",
+        "make tickets live": "toggle_all_tickets",
+        "open ticket sales": "toggle_all_tickets",
+        "close ticket sales": "toggle_all_tickets",
+        # Add tickets
+        "add more tickets": "add_tickets",
+        "add tickets": "add_tickets",
+        "add another": "add_tickets",
+        "increase tickets": "add_tickets",
+        "increase inventory": "add_tickets",
+        # Update tier
+        "update ticket tier": "update_ticket_tier",
+        "update tier": "update_ticket_tier",
+        "change tier": "update_ticket_tier",
+        "pause tier": "update_ticket_tier",
+        "activate tier": "update_ticket_tier",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -812,6 +841,51 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             price = result.get("price_cents", result.get("price", 0)) / 100
             return f"Tier '{result.get('name', '')}' created at ${price:.2f} with {result.get('quantity_available', 0)} tickets."
 
+    elif tool_name == "update_ticket_tier":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            tier_name = result.get("tier", {}).get("name", "the tier")
+            changes = result.get("changes", [])
+            change_str = ", ".join(changes[:3]) if changes else "no changes"
+            return f"Updated {tier_name}: {change_str}."
+
+    elif tool_name == "toggle_all_tickets":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            count = result.get("updated_count", 0)
+            status = result.get("new_status", "")
+            event = result.get("event", "the event")
+            skipped = result.get("skipped_sold_out", 0)
+            msg = f"{count} ticket tier{'s' if count != 1 else ''} for {event} {'are' if count != 1 else 'is'} now {status}."
+            if skipped:
+                msg += f" ({skipped} sold-out tier{'s' if skipped != 1 else ''} skipped.)"
+            return msg
+
+    elif tool_name == "add_tickets":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            action = result.get("action")
+            tier = result.get("tier", {})
+            event = result.get("event", "the event")
+            if action == "increased":
+                added = result.get("added", 0)
+                new_qty = result.get("new_quantity", 0)
+                return f"Added {added} tickets to {tier.get('name', 'the tier')} for {event}. New total: {new_qty}."
+            else:
+                price = tier.get("price_cents", 0) / 100
+                qty = result.get("quantity", 0)
+                return f"Created new tier '{tier.get('name', '')}' with {qty} tickets at ${price:.2f} for {event}."
+
+    elif tool_name == "set_event_visibility":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            action = result.get("action", "updated")
+            return f"Event '{result.get('event', '')}' has been {action}."
+
     elif tool_name == "sync_tiers_to_stripe":
         if isinstance(result, dict):
             return f"Stripe sync complete. {result.get('synced', 0)} tiers synced."
@@ -988,6 +1062,54 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             if result.get("success"):
                 return f"Done! I sent the admin link for {event_name} to the phone ending in {sent_to}. It expires in 1 hour."
             return f"I generated the admin link for {event_name} but couldn't send the SMS. The promoter can use this link: {result.get('admin_url', '')}"
+
+    # ============== Event Visibility ==============
+    elif tool_name == "set_event_visibility":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            event_name = result.get("event", "the event")
+            action = result.get("action", "updated")
+            return f"Event '{event_name}' has been {action}."
+
+    # ============== Ticket Tier Controls ==============
+    elif tool_name == "update_ticket_tier":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            tier_name = result.get("tier", {}).get("name", "the tier")
+            changes = result.get("changes", [])
+            change_str = ", ".join(changes[:3]) if changes else "updated"
+            return f"Updated {tier_name}: {change_str}."
+
+    elif tool_name == "toggle_all_tickets":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            count = result.get("updated_count", 0)
+            status = result.get("new_status", "")
+            event_name = result.get("event", "the event")
+            skipped = result.get("skipped_sold_out", 0)
+            msg = f"{count} ticket tier{'s' if count != 1 else ''} for {event_name} {'are' if count != 1 else 'is'} now {status}."
+            if skipped:
+                msg += f" {skipped} sold-out tier{'s' if skipped != 1 else ''} skipped."
+            return msg
+
+    elif tool_name == "add_tickets":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            action = result.get("action")
+            tier_name = result.get("tier", {}).get("name", "")
+            event_name = result.get("event", "")
+            if action == "increased":
+                added = result.get("added", 0)
+                new_qty = result.get("new_quantity", 0)
+                return f"Added {added} tickets to {tier_name} for {event_name}. New total: {new_qty}."
+            else:
+                qty = result.get("quantity", 0)
+                price = result.get("tier", {}).get("price_cents", 0) / 100
+                return f"Created new tier '{tier_name}' with {qty} tickets at ${price:.2f} for {event_name}."
 
     # ============== Dashboard ==============
     elif tool_name == "refresh_dashboard":

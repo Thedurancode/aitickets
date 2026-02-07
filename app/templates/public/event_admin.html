@@ -66,6 +66,10 @@
                     </div>
                 </div>
                 <div>
+                    <label class="block text-sm text-gray-400 mb-1">Doors Open</label>
+                    <input type="time" id="field-doors" value="{{ event.doors_open_time or '' }}" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-brand">
+                </div>
+                <div>
                     <label class="block text-sm text-gray-400 mb-1">Promo Video URL</label>
                     <input type="url" id="field-video" value="{{ event.promo_video_url or '' }}" placeholder="https://youtube.com/watch?v=..." class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-brand">
                 </div>
@@ -92,6 +96,14 @@
                             {% else %}bg-red-900/50 text-red-400{% endif %}">
                             {{ event.status.value | upper }}
                         </span>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <span class="text-gray-400 text-sm">Visibility</span>
+                        <button onclick="toggleVisibility()" id="visibility-btn" class="px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors
+                            {% if event.is_visible %}bg-green-900/50 text-green-400 hover:bg-red-900/50 hover:text-red-400
+                            {% else %}bg-red-900/50 text-red-400 hover:bg-green-900/50 hover:text-green-400{% endif %}">
+                            {{ 'LIVE' if event.is_visible else 'HIDDEN' }}
+                        </button>
                     </div>
                     <div class="flex justify-between">
                         <span class="text-gray-400 text-sm">Venue</span>
@@ -161,6 +173,27 @@
 <script>
 var eventId = {{ event.id }};
 var token = '{{ token }}';
+var isVisible = {{ 'true' if event.is_visible else 'false' }};
+
+function toggleVisibility() {
+    isVisible = !isVisible;
+    fetch('/events/' + eventId + '/admin', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({token: token, is_visible: isVisible})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+        var btn = document.getElementById('visibility-btn');
+        if (isVisible) {
+            btn.textContent = 'LIVE';
+            btn.className = 'px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors bg-green-900/50 text-green-400 hover:bg-red-900/50 hover:text-red-400';
+        } else {
+            btn.textContent = 'HIDDEN';
+            btn.className = 'px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors bg-red-900/50 text-red-400 hover:bg-green-900/50 hover:text-green-400';
+        }
+    });
+}
 
 // Show upload button when file selected
 document.getElementById('image-input').addEventListener('change', function() {
@@ -229,6 +262,7 @@ function saveDetails() {
         description: document.getElementById('field-description').value.trim(),
         event_date: document.getElementById('field-date').value,
         event_time: document.getElementById('field-time').value,
+        doors_open_time: document.getElementById('field-doors').value || null,
         promo_video_url: document.getElementById('field-video').value.trim() || null
     };
 
@@ -257,6 +291,24 @@ function saveDetails() {
         status.classList.remove('hidden');
         btn.disabled = false;
         btn.textContent = 'Save Changes';
+    });
+}
+
+var isVisible = {{ 'true' if event.is_visible else 'false' }};
+function toggleVisibility() {
+    isVisible = !isVisible;
+    fetch('/events/' + eventId + '/admin', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({token: token, is_visible: isVisible})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+        var btn = document.getElementById('visibility-btn');
+        btn.textContent = isVisible ? 'LIVE' : 'HIDDEN';
+        btn.className = 'px-2 py-0.5 rounded text-xs font-medium cursor-pointer transition-colors ' +
+            (isVisible ? 'bg-green-900/50 text-green-400 hover:bg-red-900/50 hover:text-red-400' :
+                         'bg-red-900/50 text-red-400 hover:bg-green-900/50 hover:text-green-400');
     });
 }
 </script>

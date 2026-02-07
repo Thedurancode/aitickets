@@ -215,6 +215,8 @@ async def list_tools():
                     "image_url": {"type": "string", "description": "Event poster/image URL (optional)"},
                     "promo_video_url": {"type": "string", "description": "YouTube or video URL for event promo (optional)"},
                     "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of category IDs to assign (replaces existing)"},
+                    "doors_open_time": {"type": "string", "description": "Doors open time in HH:MM format (optional)"},
+                    "is_visible": {"type": "boolean", "description": "Whether event is visible on public listing (optional)"},
                 },
                 "required": ["event_id"],
             },
@@ -282,6 +284,61 @@ async def list_tools():
                     "event_id": {"type": "integer", "description": "The event ID"},
                 },
                 "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="update_ticket_tier",
+            description="Update a ticket tier (name, price, quantity, or status). Use to pause/activate tiers or increase inventory.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tier_id": {"type": "integer", "description": "The ticket tier ID"},
+                    "name": {"type": "string", "description": "New tier name (optional)"},
+                    "description": {"type": "string", "description": "New description (optional)"},
+                    "price": {"type": "integer", "description": "New price in cents (optional)"},
+                    "quantity_available": {"type": "integer", "description": "New total quantity (optional)"},
+                    "status": {"type": "string", "enum": ["active", "paused", "sold_out"], "description": "Tier status (optional)"},
+                },
+                "required": ["tier_id"],
+            },
+        ),
+        Tool(
+            name="toggle_all_tickets",
+            description="Enable or disable all ticket tiers for an event. Use for 'turn off all tickets' or 'make tickets live'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "status": {"type": "string", "enum": ["active", "paused"], "description": "Set all tiers to this status"},
+                },
+                "required": ["event_id", "status"],
+            },
+        ),
+        Tool(
+            name="add_tickets",
+            description="Add more tickets to an existing tier (by name match) or create a new tier. Use for 'add 10 more VIP tickets at $25'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "tier_name": {"type": "string", "description": "Tier name (e.g., 'VIP', 'General'). Matches existing or creates new."},
+                    "quantity": {"type": "integer", "description": "Number of tickets to add"},
+                    "price_cents": {"type": "integer", "description": "Price in cents (required if creating new tier)"},
+                    "description": {"type": "string", "description": "Tier description (optional, for new tiers)"},
+                },
+                "required": ["event_id", "tier_name", "quantity"],
+            },
+        ),
+        Tool(
+            name="set_event_visibility",
+            description="Show or hide an event from public listings. Use for 'hide event' or 'make event live'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "is_visible": {"type": "boolean", "description": "True to make visible/live, False to hide"},
+                },
+                "required": ["event_id", "is_visible"],
             },
         ),
         # Sales and attendee tools
@@ -1173,6 +1230,10 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if "category_ids" in arguments:
             categories = db.query(EventCategory).filter(EventCategory.id.in_(arguments["category_ids"])).all()
             event.categories = categories
+        if "doors_open_time" in arguments:
+            event.doors_open_time = arguments["doors_open_time"]
+        if "is_visible" in arguments:
+            event.is_visible = arguments["is_visible"]
         db.commit()
         db.refresh(event)
         return _event_to_dict(event)
@@ -1268,6 +1329,154 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         result["total_sold"] = total_sold
         result["total_remaining"] = total_available - total_sold
         return result
+
+    elif name == "update_ticket_tier":
+        from app.models import TierStatus
+        tier_id = arguments.get("tier_id")
+        tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+        if not tier:
+            return {"error": "Ticket tier not found"}
+        event = db.query(Event).filter(Event.id == tier.event_id).first()
+        changes = []
+        if "name" in arguments:
+            tier.name = arguments["name"]
+            changes.append(f"name → {arguments['name']}")
+        if "description" in arguments:
+            tier.description = arguments["description"]
+            changes.append("description updated")
+        if "price" in arguments:
+            old_price = tier.price
+            tier.price = arguments["price"]
+            changes.append(f"price ${old_price/100:.2f} → ${tier.price/100:.2f}")
+        if "quantity_available" in arguments:
+            old_qty = tier.quantity_available
+            tier.quantity_available = arguments["quantity_available"]
+            changes.append(f"quantity {old_qty} → {tier.quantity_available}")
+        if "status" in arguments:
+            old_status = tier.status.value if tier.status else "active"
+            tier.status = TierStatus(arguments["status"])
+            changes.append(f"status {old_status} → {tier.status.value}")
+        # Auto sold-out check after quantity changes
+        if tier.quantity_sold >= tier.quantity_available and "status" not in arguments:
+            tier.status = TierStatus.SOLD_OUT
+        elif tier.status == TierStatus.SOLD_OUT and tier.quantity_sold < tier.quantity_available and "status" not in arguments:
+            tier.status = TierStatus.ACTIVE
+        db.commit()
+        db.refresh(tier)
+        return {
+            "success": True,
+            "tier": _tier_to_dict(tier),
+            "event": event.name if event else "Unknown",
+            "changes": changes,
+        }
+
+    elif name == "toggle_all_tickets":
+        from app.models import TierStatus
+        event_id = arguments.get("event_id")
+        target_status_str = arguments.get("status")
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return {"error": "Event not found"}
+        tiers = db.query(TicketTier).filter(TicketTier.event_id == event_id).all()
+        if not tiers:
+            return {"error": "No ticket tiers found for this event"}
+        target_status = TierStatus.ACTIVE if target_status_str == "active" else TierStatus.PAUSED
+        updated_count = 0
+        skipped_sold_out = 0
+        for tier in tiers:
+            if target_status == TierStatus.ACTIVE and tier.status == TierStatus.SOLD_OUT:
+                skipped_sold_out += 1
+                continue
+            if tier.status != target_status:
+                tier.status = target_status
+                updated_count += 1
+        db.commit()
+        return {
+            "success": True,
+            "event": event.name,
+            "event_id": event.id,
+            "updated_count": updated_count,
+            "total_tiers": len(tiers),
+            "new_status": target_status.value,
+            "skipped_sold_out": skipped_sold_out,
+        }
+
+    elif name == "add_tickets":
+        from app.models import TierStatus
+        event_id = arguments.get("event_id")
+        tier_name = arguments.get("tier_name")
+        quantity = arguments.get("quantity")
+        price_cents = arguments.get("price_cents")
+        description = arguments.get("description")
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return {"error": "Event not found"}
+        # Try to find existing tier by name (case-insensitive)
+        tier = db.query(TicketTier).filter(
+            TicketTier.event_id == event_id,
+            TicketTier.name.ilike(f"%{tier_name}%")
+        ).first()
+        if tier:
+            old_qty = tier.quantity_available
+            tier.quantity_available += quantity
+            if tier.status == TierStatus.SOLD_OUT:
+                tier.status = TierStatus.ACTIVE
+            db.commit()
+            db.refresh(tier)
+            return {
+                "success": True,
+                "action": "increased",
+                "tier": _tier_to_dict(tier),
+                "event": event.name,
+                "old_quantity": old_qty,
+                "new_quantity": tier.quantity_available,
+                "added": quantity,
+            }
+        else:
+            if price_cents is None:
+                return {"error": f"No tier found matching '{tier_name}'. To create a new tier, provide price_cents."}
+            new_tier = TicketTier(
+                event_id=event_id,
+                name=tier_name,
+                description=description,
+                price=price_cents,
+                quantity_available=quantity,
+                quantity_sold=0,
+                status=TierStatus.ACTIVE,
+            )
+            db.add(new_tier)
+            db.commit()
+            db.refresh(new_tier)
+            # Sync to Stripe if paid tier
+            if price_cents > 0:
+                try:
+                    from app.services.stripe_sync import create_stripe_product_for_tier
+                    create_stripe_product_for_tier(db, new_tier, event)
+                except Exception as e:
+                    print(f"Stripe sync warning: {e}")
+            return {
+                "success": True,
+                "action": "created",
+                "tier": _tier_to_dict(new_tier),
+                "event": event.name,
+                "quantity": quantity,
+            }
+
+    elif name == "set_event_visibility":
+        event_id = arguments.get("event_id")
+        is_visible = arguments.get("is_visible")
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return {"error": "Event not found"}
+        event.is_visible = is_visible
+        db.commit()
+        return {
+            "success": True,
+            "event": event.name,
+            "event_id": event.id,
+            "is_visible": is_visible,
+            "action": "made live" if is_visible else "hidden",
+        }
 
     # ============== Sales & Attendee Tools ==============
     elif name == "get_event_sales":
@@ -1560,6 +1769,10 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             tickets.append(ticket)
 
         tier.quantity_sold += quantity
+        # Auto sold-out check
+        if tier.quantity_sold >= tier.quantity_available:
+            from app.models import TierStatus
+            tier.status = TierStatus.SOLD_OUT
         db.commit()
 
         # Refresh to get IDs
@@ -3393,7 +3606,11 @@ def _event_to_dict(event: Event) -> dict:
         "promo_video_url": event.promo_video_url,
         "event_date": event.event_date,
         "event_time": event.event_time,
+        "doors_open_time": getattr(event, 'doors_open_time', None),
         "status": event.status.value if event.status else "scheduled",
+        "is_visible": getattr(event, 'is_visible', True),
+        "promoter_phone": getattr(event, 'promoter_phone', None),
+        "promoter_name": getattr(event, 'promoter_name', None),
         "created_at": event.created_at,
     }
     # Include venue info if loaded
@@ -3416,6 +3633,7 @@ def _tier_to_dict(tier: TicketTier) -> dict:
         "quantity_available": tier.quantity_available,
         "quantity_sold": tier.quantity_sold,
         "tickets_remaining": tier.quantity_available - tier.quantity_sold,
+        "status": tier.status.value if tier.status else "active",
         "stripe_product_id": tier.stripe_product_id,
         "stripe_price_id": tier.stripe_price_id,
     }

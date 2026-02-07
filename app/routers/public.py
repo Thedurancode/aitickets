@@ -43,7 +43,7 @@ def events_listing(
         joinedload(Event.venue),
         joinedload(Event.categories),
         joinedload(Event.ticket_tiers),
-    ).filter(Event.status == EventStatus.SCHEDULED)
+    ).filter(Event.status == EventStatus.SCHEDULED, Event.is_visible == True)
 
     if category:
         query = query.join(Event.categories).filter(
@@ -92,9 +92,13 @@ def event_detail(
         raise HTTPException(status_code=404, detail="Event not found")
 
     # Build tier data with availability
+    from app.models import TierStatus
     tiers = []
     for tier in event.ticket_tiers:
         remaining = tier.quantity_available - tier.quantity_sold
+        tier_status = tier.status.value if tier.status else "active"
+        is_sold_out = tier_status == "sold_out" or remaining <= 0
+        is_paused = tier_status == "paused"
         tiers.append({
             "id": tier.id,
             "name": tier.name,
@@ -102,7 +106,10 @@ def event_detail(
             "price_cents": tier.price,
             "price_display": f"${tier.price / 100:.2f}" if tier.price > 0 else "Free",
             "remaining": remaining,
-            "sold_out": remaining <= 0,
+            "sold_out": is_sold_out,
+            "paused": is_paused,
+            "status": tier_status,
+            "is_available": not is_sold_out and not is_paused,
         })
 
     template = jinja_env.get_template("event_detail.html")
@@ -218,9 +225,11 @@ async def admin_update_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    for field in ["name", "description", "event_date", "event_time", "promo_video_url"]:
+    for field in ["name", "description", "event_date", "event_time", "promo_video_url", "doors_open_time"]:
         if field in body and body[field] is not None:
             setattr(event, field, body[field])
+    if "is_visible" in body:
+        event.is_visible = body["is_visible"]
 
     db.commit()
     db.refresh(event)

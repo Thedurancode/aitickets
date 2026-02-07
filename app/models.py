@@ -49,6 +49,12 @@ class DiscountType(str, enum.Enum):
     FIXED_CENTS = "fixed_cents"
 
 
+class TierStatus(str, enum.Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    SOLD_OUT = "sold_out"
+
+
 event_category_link = Table(
     "event_category_link",
     Base.metadata,
@@ -94,7 +100,9 @@ class Event(Base):
     promo_video_url = Column(String(500), nullable=True)  # YouTube or video URL
     event_date = Column(String(20), nullable=False)  # YYYY-MM-DD format
     event_time = Column(String(10), nullable=False)  # HH:MM format
+    doors_open_time = Column(String(10), nullable=True)  # HH:MM format
     status = Column(Enum(EventStatus), default=EventStatus.SCHEDULED)
+    is_visible = Column(Boolean, default=True)
     cancellation_reason = Column(Text, nullable=True)
     promoter_phone = Column(String(50), nullable=True)
     promoter_name = Column(String(255), nullable=True)
@@ -133,6 +141,7 @@ class TicketTier(Base):
     price = Column(Integer, nullable=False)  # Price in cents
     quantity_available = Column(Integer, nullable=False)
     quantity_sold = Column(Integer, default=0)
+    status = Column(Enum(TierStatus), default=TierStatus.ACTIVE)
 
     # Stripe integration
     stripe_product_id = Column(String(255), nullable=True, index=True)

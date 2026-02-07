@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import Optional
-from app.models import TicketStatus, NotificationType, NotificationChannel, NotificationStatus, EventStatus
+from app.models import TicketStatus, NotificationType, NotificationChannel, NotificationStatus, EventStatus, TierStatus
 
 
 # ============== Venue Schemas ==============
@@ -73,6 +73,8 @@ class EventCreate(EventBase):
     category_ids: list[int] = []
     promoter_phone: Optional[str] = None
     promoter_name: Optional[str] = None
+    is_visible: bool = True
+    doors_open_time: Optional[str] = None
 
 
 class EventUpdate(BaseModel):
@@ -84,6 +86,8 @@ class EventUpdate(BaseModel):
     category_ids: Optional[list[int]] = None
     promoter_phone: Optional[str] = None
     promoter_name: Optional[str] = None
+    is_visible: Optional[bool] = None
+    doors_open_time: Optional[str] = None
 
 
 class EventResponse(EventBase):
@@ -92,6 +96,8 @@ class EventResponse(EventBase):
     image_url: Optional[str] = None
     promo_video_url: Optional[str] = None
     status: EventStatus = EventStatus.SCHEDULED
+    is_visible: bool = True
+    doors_open_time: Optional[str] = None
     categories: list[EventCategoryResponse] = []
     created_at: datetime
 
@@ -121,12 +127,14 @@ class TicketTierUpdate(BaseModel):
     description: Optional[str] = None
     price: Optional[int] = None
     quantity_available: Optional[int] = None
+    status: Optional[TierStatus] = None
 
 
 class TicketTierResponse(TicketTierBase):
     id: int
     event_id: int
     quantity_sold: int
+    status: TierStatus = TierStatus.ACTIVE
     stripe_product_id: Optional[str] = None
     stripe_price_id: Optional[str] = None
 

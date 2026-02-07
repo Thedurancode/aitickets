@@ -87,6 +87,10 @@ async def handle_checkout_completed(session_data: dict, db: Session):
 
         # Update tier sold count
         ticket.ticket_tier.quantity_sold += 1
+        # Auto sold-out check
+        if ticket.ticket_tier.quantity_sold >= ticket.ticket_tier.quantity_available:
+            from app.models import TierStatus
+            ticket.ticket_tier.status = TierStatus.SOLD_OUT
 
     db.commit()
 

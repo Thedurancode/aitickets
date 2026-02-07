@@ -67,6 +67,9 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                     </svg>
                     <span class="text-lg">{{ event.event_date }} at {{ event.event_time }}</span>
+                    {% if event.doors_open_time %}
+                    <span class="text-sm text-gray-500 ml-1">(Doors {{ event.doors_open_time }})</span>
+                    {% endif %}
                 </div>
                 {% if event.venue %}
                 <div class="flex items-center gap-3 text-gray-300">
@@ -133,6 +136,8 @@
                     {% endif %}
                     {% if tier.sold_out %}
                     <div class="text-red-400 font-medium text-sm">Sold Out</div>
+                    {% elif tier.paused %}
+                    <div class="text-yellow-400 font-medium text-sm">Currently Unavailable</div>
                     {% else %}
                     <div class="text-xs text-gray-500 mb-3">{{ tier.remaining }} remaining</div>
                     <button onclick="selectTier({{ tier.id }})" class="w-full bg-brand hover:bg-brand-dark text-white py-2.5 rounded-lg font-medium transition-colors select-btn">

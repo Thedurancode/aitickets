@@ -97,6 +97,10 @@ def create_checkout_session(
             tickets.append(ticket)
 
         tier.quantity_sold += purchase.quantity
+        # Auto sold-out check
+        if tier.quantity_sold >= tier.quantity_available:
+            from app.models import TierStatus
+            tier.status = TierStatus.SOLD_OUT
         if promo:
             promo.uses_count += purchase.quantity
         db.commit()

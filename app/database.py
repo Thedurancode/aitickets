@@ -69,3 +69,9 @@ def init_db():
         run_promoter_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_visibility_and_tier_status import run_migration as run_visibility_migration
+        run_visibility_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")
