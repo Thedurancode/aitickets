@@ -703,6 +703,21 @@ async def list_tools():
                 "required": [],
             },
         ),
+        Tool(
+            name="share_event_link",
+            description="Send the public event page link to someone via email, SMS, or both. Use this when someone asks you to share an event, send an event link, or invite someone to an event.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID to share"},
+                    "to_email": {"type": "string", "description": "Email address to send to (optional if phone provided)"},
+                    "to_phone": {"type": "string", "description": "Phone number to send SMS to (optional if email provided)"},
+                    "recipient_name": {"type": "string", "description": "Recipient's name (optional, for personalization)"},
+                    "message": {"type": "string", "description": "Optional custom message to include"},
+                },
+                "required": ["event_id"],
+            },
+        ),
         # ============== Phone Verification Tools ==============
         Tool(
             name="send_verification_code",
@@ -3132,6 +3147,70 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             result["event_id"] = event_id
             result["event_name"] = event.name if event else "Unknown"
         return result
+
+    elif name == "share_event_link":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        share_url = f"{settings.base_url}/events/{event.id}"
+        recipient_name = arguments.get("recipient_name", "")
+        custom_msg = arguments.get("message", "")
+        to_email = arguments.get("to_email")
+        to_phone = arguments.get("to_phone")
+
+        if not to_email and not to_phone:
+            return {"error": "Please provide an email address or phone number to send the link to"}
+
+        results = {"event": event.name, "share_url": share_url}
+        sent_via = []
+
+        # Send via email
+        if to_email:
+            from app.services.email import _send_email
+            greeting = f"Hi {recipient_name}," if recipient_name else "Hi there,"
+            custom_line = f"<p>{custom_msg}</p>" if custom_msg else ""
+            html = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #111; color: #fff; border-radius: 12px; overflow: hidden;">
+                <div style="background: {settings.org_color}; padding: 20px 24px;">
+                    <h2 style="margin: 0; color: #fff;">{settings.org_name}</h2>
+                </div>
+                <div style="padding: 24px;">
+                    <p>{greeting}</p>
+                    {custom_line}
+                    <h3 style="color: {settings.org_color}; margin: 16px 0 8px;">{event.name}</h3>
+                    <p style="color: #ccc;">{event.event_date} at {event.event_time}</p>
+                    <p style="color: #999;">{event.description[:200] + '...' if event.description and len(event.description) > 200 else event.description or ''}</p>
+                    <a href="{share_url}" style="display: inline-block; margin-top: 16px; padding: 12px 28px; background: {settings.org_color}; color: #fff; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                        View Event & Get Tickets
+                    </a>
+                </div>
+            </div>
+            """
+            success = _send_email(
+                to_email=to_email,
+                subject=f"Check out {event.name}! | {settings.org_name}",
+                html_content=html,
+            )
+            results["email_sent"] = success
+            if success:
+                sent_via.append("email")
+
+        # Send via SMS
+        if to_phone:
+            from app.services.sms import send_sms
+            sms_body = f"Check out {event.name} on {event.event_date}!"
+            if custom_msg:
+                sms_body = f"{custom_msg}\n\n{event.name} — {event.event_date}"
+            sms_body += f"\n\nView & get tickets: {share_url}"
+            sms_result = send_sms(to_phone, sms_body)
+            results["sms_sent"] = sms_result.get("success", False)
+            if sms_result.get("success"):
+                sent_via.append("SMS")
+
+        results["sent_via"] = sent_via
+        results["success"] = len(sent_via) > 0
+        return results
 
     return {"error": f"Unknown tool: {name}"}
 

@@ -515,6 +515,14 @@ async def voice_action(request: Request):
         "analytics": "get_event_analytics",
         "traffic": "get_event_analytics",
         "how many views": "get_event_analytics",
+        # Share event link
+        "share event": "share_event_link",
+        "share event link": "share_event_link",
+        "send event link": "share_event_link",
+        "send link": "share_event_link",
+        "invite to event": "share_event_link",
+        "text event link": "share_event_link",
+        "email event link": "share_event_link",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -951,6 +959,17 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                 name = result.get("event_name", "the event")
                 return f"In the last {days} days, {name} had {views} page views from {unique} unique visitors."
             return f"In the last {days} days, all event pages had {views} total views from {unique} unique visitors."
+
+    elif tool_name == "share_event_link":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            event_name = result.get("event", "the event")
+            sent_via = result.get("sent_via", [])
+            if sent_via:
+                channels = " and ".join(sent_via)
+                return f"Done! I sent the link for {event_name} via {channels}."
+            return f"Sorry, I couldn't send the link for {event_name}. Please check the email or phone number."
 
     # ============== Dashboard ==============
     elif tool_name == "refresh_dashboard":
