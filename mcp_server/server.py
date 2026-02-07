@@ -202,6 +202,40 @@ async def list_tools():
             },
         ),
         Tool(
+            name="create_recurring_event",
+            description="Create a series of recurring events (e.g. every Tuesday for 4 months) with ticket tiers. Creates individual events linked by a series_id.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "venue_id": {"type": "integer", "description": "The venue ID"},
+                    "name": {"type": "string", "description": "Event name (e.g. Taco Tuesday)"},
+                    "event_time": {"type": "string", "description": "Time in HH:MM format"},
+                    "day_of_week": {
+                        "type": "string",
+                        "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+                        "description": "Day of the week for the recurring event",
+                    },
+                    "frequency": {
+                        "type": "string",
+                        "enum": ["weekly", "biweekly", "monthly"],
+                        "description": "How often the event repeats (default: weekly)",
+                    },
+                    "duration_months": {
+                        "type": "integer",
+                        "description": "How many months to create events for (default: 3, max: 12)",
+                    },
+                    "start_date": {"type": "string", "description": "Start date YYYY-MM-DD (default: today)"},
+                    "description": {"type": "string", "description": "Event description (optional)"},
+                    "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Category IDs to assign to all events"},
+                    "tier_name": {"type": "string", "description": "Ticket tier name (default: General Admission)"},
+                    "tier_price": {"type": "integer", "description": "Ticket price in cents (default: 0 for free)"},
+                    "tier_quantity": {"type": "integer", "description": "Number of tickets per event (default: 100)"},
+                    "doors_open_time": {"type": "string", "description": "Doors open time in HH:MM format (optional)"},
+                },
+                "required": ["venue_id", "name", "event_time", "day_of_week"],
+            },
+        ),
+        Tool(
             name="update_event",
             description="Update event details including image and promo video",
             inputSchema={
@@ -1237,6 +1271,171 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         db.commit()
         db.refresh(event)
         return _event_to_dict(event)
+
+    elif name == "create_recurring_event":
+        import uuid as uuid_mod
+        import calendar
+        from datetime import date, timedelta
+
+        # Validate venue
+        venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
+        if not venue:
+            return {"error": "Venue not found"}
+
+        # Parse parameters
+        day_of_week = arguments["day_of_week"].lower()
+        frequency = arguments.get("frequency", "weekly")
+        duration_months = min(arguments.get("duration_months", 3), 12)
+        event_time = arguments["event_time"]
+        event_name = arguments["name"]
+        description = arguments.get("description")
+        doors_open_time = arguments.get("doors_open_time")
+        category_ids = arguments.get("category_ids", [])
+        tier_name = arguments.get("tier_name", "General Admission")
+        tier_price = arguments.get("tier_price", 0)
+        tier_quantity = arguments.get("tier_quantity", 100)
+
+        # Map day name to weekday number (Monday=0)
+        day_map = {
+            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6,
+        }
+        target_weekday = day_map.get(day_of_week)
+        if target_weekday is None:
+            return {"error": f"Invalid day_of_week: {day_of_week}"}
+
+        # Calculate start date
+        start_str = arguments.get("start_date")
+        if start_str:
+            try:
+                start = datetime.strptime(start_str, "%Y-%m-%d").date()
+            except ValueError:
+                return {"error": "Invalid start_date format, use YYYY-MM-DD"}
+        else:
+            start = datetime.now().date()
+
+        # Calculate end date
+        end_month = start.month + duration_months
+        end_year = start.year + (end_month - 1) // 12
+        end_month = (end_month - 1) % 12 + 1
+        end_day = min(start.day, calendar.monthrange(end_year, end_month)[1])
+        end = date(end_year, end_month, end_day)
+
+        # Find first occurrence of target weekday on or after start
+        current = start
+        days_ahead = target_weekday - current.weekday()
+        if days_ahead < 0:
+            days_ahead += 7
+        current = current + timedelta(days=days_ahead)
+
+        # Generate event dates
+        event_dates = []
+        if frequency == "weekly":
+            step = timedelta(days=7)
+            while current <= end:
+                event_dates.append(current.strftime("%Y-%m-%d"))
+                current = current + step
+        elif frequency == "biweekly":
+            step = timedelta(days=14)
+            while current <= end:
+                event_dates.append(current.strftime("%Y-%m-%d"))
+                current = current + step
+        elif frequency == "monthly":
+            week_of_month = (current.day - 1) // 7  # 0-indexed week number
+            while current <= end:
+                event_dates.append(current.strftime("%Y-%m-%d"))
+                # Advance to next month, same nth weekday
+                month = current.month + 1
+                year = current.year
+                if month > 12:
+                    month = 1
+                    year += 1
+                first_of_month = date(year, month, 1)
+                first_weekday_offset = (target_weekday - first_of_month.weekday()) % 7
+                candidate_day = 1 + first_weekday_offset + (week_of_month * 7)
+                if candidate_day > calendar.monthrange(year, month)[1]:
+                    candidate_day -= 7
+                current = date(year, month, candidate_day)
+        else:
+            return {"error": f"Invalid frequency: {frequency}"}
+
+        if not event_dates:
+            return {"error": "No event dates generated. Check start_date and day_of_week."}
+
+        # Generate series_id
+        series_id = str(uuid_mod.uuid4())
+
+        # Load categories once
+        categories = []
+        if category_ids:
+            categories = db.query(EventCategory).filter(EventCategory.id.in_(category_ids)).all()
+
+        # Create events + tiers in a single transaction
+        created_events = []
+        created_tiers = []
+        for event_date_str in event_dates:
+            event = Event(
+                venue_id=arguments["venue_id"],
+                name=event_name,
+                description=description,
+                event_date=event_date_str,
+                event_time=event_time,
+                doors_open_time=doors_open_time,
+                series_id=series_id,
+            )
+            if categories:
+                event.categories = list(categories)
+            db.add(event)
+            db.flush()
+
+            tier = TicketTier(
+                event_id=event.id,
+                name=tier_name,
+                price=tier_price,
+                quantity_available=tier_quantity,
+            )
+            db.add(tier)
+            db.flush()
+
+            created_events.append(event)
+            created_tiers.append(tier)
+
+        db.commit()
+
+        # Stripe sync for paid tiers (after commit)
+        stripe_synced = 0
+        stripe_errors = []
+        if tier_price > 0:
+            from app.services.stripe_sync import create_stripe_product_for_tier
+            for tier in created_tiers:
+                evt = db.query(Event).filter(Event.id == tier.event_id).first()
+                sync_result = create_stripe_product_for_tier(db, tier, evt)
+                if sync_result.get("success"):
+                    stripe_synced += 1
+                elif sync_result.get("error"):
+                    stripe_errors.append(f"Event {tier.event_id}: {sync_result['error']}")
+
+        # Build response
+        response = {
+            "series_id": series_id,
+            "events_created": len(created_events),
+            "frequency": frequency,
+            "day_of_week": day_of_week,
+            "first_date": event_dates[0],
+            "last_date": event_dates[-1],
+            "event_name": event_name,
+            "tier_name": tier_name,
+            "tier_price_cents": tier_price,
+            "tier_quantity": tier_quantity,
+            "event_ids": [e.id for e in created_events],
+            "events": [_event_to_dict(e) for e in created_events],
+        }
+        if tier_price > 0:
+            response["stripe_synced"] = stripe_synced
+            if stripe_errors:
+                response["stripe_errors"] = stripe_errors
+
+        return response
 
     elif name == "update_event":
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
@@ -3778,6 +3977,7 @@ def _event_to_dict(event: Event) -> dict:
         "is_visible": getattr(event, 'is_visible', True),
         "promoter_phone": getattr(event, 'promoter_phone', None),
         "promoter_name": getattr(event, 'promoter_name', None),
+        "series_id": getattr(event, 'series_id', None),
         "created_at": event.created_at,
     }
     # Include venue info if loaded

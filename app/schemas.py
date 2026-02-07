@@ -98,6 +98,7 @@ class EventResponse(EventBase):
     status: EventStatus = EventStatus.SCHEDULED
     is_visible: bool = True
     doors_open_time: Optional[str] = None
+    series_id: Optional[str] = None
     categories: list[EventCategoryResponse] = []
     created_at: datetime
 

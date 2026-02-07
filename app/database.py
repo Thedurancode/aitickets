@@ -75,3 +75,9 @@ def init_db():
         run_visibility_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_series_id import run_migration as run_series_id_migration
+        run_series_id_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

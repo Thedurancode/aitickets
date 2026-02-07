@@ -106,6 +106,7 @@ class Event(Base):
     cancellation_reason = Column(Text, nullable=True)
     promoter_phone = Column(String(50), nullable=True)
     promoter_name = Column(String(255), nullable=True)
+    series_id = Column(String(36), nullable=True, index=True)  # UUID linking recurring events
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

@@ -574,6 +574,15 @@ async def voice_action(request: Request):
         "funnel": "get_conversion_analytics",
         "how many converted": "get_conversion_analytics",
         "purchase analytics": "get_conversion_analytics",
+        # Recurring events
+        "create recurring event": "create_recurring_event",
+        "recurring event": "create_recurring_event",
+        "set up recurring event": "create_recurring_event",
+        "set up weekly event": "create_recurring_event",
+        "weekly event": "create_recurring_event",
+        "create weekly event": "create_recurring_event",
+        "repeating event": "create_recurring_event",
+        "every week event": "create_recurring_event",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -638,6 +647,22 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     elif tool_name == "create_event":
         if isinstance(result, dict):
             return f"Event '{result.get('name', '')}' created for {result.get('event_date', '')} at {result.get('event_time', '')}."
+
+    elif tool_name == "create_recurring_event":
+        if isinstance(result, dict):
+            count = result.get("events_created", 0)
+            name = result.get("event_name", "")
+            day = result.get("day_of_week", "").capitalize()
+            first = result.get("first_date", "")
+            last = result.get("last_date", "")
+            qty = result.get("tier_quantity", 0)
+            price = result.get("tier_price_cents", 0)
+            price_str = "free" if price == 0 else f"${price / 100:.2f}"
+            return (
+                f"Done! Created {count} '{name}' events, every {day} "
+                f"from {first} to {last}. "
+                f"Each event has {qty} tickets at {price_str}."
+            )
 
     elif tool_name == "get_event":
         if isinstance(result, dict):
