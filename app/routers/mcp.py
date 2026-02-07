@@ -626,6 +626,17 @@ async def voice_action(request: Request):
         db.close()
 
 
+def _format_time(t: str) -> str:
+    """Convert HH:MM (24h) to 12-hour format like '7 PM' or '10:30 AM'."""
+    try:
+        h, m = int(t.split(":")[0]), int(t.split(":")[1])
+        suffix = "AM" if h < 12 else "PM"
+        h = h % 12 or 12
+        return f"{h}:{m:02d} {suffix}" if m else f"{h} {suffix}"
+    except (ValueError, IndexError):
+        return t
+
+
 def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     """Generate a speech-friendly response for voice agents."""
 
@@ -640,13 +651,13 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                 return "There are no upcoming events."
             elif len(result) == 1:
                 e = result[0]
-                return f"There is 1 event: {e['name']} on {e['event_date']} at {e['event_time']}."
+                return f"There is 1 event: {e['name']} on {e['event_date']} at {_format_time(e['event_time'])}."
             else:
                 return f"There are {len(result)} events. The first one is {result[0]['name']} on {result[0]['event_date']}."
 
     elif tool_name == "create_event":
         if isinstance(result, dict):
-            return f"Event '{result.get('name', '')}' created for {result.get('event_date', '')} at {result.get('event_time', '')}."
+            return f"Event '{result.get('name', '')}' created for {result.get('event_date', '')} at {_format_time(result.get('event_time', ''))}."
 
     elif tool_name == "create_recurring_event":
         if isinstance(result, dict):
@@ -668,7 +679,7 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
         if isinstance(result, dict):
             tiers = result.get("ticket_tiers", [])
             tier_info = f" with {len(tiers)} ticket tiers" if tiers else ""
-            return f"{result.get('name', 'Event')}, {result.get('event_date', '')} at {result.get('event_time', '')}{tier_info}. Status: {result.get('status', 'scheduled')}."
+            return f"{result.get('name', 'Event')}, {result.get('event_date', '')} at {_format_time(result.get('event_time', ''))}{tier_info}. Status: {result.get('status', 'scheduled')}."
 
     elif tool_name == "update_event":
         if isinstance(result, dict):
@@ -709,7 +720,7 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             new_time = result.get("new_time")
             name = result.get("event_name", "the event")
             if new_date and new_time:
-                return f"Event postponed. {name} has been rescheduled to {new_date} at {new_time}. Notifications sent to {sent} ticket holders."
+                return f"Event postponed. {name} has been rescheduled to {new_date} at {_format_time(new_time)}. Notifications sent to {sent} ticket holders."
             elif new_date:
                 return f"Event postponed. {name} has been rescheduled to {new_date}. Notifications sent to {sent} ticket holders."
             return f"Event postponed. Notifications sent to {sent} ticket holders. New date to be announced."
