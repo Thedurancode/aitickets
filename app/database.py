@@ -51,3 +51,9 @@ def init_db():
         run_segments_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_promo_codes import run_migration as run_promo_codes_migration
+        run_promo_codes_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

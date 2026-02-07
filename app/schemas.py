@@ -212,6 +212,7 @@ class PurchaseRequest(BaseModel):
     name: str
     phone: Optional[str] = None
     quantity: int = 1
+    promo_code: Optional[str] = None
 
 
 class CheckoutSessionResponse(BaseModel):
@@ -351,6 +352,39 @@ class SendMarketingResponse(BaseModel):
     email_sent: int
     sms_sent: int
     failed: int
+
+
+# ============== Promo Code Schemas ==============
+
+class PromoCodeBase(BaseModel):
+    code: str
+    discount_type: str  # "percent" or "fixed_cents"
+    discount_value: int
+    is_active: bool = True
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    max_uses: Optional[int] = None
+    event_id: Optional[int] = None
+
+
+class PromoCodeCreate(PromoCodeBase):
+    pass
+
+
+class PromoCodeUpdate(BaseModel):
+    is_active: Optional[bool] = None
+    valid_from: Optional[datetime] = None
+    valid_until: Optional[datetime] = None
+    max_uses: Optional[int] = None
+
+
+class PromoCodeResponse(PromoCodeBase):
+    id: int
+    uses_count: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # ============== SMS Ticket Request ==============

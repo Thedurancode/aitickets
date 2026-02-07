@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.database import init_db
 from app.config import get_settings
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -22,6 +22,7 @@ app.include_router(tickets.router)
 app.include_router(payments.router)
 app.include_router(notifications.router)
 app.include_router(categories.router)
+app.include_router(promo_codes.router)
 app.include_router(mcp.router)
 
 # Mount static files for uploads

@@ -44,6 +44,11 @@ class EventStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class DiscountType(str, enum.Enum):
+    PERCENT = "percent"
+    FIXED_CENTS = "fixed_cents"
+
+
 event_category_link = Table(
     "event_category_link",
     Base.metadata,
@@ -173,8 +178,13 @@ class Ticket(Base):
     reminder_sent = Column(Boolean, default=False)
     reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Promo code tracking
+    promo_code_id = Column(Integer, ForeignKey("promo_codes.id"), nullable=True)
+    discount_amount_cents = Column(Integer, nullable=True)
+
     ticket_tier = relationship("TicketTier", back_populates="tickets")
     event_goer = relationship("EventGoer", back_populates="tickets")
+    promo_code = relationship("PromoCode")
 
 
 class Notification(Base):
@@ -278,3 +288,21 @@ class CustomerPreference(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     event_goer = relationship("EventGoer", back_populates="preferences")
+
+
+class PromoCode(Base):
+    __tablename__ = "promo_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    code = Column(String(50), unique=True, nullable=False, index=True)
+    discount_type = Column(Enum(DiscountType), nullable=False)
+    discount_value = Column(Integer, nullable=False)  # percent (1-100) or cents
+    is_active = Column(Boolean, default=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+    max_uses = Column(Integer, nullable=True)  # null = unlimited
+    uses_count = Column(Integer, default=0)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # null = all events
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")

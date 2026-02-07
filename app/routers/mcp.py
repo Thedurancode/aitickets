@@ -493,6 +493,21 @@ async def voice_action(request: Request):
         "edit campaign": "update_campaign",
         "update campaign": "update_campaign",
         "change campaign message": "update_campaign",
+        # Promo codes
+        "create promo code": "create_promo_code",
+        "new promo code": "create_promo_code",
+        "create discount code": "create_promo_code",
+        "add coupon": "create_promo_code",
+        "list promo codes": "list_promo_codes",
+        "show promo codes": "list_promo_codes",
+        "promo codes": "list_promo_codes",
+        "discount codes": "list_promo_codes",
+        "validate promo code": "validate_promo_code",
+        "check promo code": "validate_promo_code",
+        "check coupon": "validate_promo_code",
+        "deactivate promo code": "deactivate_promo_code",
+        "disable promo code": "deactivate_promo_code",
+        "remove promo code": "deactivate_promo_code",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -894,6 +909,30 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             emails = result.get("email_sent", 0)
             sms = result.get("sms_sent", 0)
             return f"Marketing blast sent! Reached {total} recipients with {emails} emails and {sms} SMS messages."
+
+    # ============== Promo Codes ==============
+    elif tool_name == "create_promo_code":
+        if isinstance(result, dict):
+            if result.get("success"):
+                return f"Promo code '{result.get('code', '')}' created for {result.get('discount', '')} off."
+            return result.get("error", "Could not create promo code.")
+
+    elif tool_name == "list_promo_codes":
+        if isinstance(result, list):
+            if len(result) == 0:
+                return "There are no active promo codes."
+            codes = ", ".join(f"{p['code']} ({p['discount']})" for p in result[:5])
+            if len(result) > 5:
+                return f"There are {len(result)} promo codes. Including {codes}, and more."
+            return f"There are {len(result)} promo codes: {codes}."
+
+    elif tool_name == "validate_promo_code":
+        if isinstance(result, dict):
+            return result.get("message", "Could not validate promo code.")
+
+    elif tool_name == "deactivate_promo_code":
+        if isinstance(result, dict):
+            return result.get("message", result.get("error", "Could not deactivate promo code."))
 
     # ============== Dashboard ==============
     elif tool_name == "refresh_dashboard":

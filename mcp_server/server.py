@@ -18,7 +18,7 @@ from app.models import (
     Venue, Event, TicketTier, Ticket, EventGoer, TicketStatus,
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference, EventCategory,
-    MarketingCampaign,
+    MarketingCampaign, PromoCode, DiscountType,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -638,6 +638,58 @@ async def list_tools():
                 "required": ["subject", "content"],
             },
         ),
+        # ============== Promo Code Tools ==============
+        Tool(
+            name="create_promo_code",
+            description="Create a new promo/discount code. Discount types: 'percent' (1-100) or 'fixed_cents' (amount in cents).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The promo code (will be uppercased, e.g. SUMMER20)"},
+                    "discount_type": {"type": "string", "enum": ["percent", "fixed_cents"], "description": "'percent' for percentage off, 'fixed_cents' for fixed amount in cents (e.g. 500 = $5.00)"},
+                    "discount_value": {"type": "integer", "description": "1-100 for percent, or cents for fixed"},
+                    "event_id": {"type": "integer", "description": "Limit to specific event (optional, null = all events)"},
+                    "max_uses": {"type": "integer", "description": "Maximum uses (optional, null = unlimited)"},
+                    "valid_until": {"type": "string", "description": "Expiry date ISO format (optional)"},
+                },
+                "required": ["code", "discount_type", "discount_value"],
+            },
+        ),
+        Tool(
+            name="list_promo_codes",
+            description="List all promo/discount codes, optionally filtered by event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Filter by event ID (optional)"},
+                    "active_only": {"type": "boolean", "description": "Only show active codes (default true)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="validate_promo_code",
+            description="Check if a promo code is valid for a specific ticket tier and preview the discount",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The promo code to validate"},
+                    "ticket_tier_id": {"type": "integer", "description": "The ticket tier to check price against"},
+                },
+                "required": ["code", "ticket_tier_id"],
+            },
+        ),
+        Tool(
+            name="deactivate_promo_code",
+            description="Deactivate a promo code so it can no longer be used",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "The promo code to deactivate"},
+                },
+                "required": ["code"],
+            },
+        ),
         # ============== Phone Verification Tools ==============
         Tool(
             name="send_verification_code",
@@ -916,6 +968,20 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                         "High spenders ($500+)": "quick_send_campaign with target_min_spent_cents=50000",
                         "Concert fans": "quick_send_campaign with target_category_ids=[id] (use list_categories first)",
                         "VIP high spenders": "quick_send_campaign with target_vip=true + target_min_spent_cents=50000",
+                    },
+                },
+            "promo_codes": {
+                    "description": "Create and manage promo/discount codes for ticket purchases",
+                    "steps": [
+                        "1. Use create_promo_code to make a new code (e.g. SUMMER20, 20% off)",
+                        "2. Use validate_promo_code to check if a code works for a specific tier",
+                        "3. Use list_promo_codes to see all active codes",
+                        "4. Use deactivate_promo_code to disable a code",
+                    ],
+                    "examples": {
+                        "20% off all events": "create_promo_code code=VIP20 discount_type=percent discount_value=20",
+                        "$10 off specific event": "create_promo_code code=SAVE10 discount_type=fixed_cents discount_value=1000 event_id=5",
+                        "Limited use 50% off": "create_promo_code code=FLASH50 discount_type=percent discount_value=50 max_uses=20",
                     },
                 },
             "error_recovery": {
@@ -2885,6 +2951,127 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 }
                 for n in notes
             ],
+        }
+
+    # ============== Promo Code Tools ==============
+    elif name == "create_promo_code":
+        code_upper = arguments["code"].upper()
+        existing = db.query(PromoCode).filter(PromoCode.code == code_upper).first()
+        if existing:
+            return {"error": f"Promo code '{code_upper}' already exists"}
+
+        discount_type_str = arguments["discount_type"]
+        discount_value = arguments["discount_value"]
+        if discount_type_str == "percent" and not (1 <= discount_value <= 100):
+            return {"error": "Percent discount must be between 1 and 100"}
+        if discount_type_str == "fixed_cents" and discount_value <= 0:
+            return {"error": "Fixed discount must be a positive number of cents"}
+
+        event_id = arguments.get("event_id")
+        if event_id:
+            event = db.query(Event).filter(Event.id == event_id).first()
+            if not event:
+                return {"error": f"Event {event_id} not found"}
+
+        valid_until = None
+        if arguments.get("valid_until"):
+            valid_until = datetime.fromisoformat(arguments["valid_until"])
+
+        promo = PromoCode(
+            code=code_upper,
+            discount_type=DiscountType(discount_type_str),
+            discount_value=discount_value,
+            event_id=event_id,
+            max_uses=arguments.get("max_uses"),
+            valid_until=valid_until,
+        )
+        db.add(promo)
+        db.commit()
+        db.refresh(promo)
+
+        discount_desc = f"{discount_value}%" if discount_type_str == "percent" else f"${discount_value / 100:.2f}"
+        return {
+            "success": True,
+            "promo_code_id": promo.id,
+            "code": promo.code,
+            "discount": discount_desc,
+            "discount_type": discount_type_str,
+            "discount_value": discount_value,
+            "event_id": event_id,
+            "max_uses": promo.max_uses,
+        }
+
+    elif name == "list_promo_codes":
+        query = db.query(PromoCode)
+        if arguments.get("event_id"):
+            query = query.filter(PromoCode.event_id == arguments["event_id"])
+        if arguments.get("active_only", True):
+            query = query.filter(PromoCode.is_active == True)
+        promos = query.order_by(PromoCode.created_at.desc()).all()
+        return [
+            {
+                "id": p.id,
+                "code": p.code,
+                "discount_type": p.discount_type.value,
+                "discount_value": p.discount_value,
+                "discount": f"{p.discount_value}%" if p.discount_type == DiscountType.PERCENT else f"${p.discount_value / 100:.2f}",
+                "is_active": p.is_active,
+                "uses_count": p.uses_count,
+                "max_uses": p.max_uses,
+                "event_id": p.event_id,
+                "valid_until": str(p.valid_until) if p.valid_until else None,
+            }
+            for p in promos
+        ]
+
+    elif name == "validate_promo_code":
+        code_str = arguments["code"].upper()
+        tier_id = arguments["ticket_tier_id"]
+        promo = db.query(PromoCode).filter(PromoCode.code == code_str).first()
+        if not promo:
+            return {"valid": False, "message": "Promo code not found"}
+        if not promo.is_active:
+            return {"valid": False, "message": "Promo code is inactive"}
+        tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+        if not tier:
+            return {"valid": False, "message": "Ticket tier not found"}
+        if promo.event_id and promo.event_id != tier.event_id:
+            return {"valid": False, "message": "Promo code is not valid for this event"}
+        now = datetime.utcnow()
+        if promo.valid_until and now > promo.valid_until.replace(tzinfo=None):
+            return {"valid": False, "message": "Promo code has expired"}
+        if promo.max_uses and promo.uses_count >= promo.max_uses:
+            return {"valid": False, "message": "Promo code usage limit reached"}
+
+        original = tier.price
+        if promo.discount_type == DiscountType.PERCENT:
+            discount = int(original * promo.discount_value / 100)
+        else:
+            discount = min(promo.discount_value, original)
+        discounted = max(original - discount, 0)
+
+        return {
+            "valid": True,
+            "code": promo.code,
+            "discount_type": promo.discount_type.value,
+            "discount_value": promo.discount_value,
+            "original_price_cents": original,
+            "discount_amount_cents": discount,
+            "discounted_price_cents": discounted,
+            "message": f"Code '{promo.code}' is valid! ${discount / 100:.2f} off, final price ${discounted / 100:.2f}.",
+        }
+
+    elif name == "deactivate_promo_code":
+        code_str = arguments.get("code", "").upper()
+        promo = db.query(PromoCode).filter(PromoCode.code == code_str).first()
+        if not promo:
+            return {"error": "Promo code not found"}
+        promo.is_active = False
+        db.commit()
+        return {
+            "success": True,
+            "code": promo.code,
+            "message": f"Promo code '{promo.code}' has been deactivated.",
         }
 
     return {"error": f"Unknown tool: {name}"}

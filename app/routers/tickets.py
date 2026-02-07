@@ -7,7 +7,7 @@ import secrets
 from datetime import datetime
 
 from app.database import get_db
-from app.models import Event, TicketTier, Ticket, EventGoer, TicketStatus
+from app.models import Event, TicketTier, Ticket, EventGoer, TicketStatus, PromoCode, DiscountType
 from app.schemas import (
     PurchaseRequest,
     CheckoutSessionResponse,
@@ -71,8 +71,17 @@ def create_checkout_session(
         db.commit()
         db.refresh(event_goer)
 
-    # Free ticket flow — skip Stripe entirely for $0 tiers
-    if tier.price == 0:
+    # Promo code validation
+    promo = None
+    discounted_price = tier.price
+    discount_amount = 0
+    if purchase.promo_code:
+        promo, discounted_price, discount_amount = _validate_promo(
+            db, purchase.promo_code, tier, event_id
+        )
+
+    # Free ticket flow — skip Stripe for $0 tiers or 100% discount
+    if discounted_price == 0:
         tickets = []
         for _ in range(purchase.quantity):
             ticket = Ticket(
@@ -81,17 +90,24 @@ def create_checkout_session(
                 qr_code_token=secrets.token_urlsafe(16),
                 status=TicketStatus.PAID,
                 purchased_at=datetime.utcnow(),
+                promo_code_id=promo.id if promo else None,
+                discount_amount_cents=discount_amount if promo else None,
             )
             db.add(ticket)
             tickets.append(ticket)
 
         tier.quantity_sold += purchase.quantity
+        if promo:
+            promo.uses_count += purchase.quantity
         db.commit()
         for t in tickets:
             db.refresh(t)
 
+        msg = f"{purchase.quantity} free ticket(s) confirmed for {event.name}!"
+        if promo:
+            msg = f"{purchase.quantity} ticket(s) confirmed for {event.name} (code {promo.code} applied)!"
         return CheckoutSessionResponse(
-            message=f"{purchase.quantity} free ticket(s) confirmed for {event.name}!",
+            message=msg,
             tickets=[{"id": t.id, "qr_token": t.qr_code_token} for t in tickets],
         )
 
@@ -107,6 +123,8 @@ def create_checkout_session(
             ticket_tier_id=tier.id,
             event_goer_id=event_goer.id,
             status=TicketStatus.PENDING,
+            promo_code_id=promo.id if promo else None,
+            discount_amount_cents=discount_amount if promo else None,
         )
         db.add(ticket)
         tickets.append(ticket)
@@ -118,7 +136,21 @@ def create_checkout_session(
         db.refresh(t)
 
     try:
-        line_item = get_stripe_checkout_line_item(tier, purchase.quantity)
+        # When promo applied, use inline price_data with adjusted amount
+        if promo and discount_amount > 0:
+            line_item = {
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": discounted_price,
+                    "product_data": {
+                        "name": f"{event.name} - {tier.name}",
+                        "description": f"{tier.description or 'Ticket'} (Code: {promo.code})",
+                    },
+                },
+                "quantity": purchase.quantity,
+            }
+        else:
+            line_item = get_stripe_checkout_line_item(tier, purchase.quantity)
 
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=["card"],
@@ -131,6 +163,7 @@ def create_checkout_session(
                 "event_id": str(event_id),
                 "tier_id": str(tier.id),
                 "stripe_product_id": tier.stripe_product_id or "",
+                "promo_code": promo.code if promo else "",
             },
             customer_email=purchase.email,
         )
@@ -138,6 +171,8 @@ def create_checkout_session(
         for ticket in tickets:
             ticket.stripe_checkout_session_id = checkout_session.id
 
+        if promo:
+            promo.uses_count += purchase.quantity
         db.commit()
 
         return CheckoutSessionResponse(
@@ -253,6 +288,34 @@ def validate_ticket(qr_token: str, db: Session = Depends(get_db)):
         message="Ticket validated successfully - Welcome!",
         ticket=_build_ticket_full_response(ticket),
     )
+
+
+def _validate_promo(db: Session, code_str: str, tier: TicketTier, event_id: int):
+    """Validate promo code and return (promo, discounted_price, discount_amount)."""
+    promo = db.query(PromoCode).filter(PromoCode.code == code_str.upper()).first()
+    if not promo:
+        raise HTTPException(status_code=400, detail="Invalid promo code")
+    if not promo.is_active:
+        raise HTTPException(status_code=400, detail="Promo code is no longer active")
+    if promo.event_id and promo.event_id != event_id:
+        raise HTTPException(status_code=400, detail="Promo code is not valid for this event")
+
+    now = datetime.utcnow()
+    if promo.valid_from and now < promo.valid_from.replace(tzinfo=None):
+        raise HTTPException(status_code=400, detail="Promo code is not yet valid")
+    if promo.valid_until and now > promo.valid_until.replace(tzinfo=None):
+        raise HTTPException(status_code=400, detail="Promo code has expired")
+    if promo.max_uses and promo.uses_count >= promo.max_uses:
+        raise HTTPException(status_code=400, detail="Promo code has reached its usage limit")
+
+    original = tier.price
+    if promo.discount_type == DiscountType.PERCENT:
+        discount = int(original * promo.discount_value / 100)
+    else:
+        discount = min(promo.discount_value, original)
+    discounted = max(original - discount, 0)
+
+    return promo, discounted, discount
 
 
 def _build_ticket_full_response(ticket: Ticket) -> TicketFullResponse:
