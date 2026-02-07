@@ -92,6 +92,9 @@ def create_checkout_session(
                 purchased_at=datetime.utcnow(),
                 promo_code_id=promo.id if promo else None,
                 discount_amount_cents=discount_amount if promo else None,
+                utm_source=purchase.utm_source,
+                utm_medium=purchase.utm_medium,
+                utm_campaign=purchase.utm_campaign,
             )
             db.add(ticket)
             tickets.append(ticket)
@@ -129,6 +132,9 @@ def create_checkout_session(
             status=TicketStatus.PENDING,
             promo_code_id=promo.id if promo else None,
             discount_amount_cents=discount_amount if promo else None,
+            utm_source=purchase.utm_source,
+            utm_medium=purchase.utm_medium,
+            utm_campaign=purchase.utm_campaign,
         )
         db.add(ticket)
         tickets.append(ticket)
@@ -168,6 +174,9 @@ def create_checkout_session(
                 "tier_id": str(tier.id),
                 "stripe_product_id": tier.stripe_product_id or "",
                 "promo_code": promo.code if promo else "",
+                "utm_source": purchase.utm_source or "",
+                "utm_medium": purchase.utm_medium or "",
+                "utm_campaign": purchase.utm_campaign or "",
             },
             customer_email=purchase.email,
         )

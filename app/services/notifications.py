@@ -12,7 +12,7 @@ from app.models import (
 from app.services.email import send_ticket_email
 from app.services.sms import (
     send_ticket_sms, send_reminder_sms, send_event_update_sms,
-    send_event_cancelled_sms, send_marketing_sms,
+    send_event_cancelled_sms, send_event_postponed_sms, send_marketing_sms,
 )
 from app.config import get_settings
 
@@ -380,6 +380,117 @@ def send_event_cancellation_notifications(
                 stats["notifications_sent"] += 1
                 log_notification(
                     db, event_goer.id, NotificationType.EVENT_CANCELLED,
+                    NotificationChannel.SMS, message,
+                    event_id=event_id,
+                    status=NotificationStatus.SENT,
+                    external_id=result.get("sid"),
+                )
+
+    db.commit()
+    return stats
+
+
+def send_event_postponement_notifications(
+    db: Session,
+    event_id: int,
+    original_date: str,
+    new_date: str = None,
+    new_time: str = None,
+    reason: Optional[str] = None,
+    channels: list[NotificationChannel] = None,
+) -> dict:
+    """Send postponement notifications to all ticket holders."""
+    if channels is None:
+        channels = [NotificationChannel.EMAIL]
+
+    event = (
+        db.query(Event)
+        .options(joinedload(Event.venue))
+        .filter(Event.id == event_id)
+        .first()
+    )
+
+    if not event:
+        return {"error": "Event not found"}
+
+    tickets = (
+        db.query(Ticket)
+        .options(joinedload(Ticket.event_goer))
+        .join(TicketTier)
+        .filter(TicketTier.event_id == event_id)
+        .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.PENDING, TicketStatus.CHECKED_IN]))
+        .all()
+    )
+
+    stats = {
+        "event_id": event_id,
+        "event_name": event.name,
+        "notifications_sent": 0,
+    }
+
+    event_goers_notified = set()
+
+    for ticket in tickets:
+        event_goer = ticket.event_goer
+
+        if event_goer.id in event_goers_notified:
+            continue
+
+        event_goers_notified.add(event_goer.id)
+
+        message = f"{event.name} originally on {original_date} has been postponed."
+        if new_date:
+            message += f" New date: {new_date}"
+        if reason:
+            message += f" Reason: {reason}"
+
+        # Send email
+        if NotificationChannel.EMAIL in channels and event_goer.email_opt_in:
+            try:
+                from app.services.email import send_event_postponed_email
+                success = send_event_postponed_email(
+                    to_email=event_goer.email,
+                    recipient_name=event_goer.name,
+                    event_name=event.name,
+                    original_date=original_date,
+                    new_date=new_date,
+                    new_time=new_time,
+                    venue_name=event.venue.name,
+                    postponement_reason=reason,
+                )
+                if success:
+                    stats["notifications_sent"] += 1
+                    log_notification(
+                        db, event_goer.id, NotificationType.EVENT_UPDATE,
+                        NotificationChannel.EMAIL, message,
+                        subject=f"Postponed: {event.name}",
+                        event_id=event_id,
+                        status=NotificationStatus.SENT,
+                    )
+            except Exception as e:
+                log_notification(
+                    db, event_goer.id, NotificationType.EVENT_UPDATE,
+                    NotificationChannel.EMAIL, message,
+                    event_id=event_id,
+                    status=NotificationStatus.FAILED,
+                    failed_reason=str(e),
+                )
+
+        # Send SMS
+        if NotificationChannel.SMS in channels and event_goer.sms_opt_in and event_goer.phone:
+            result = send_event_postponed_sms(
+                to_phone=event_goer.phone,
+                recipient_name=event_goer.name,
+                event_name=event.name,
+                original_date=original_date,
+                new_date=new_date,
+                new_time=new_time,
+                postponement_reason=reason,
+            )
+            if result["success"]:
+                stats["notifications_sent"] += 1
+                log_notification(
+                    db, event_goer.id, NotificationType.EVENT_UPDATE,
                     NotificationChannel.SMS, message,
                     event_id=event_id,
                     status=NotificationStatus.SENT,

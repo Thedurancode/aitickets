@@ -560,6 +560,20 @@ async def voice_action(request: Request):
         "change tier": "update_ticket_tier",
         "pause tier": "update_ticket_tier",
         "activate tier": "update_ticket_tier",
+        # Postpone event
+        "postpone event": "postpone_event",
+        "postpone_event": "postpone_event",
+        "reschedule event": "postpone_event",
+        "delay event": "postpone_event",
+        "push back event": "postpone_event",
+        "move event date": "postpone_event",
+        # Conversion analytics
+        "conversion analytics": "get_conversion_analytics",
+        "conversion rate": "get_conversion_analytics",
+        "conversions": "get_conversion_analytics",
+        "funnel": "get_conversion_analytics",
+        "how many converted": "get_conversion_analytics",
+        "purchase analytics": "get_conversion_analytics",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -662,6 +676,18 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
         if isinstance(result, dict):
             total = result.get("total_recipients", 0)
             return f"Event cancelled. Notifications sent to {total} ticket holders."
+
+    elif tool_name == "postpone_event":
+        if isinstance(result, dict):
+            sent = result.get("notifications_sent", 0)
+            new_date = result.get("new_date")
+            new_time = result.get("new_time")
+            name = result.get("event_name", "the event")
+            if new_date and new_time:
+                return f"Event postponed. {name} has been rescheduled to {new_date} at {new_time}. Notifications sent to {sent} ticket holders."
+            elif new_date:
+                return f"Event postponed. {name} has been rescheduled to {new_date}. Notifications sent to {sent} ticket holders."
+            return f"Event postponed. Notifications sent to {sent} ticket holders. New date to be announced."
 
     # ============== Venue Tools ==============
     elif tool_name == "list_venues":
@@ -1051,6 +1077,21 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                 name = result.get("event_name", "the event")
                 return f"In the last {days} days, {name} had {views} page views from {unique} unique visitors."
             return f"In the last {days} days, all event pages had {views} total views from {unique} unique visitors."
+
+    elif tool_name == "get_conversion_analytics":
+        if isinstance(result, dict):
+            funnel = result.get("funnel", {})
+            rate = result.get("conversion_rate_percent", 0)
+            days = result.get("period_days", 30)
+            name = result.get("event_name", "the event")
+            detail = funnel.get("detail_views", 0)
+            purchases = funnel.get("purchases", 0)
+            buyers = funnel.get("unique_buyers", 0)
+            return (
+                f"In the last {days} days, {name} had {detail} detail page views "
+                f"and {purchases} ticket purchases from {buyers} unique buyers. "
+                f"Conversion rate is {rate} percent."
+            )
 
     elif tool_name == "share_event_link":
         if isinstance(result, dict):

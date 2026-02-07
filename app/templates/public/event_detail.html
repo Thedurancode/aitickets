@@ -337,6 +337,12 @@ function purchase() {
     };
     if (promoCode) body.promo_code = promoCode;
 
+    // Pass UTM params for conversion attribution
+    var urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('utm_source')) body.utm_source = urlParams.get('utm_source');
+    if (urlParams.get('utm_medium')) body.utm_medium = urlParams.get('utm_medium');
+    if (urlParams.get('utm_campaign')) body.utm_campaign = urlParams.get('utm_campaign');
+
     fetch('/api/tickets/events/' + eventId + '/purchase', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},

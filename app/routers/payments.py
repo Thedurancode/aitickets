@@ -85,6 +85,14 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         ticket.purchased_at = datetime.utcnow()
         ticket.qr_code_token = uuid.uuid4().hex
 
+        # Copy UTM from metadata if not already on ticket
+        if not ticket.utm_source and metadata.get("utm_source"):
+            ticket.utm_source = metadata["utm_source"]
+        if not ticket.utm_medium and metadata.get("utm_medium"):
+            ticket.utm_medium = metadata["utm_medium"]
+        if not ticket.utm_campaign and metadata.get("utm_campaign"):
+            ticket.utm_campaign = metadata["utm_campaign"]
+
         # Update tier sold count
         ticket.ticket_tier.quantity_sold += 1
         # Auto sold-out check

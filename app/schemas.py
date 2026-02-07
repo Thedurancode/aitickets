@@ -225,6 +225,9 @@ class PurchaseRequest(BaseModel):
     phone: Optional[str] = None
     quantity: int = 1
     promo_code: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
 
 
 class CheckoutSessionResponse(BaseModel):

@@ -138,6 +138,31 @@ def send_event_cancelled_sms(
     return send_sms(to_phone, message)
 
 
+def send_event_postponed_sms(
+    to_phone: str,
+    recipient_name: str,
+    event_name: str,
+    original_date: str,
+    new_date: str = None,
+    new_time: str = None,
+    postponement_reason: str = None,
+) -> dict:
+    """Send event postponement notification via SMS."""
+    message = f"📅 {event_name} originally on {original_date} has been postponed."
+
+    if new_date and new_time:
+        message += f"\n\nNew date: {new_date} at {new_time}"
+    elif new_date:
+        message += f"\n\nNew date: {new_date}"
+
+    if postponement_reason:
+        message += f"\n\nReason: {postponement_reason}"
+
+    message += "\n\nYour tickets remain valid. Check your email for details."
+
+    return send_sms(to_phone, message)
+
+
 def send_marketing_sms(
     to_phone: str,
     recipient_name: str,

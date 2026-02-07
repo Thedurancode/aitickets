@@ -570,6 +570,21 @@ async def list_tools():
             },
         ),
         Tool(
+            name="postpone_event",
+            description="Postpone an event to a new date/time and notify all ticket holders. Tickets remain valid.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "new_date": {"type": "string", "description": "New event date in YYYY-MM-DD format (optional)"},
+                    "new_time": {"type": "string", "description": "New event time in HH:MM format (optional)"},
+                    "reason": {"type": "string", "description": "Reason for postponement (optional)"},
+                    "use_sms": {"type": "boolean", "description": "Also send SMS notifications (default false)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
             name="send_sms_ticket",
             description="Send ticket details via SMS to a ticket holder",
             inputSchema={
@@ -762,6 +777,18 @@ async def list_tools():
                     "days": {"type": "integer", "description": "Number of days to look back (default 30)"},
                 },
                 "required": [],
+            },
+        ),
+        Tool(
+            name="get_conversion_analytics",
+            description="Get conversion funnel analytics for an event: page views to purchases, conversion rate, and UTM attribution breakdown",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "days": {"type": "integer", "description": "Number of days to look back (default 30)"},
+                },
+                "required": ["event_id"],
             },
         ),
         Tool(
@@ -2124,6 +2151,53 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         result["event_status"] = "cancelled"
         return result
 
+    elif name == "postpone_event":
+        from app.services.notifications import send_event_postponement_notifications
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        # Save original date/time before updating
+        original_date = event.event_date
+        original_time = event.event_time
+
+        # Update event status
+        event.status = EventStatus.POSTPONED
+        event.cancellation_reason = arguments.get("reason")
+
+        # Update date/time if provided
+        new_date = arguments.get("new_date")
+        new_time = arguments.get("new_time")
+        if new_date:
+            event.event_date = new_date
+        if new_time:
+            event.event_time = new_time
+
+        db.commit()
+
+        channels = [NotificationChannel.EMAIL]
+        if arguments.get("use_sms"):
+            channels.append(NotificationChannel.SMS)
+
+        result = send_event_postponement_notifications(
+            db=db,
+            event_id=arguments["event_id"],
+            original_date=original_date,
+            new_date=new_date,
+            new_time=new_time,
+            reason=arguments.get("reason"),
+            channels=channels,
+        )
+        result["event_status"] = "postponed"
+        result["original_date"] = original_date
+        result["original_time"] = original_time
+        if new_date:
+            result["new_date"] = new_date
+        if new_time:
+            result["new_time"] = new_time
+        return result
+
     elif name == "send_sms_ticket":
         from app.services.notifications import send_sms_ticket
 
@@ -3375,6 +3449,99 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             result["event_id"] = event_id
             result["event_name"] = event.name if event else "Unknown"
         return result
+
+    elif name == "get_conversion_analytics":
+        from app.models import PageView
+        from sqlalchemy import func as sqlfunc
+
+        event_id = arguments["event_id"]
+        days = arguments.get("days", 30)
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        event = db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        # Page views
+        listing_views = db.query(sqlfunc.count(PageView.id)).filter(
+            PageView.page == "listing", PageView.created_at >= cutoff
+        ).scalar() or 0
+
+        detail_views = db.query(sqlfunc.count(PageView.id)).filter(
+            PageView.event_id == event_id, PageView.page == "detail",
+            PageView.created_at >= cutoff
+        ).scalar() or 0
+
+        unique_detail_visitors = db.query(
+            sqlfunc.count(sqlfunc.distinct(PageView.ip_hash))
+        ).filter(
+            PageView.event_id == event_id, PageView.page == "detail",
+            PageView.created_at >= cutoff
+        ).scalar() or 0
+
+        # Purchases in period
+        purchases = (
+            db.query(sqlfunc.count(Ticket.id))
+            .join(TicketTier)
+            .filter(
+                TicketTier.event_id == event_id,
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+                Ticket.purchased_at >= cutoff,
+            )
+            .scalar() or 0
+        )
+
+        unique_buyers = (
+            db.query(sqlfunc.count(sqlfunc.distinct(Ticket.event_goer_id)))
+            .join(TicketTier)
+            .filter(
+                TicketTier.event_id == event_id,
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+                Ticket.purchased_at >= cutoff,
+            )
+            .scalar() or 0
+        )
+
+        # Conversion rate
+        conversion_rate = round((unique_buyers / unique_detail_visitors * 100), 1) if unique_detail_visitors > 0 else 0
+
+        # UTM attribution for purchases
+        utm_breakdown = (
+            db.query(
+                Ticket.utm_source,
+                sqlfunc.count(Ticket.id).label("tickets"),
+                sqlfunc.count(sqlfunc.distinct(Ticket.event_goer_id)).label("buyers"),
+            )
+            .join(TicketTier)
+            .filter(
+                TicketTier.event_id == event_id,
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+                Ticket.purchased_at >= cutoff,
+                Ticket.utm_source != None,
+            )
+            .group_by(Ticket.utm_source)
+            .order_by(sqlfunc.count(Ticket.id).desc())
+            .limit(10)
+            .all()
+        )
+
+        return {
+            "event_id": event_id,
+            "event_name": event.name,
+            "period_days": days,
+            "funnel": {
+                "listing_views": listing_views,
+                "detail_views": detail_views,
+                "unique_detail_visitors": unique_detail_visitors,
+                "purchases": purchases,
+                "unique_buyers": unique_buyers,
+            },
+            "conversion_rate_percent": conversion_rate,
+            "utm_attribution": [
+                {"source": s or "direct", "tickets": t, "buyers": b}
+                for s, t, b in utm_breakdown
+            ],
+        }
 
     elif name == "share_event_link":
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()

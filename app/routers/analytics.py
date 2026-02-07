@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import PageView, Event
+from app.models import PageView, Event, Ticket, TicketTier, TicketStatus
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -151,4 +151,97 @@ def get_analytics_overview(
         "top_events": [{"event_id": eid, "name": name, "views": c} for eid, name, c in top_events],
         "top_referrers": [{"referrer": r, "count": c} for r, c in top_referrers],
         "views_by_day": [{"date": str(d), "views": c} for d, c in views_by_day],
+    }
+
+
+@router.get("/events/{event_id}/conversions")
+def get_conversion_analytics(
+    event_id: int,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """Get conversion funnel analytics for a specific event."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return {"error": "Event not found"}
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    # Listing views (global — listing page shows all events)
+    listing_views = db.query(func.count(PageView.id)).filter(
+        PageView.page == "listing", PageView.created_at >= cutoff
+    ).scalar() or 0
+
+    # Detail views for this event
+    detail_views = db.query(func.count(PageView.id)).filter(
+        PageView.event_id == event_id, PageView.page == "detail",
+        PageView.created_at >= cutoff
+    ).scalar() or 0
+
+    unique_detail = db.query(func.count(func.distinct(PageView.ip_hash))).filter(
+        PageView.event_id == event_id, PageView.page == "detail",
+        PageView.created_at >= cutoff
+    ).scalar() or 0
+
+    # Purchases
+    purchases = (
+        db.query(func.count(Ticket.id))
+        .join(TicketTier)
+        .filter(
+            TicketTier.event_id == event_id,
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            Ticket.purchased_at >= cutoff,
+        )
+        .scalar() or 0
+    )
+
+    unique_buyers = (
+        db.query(func.count(func.distinct(Ticket.event_goer_id)))
+        .join(TicketTier)
+        .filter(
+            TicketTier.event_id == event_id,
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            Ticket.purchased_at >= cutoff,
+        )
+        .scalar() or 0
+    )
+
+    conversion_rate = round((unique_buyers / unique_detail * 100), 1) if unique_detail > 0 else 0
+
+    # UTM attribution
+    utm_purchases = (
+        db.query(
+            Ticket.utm_source,
+            func.count(Ticket.id).label("tickets"),
+            func.count(func.distinct(Ticket.event_goer_id)).label("buyers"),
+        )
+        .join(TicketTier)
+        .filter(
+            TicketTier.event_id == event_id,
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            Ticket.purchased_at >= cutoff,
+            Ticket.utm_source != None,
+        )
+        .group_by(Ticket.utm_source)
+        .order_by(func.count(Ticket.id).desc())
+        .limit(10)
+        .all()
+    )
+
+    return {
+        "event_id": event_id,
+        "event_name": event.name,
+        "period_days": days,
+        "funnel": {
+            "listing_views": listing_views,
+            "detail_views": detail_views,
+            "unique_detail_visitors": unique_detail,
+            "purchases": purchases,
+            "unique_buyers": unique_buyers,
+        },
+        "conversion_rate_percent": conversion_rate,
+        "utm_attribution": [
+            {"source": s or "direct", "tickets": t, "buyers": b}
+            for s, t, b in utm_purchases
+        ],
     }

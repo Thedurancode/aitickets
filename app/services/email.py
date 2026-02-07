@@ -139,6 +139,31 @@ def send_event_cancelled_email(
     return _send_email(to_email, f"Cancelled: {event_name}", html_content)
 
 
+def send_event_postponed_email(
+    to_email: str,
+    recipient_name: str,
+    event_name: str,
+    original_date: str,
+    new_date: str = None,
+    new_time: str = None,
+    venue_name: str = None,
+    postponement_reason: Optional[str] = None,
+) -> bool:
+    """Send an event postponement notification email."""
+    template = env.get_template("event_postponed_email.html")
+    html_content = template.render(
+        recipient_name=recipient_name,
+        event_name=event_name,
+        original_date=original_date,
+        new_date=new_date,
+        new_time=new_time,
+        venue_name=venue_name,
+        postponement_reason=postponement_reason,
+    )
+
+    return _send_email(to_email, f"Postponed: {event_name}", html_content)
+
+
 def send_marketing_email(
     to_email: str,
     recipient_name: str,

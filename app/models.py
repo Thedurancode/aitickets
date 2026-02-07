@@ -193,6 +193,11 @@ class Ticket(Base):
     promo_code_id = Column(Integer, ForeignKey("promo_codes.id"), nullable=True)
     discount_amount_cents = Column(Integer, nullable=True)
 
+    # UTM attribution tracking
+    utm_source = Column(String(100), nullable=True)
+    utm_medium = Column(String(100), nullable=True)
+    utm_campaign = Column(String(100), nullable=True)
+
     ticket_tier = relationship("TicketTier", back_populates="tickets")
     event_goer = relationship("EventGoer", back_populates="tickets")
     promo_code = relationship("PromoCode")
