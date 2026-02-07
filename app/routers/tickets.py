@@ -3,6 +3,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 import stripe
 import uuid
+import secrets
 from datetime import datetime
 
 from app.database import get_db
@@ -31,13 +32,8 @@ def create_checkout_session(
     purchase: PurchaseRequest,
     db: Session = Depends(get_db),
 ):
-    """Create a Stripe checkout session for ticket purchase."""
+    """Create a Stripe checkout session for ticket purchase, or issue free tickets instantly."""
     settings = get_settings()
-
-    if not settings.stripe_secret_key:
-        raise HTTPException(status_code=500, detail="Stripe not configured")
-
-    stripe.api_key = settings.stripe_secret_key
 
     # Verify event exists
     event = (
@@ -75,7 +71,36 @@ def create_checkout_session(
         db.commit()
         db.refresh(event_goer)
 
-    # Create pending tickets
+    # Free ticket flow — skip Stripe entirely for $0 tiers
+    if tier.price == 0:
+        tickets = []
+        for _ in range(purchase.quantity):
+            ticket = Ticket(
+                ticket_tier_id=tier.id,
+                event_goer_id=event_goer.id,
+                qr_code_token=secrets.token_urlsafe(16),
+                status=TicketStatus.PAID,
+                purchased_at=datetime.utcnow(),
+            )
+            db.add(ticket)
+            tickets.append(ticket)
+
+        tier.quantity_sold += purchase.quantity
+        db.commit()
+        for t in tickets:
+            db.refresh(t)
+
+        return CheckoutSessionResponse(
+            message=f"{purchase.quantity} free ticket(s) confirmed for {event.name}!",
+            tickets=[{"id": t.id, "qr_token": t.qr_code_token} for t in tickets],
+        )
+
+    # Paid ticket flow — create pending tickets and redirect to Stripe
+    if not settings.stripe_secret_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured")
+
+    stripe.api_key = settings.stripe_secret_key
+
     tickets = []
     for _ in range(purchase.quantity):
         ticket = Ticket(
@@ -88,13 +113,11 @@ def create_checkout_session(
 
     db.commit()
 
-    # Create Stripe checkout session
     ticket_ids = [t.id for t in tickets]
     for t in tickets:
         db.refresh(t)
 
     try:
-        # Use synced Stripe price if available, otherwise inline pricing
         line_item = get_stripe_checkout_line_item(tier, purchase.quantity)
 
         checkout_session = stripe.checkout.Session.create(
@@ -112,7 +135,6 @@ def create_checkout_session(
             customer_email=purchase.email,
         )
 
-        # Store checkout session ID on tickets
         for ticket in tickets:
             ticket.stripe_checkout_session_id = checkout_session.id
 
@@ -124,7 +146,6 @@ def create_checkout_session(
         )
 
     except stripe.error.StripeError as e:
-        # Clean up pending tickets on error
         for ticket in tickets:
             db.delete(ticket)
         db.commit()

@@ -433,6 +433,18 @@ async def list_tools():
             },
         ),
         Tool(
+            name="guest_list",
+            description="Get the full guest list for an event with names and check-in status",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "status": {"type": "string", "description": "Filter by status: all, checked_in, not_checked_in (default: all)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
             name="find_guest",
             description="Search for a guest by name to see their tickets",
             inputSchema={
@@ -1633,6 +1645,57 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "status": "paid",
             },
         }
+
+    elif name == "guest_list":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        query = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier),
+                joinedload(Ticket.event_goer),
+            )
+            .join(TicketTier)
+            .filter(TicketTier.event_id == event.id)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+        )
+
+        status_filter = arguments.get("status", "all")
+        if status_filter == "checked_in":
+            query = query.filter(Ticket.status == TicketStatus.CHECKED_IN)
+        elif status_filter == "not_checked_in":
+            query = query.filter(Ticket.status == TicketStatus.PAID)
+
+        tickets = query.all()
+
+        guests = []
+        for t in tickets:
+            guests.append({
+                "name": t.event_goer.name,
+                "email": t.event_goer.email,
+                "phone": t.event_goer.phone,
+                "tier": t.ticket_tier.name,
+                "status": t.status.value,
+                "ticket_id": t.id,
+                "qr_token": t.qr_code_token,
+            })
+
+        total = len(guests)
+        checked_in = sum(1 for g in guests if g["status"] == "checked_in")
+
+        response = {
+            "event": event.name,
+            "event_id": event.id,
+            "total_guests": total,
+            "checked_in": checked_in,
+            "not_checked_in": total - checked_in,
+            "guests": guests[:50],
+        }
+        if total > 50:
+            response["note"] = f"Showing first 50 of {total} guests. Use find_guest to search by name."
+        return response
 
     elif name == "find_guest":
         guest_name = arguments["name"].strip().lower()

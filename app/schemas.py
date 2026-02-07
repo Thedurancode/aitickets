@@ -215,8 +215,10 @@ class PurchaseRequest(BaseModel):
 
 
 class CheckoutSessionResponse(BaseModel):
-    checkout_url: str
-    session_id: str
+    checkout_url: Optional[str] = None
+    session_id: Optional[str] = None
+    tickets: Optional[list] = None
+    message: Optional[str] = None
 
 
 # ============== Validation Schemas ==============

@@ -724,6 +724,12 @@ async def voice_action(request: Request):
         "look up guest": "find_guest",
         "lookup guest": "find_guest",
         "find guest": "find_guest",
+        "guest list": "guest_list",
+        "who's coming": "guest_list",
+        "whos coming": "guest_list",
+        "how many people": "guest_list",
+        "attendee list": "guest_list",
+        "who's on the list": "guest_list",
         # Availability
         "availability": "get_ticket_availability",
         "how many tickets": "get_ticket_availability",
@@ -974,6 +980,21 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             if result.get("success"):
                 return result.get("message", "Guest checked out successfully.")
             return result.get("message", "Check-out failed.")
+
+    elif tool_name == "guest_list":
+        if isinstance(result, dict):
+            total = result.get("total_guests", 0)
+            checked_in = result.get("checked_in", 0)
+            event = result.get("event", "the event")
+            if total == 0:
+                return f"No guests on the list yet for {event}."
+            not_in = total - checked_in
+            parts = [f"{total} guest{'s' if total != 1 else ''} on the list for {event}."]
+            if checked_in > 0:
+                parts.append(f"{checked_in} checked in")
+            if not_in > 0:
+                parts.append(f"{not_in} not yet arrived")
+            return " ".join(parts) + "."
 
     elif tool_name == "find_guest":
         if isinstance(result, dict):

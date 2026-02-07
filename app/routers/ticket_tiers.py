@@ -66,8 +66,8 @@ def create_ticket_tier(
     db.commit()
     db.refresh(db_tier)
 
-    # Sync to Stripe
-    if sync_stripe:
+    # Sync to Stripe (skip for free tiers)
+    if sync_stripe and db_tier.price > 0:
         stripe_result = create_stripe_product_for_tier(db, db_tier, event)
         if stripe_result.get("error"):
             # Log but don't fail - tier is created, just not synced
@@ -105,8 +105,8 @@ def update_ticket_tier(
 
     db.commit()
 
-    # Handle price change in Stripe
-    if price_changed and db_tier.stripe_product_id:
+    # Handle price change in Stripe (skip for $0)
+    if price_changed and db_tier.stripe_product_id and new_price > 0:
         stripe_result = update_stripe_price_for_tier(db, db_tier, new_price)
         if stripe_result.get("error"):
             print(f"Warning: Failed to update Stripe price: {stripe_result['error']}")
