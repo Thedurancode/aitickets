@@ -63,3 +63,9 @@ def init_db():
         run_page_views_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_promoter_fields import run_migration as run_promoter_migration
+        run_promoter_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

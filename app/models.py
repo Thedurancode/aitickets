@@ -96,6 +96,8 @@ class Event(Base):
     event_time = Column(String(10), nullable=False)  # HH:MM format
     status = Column(Enum(EventStatus), default=EventStatus.SCHEDULED)
     cancellation_reason = Column(Text, nullable=True)
+    promoter_phone = Column(String(50), nullable=True)
+    promoter_name = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

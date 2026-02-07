@@ -71,6 +71,8 @@ class EventBase(BaseModel):
 class EventCreate(EventBase):
     venue_id: int
     category_ids: list[int] = []
+    promoter_phone: Optional[str] = None
+    promoter_name: Optional[str] = None
 
 
 class EventUpdate(BaseModel):
@@ -80,6 +82,8 @@ class EventUpdate(BaseModel):
     event_time: Optional[str] = None
     promo_video_url: Optional[str] = None
     category_ids: Optional[list[int]] = None
+    promoter_phone: Optional[str] = None
+    promoter_name: Optional[str] = None
 
 
 class EventResponse(EventBase):

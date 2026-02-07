@@ -797,6 +797,14 @@ async def voice_action(request: Request):
         "invite to event": "share_event_link",
         "text event link": "share_event_link",
         "email event link": "share_event_link",
+        # Magic link admin
+        "send admin link": "send_admin_link",
+        "admin link": "send_admin_link",
+        "edit event link": "send_admin_link",
+        "change event picture": "send_admin_link",
+        "upload event image": "send_admin_link",
+        "manage event link": "send_admin_link",
+        "event admin link": "send_admin_link",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -1248,6 +1256,17 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                 channels = " and ".join(sent_via)
                 return f"Done! I sent the link for {event_name} via {channels}."
             return f"Sorry, I couldn't send the link for {event_name}. Please check the email or phone number."
+
+    # ============== Magic Link Admin ==============
+    elif tool_name == "send_admin_link":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return f"Sorry, {result['error']}"
+            event_name = result.get("event", "the event")
+            sent_to = result.get("sent_to", "the promoter")
+            if result.get("success"):
+                return f"Done! I sent the admin link for {event_name} to the phone ending in {sent_to}. It expires in 1 hour."
+            return f"I generated the admin link for {event_name} but couldn't send the SMS. The promoter can use this link: {result.get('admin_url', '')}"
 
     # ============== Dashboard ==============
     elif tool_name == "refresh_dashboard":

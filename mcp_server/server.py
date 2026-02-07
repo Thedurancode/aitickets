@@ -34,6 +34,10 @@ server = Server("event-tickets")
 # Format: {phone: {"code": "123456", "expires": datetime, "verified": bool}}
 phone_verifications: dict[str, dict] = {}
 
+# Magic link tokens for event admin access (in production, use Redis)
+# Format: {token: {"event_id": int, "phone": str, "expires": datetime}}
+magic_link_tokens: dict[str, dict] = {}
+
 
 def get_db():
     """Get a database session."""
@@ -714,6 +718,17 @@ async def list_tools():
                     "to_phone": {"type": "string", "description": "Phone number to send SMS to (optional if email provided)"},
                     "recipient_name": {"type": "string", "description": "Recipient's name (optional, for personalization)"},
                     "message": {"type": "string", "description": "Optional custom message to include"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="send_admin_link",
+            description="Send a magic link via SMS to the event promoter's phone on file so they can manage the event (upload images, edit details). The link expires in 1 hour. Only works if the event has a promoter_phone set.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID to send the admin link for"},
                 },
                 "required": ["event_id"],
             },
@@ -3211,6 +3226,43 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         results["sent_via"] = sent_via
         results["success"] = len(sent_via) > 0
         return results
+
+    elif name == "send_admin_link":
+        import secrets
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        if not event.promoter_phone:
+            return {"error": f"No promoter phone number on file for '{event.name}'. Set it first with update_event."}
+
+        # Generate magic link token
+        token = secrets.token_urlsafe(32)
+        magic_link_tokens[token] = {
+            "event_id": event.id,
+            "phone": event.promoter_phone,
+            "expires": datetime.utcnow() + timedelta(hours=1),
+        }
+
+        admin_url = f"{settings.base_url}/events/{event.id}/admin?token={token}"
+
+        # Send SMS
+        from app.services.sms import send_sms
+        sms_body = f"Manage your event \"{event.name}\":\n\n{admin_url}\n\nThis link expires in 1 hour."
+        sms_result = send_sms(event.promoter_phone, sms_body)
+
+        phone_masked = "***" + event.promoter_phone[-4:] if len(event.promoter_phone) >= 4 else "***"
+
+        return {
+            "success": sms_result.get("success", False),
+            "event": event.name,
+            "event_id": event.id,
+            "sent_to": phone_masked,
+            "admin_url": admin_url,
+            "expires_in": "1 hour",
+            "sms_error": sms_result.get("error"),
+        }
 
     return {"error": f"Unknown tool: {name}"}
 
