@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block title %}Photos: {{ event.name }}{% endblock %}
+
+{% block content %}
+<!-- Back link -->
+<a href="/events/{{ event.id }}" class="inline-flex items-center gap-1 text-gray-400 hover:text-white text-sm mb-6 py-2 -ml-1 pl-1 transition-colors">
+    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+    </svg>
+    Back to {{ event.name }}
+</a>
+
+<h1 class="text-2xl sm:text-3xl font-extrabold mb-2">{{ event.name }} Photos</h1>
+<p class="text-gray-400 mb-8 text-sm">Share your photos from the event!</p>
+
+<!-- Upload Form -->
+<div class="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-8" data-animate>
+    <h2 class="text-lg font-bold mb-4">Upload Your Photos</h2>
+    <div class="space-y-4">
+        <div>
+            <label class="block text-sm text-gray-400 mb-1">Your Name (optional)</label>
+            <input type="text" id="uploader-name" placeholder="Your name"
+                   class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:border-brand">
+        </div>
+        <div>
+            <label class="block text-sm text-gray-400 mb-1">Select Photos</label>
+            <label class="block">
+                <input type="file" id="photo-input" accept="image/*" multiple class="hidden">
+                <div id="drop-zone" class="cursor-pointer bg-gray-800 hover:bg-gray-700 border border-gray-700 border-dashed rounded-lg px-4 py-8 text-center text-sm text-gray-300 transition-colors">
+                    <svg class="w-8 h-8 mx-auto mb-2 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    Tap to select photos
+                </div>
+            </label>
+        </div>
+        <div id="file-preview" class="hidden grid grid-cols-3 sm:grid-cols-4 gap-2"></div>
+        <button onclick="uploadPhotos()" id="upload-btn" class="hidden w-full bg-brand hover:bg-brand-dark text-white py-3 rounded-lg font-semibold transition-colors">
+            Upload Photos
+        </button>
+        <div id="upload-status" class="text-sm hidden"></div>
+    </div>
+</div>
+
+<!-- Photo Gallery -->
+{% if photos %}
+<h2 class="text-xl font-bold mb-4" data-animate>Event Photos ({{ photos|length }})</h2>
+<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3" data-animate>
+    {% for photo in photos %}
+    <div class="aspect-square rounded-lg overflow-hidden bg-gray-900 cursor-pointer" onclick="openLightbox('{{ photo.photo_url }}')">
+        <img src="{{ photo.photo_url }}" alt="Event photo{% if photo.uploaded_by_name %} by {{ photo.uploaded_by_name }}{% endif %}" class="w-full h-full object-cover hover:scale-105 transition-transform duration-300" loading="lazy">
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-center py-12 text-gray-500" data-animate>
+    <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+    </svg>
+    <p>No photos yet. Be the first to share!</p>
+</div>
+{% endif %}
+
+<!-- Lightbox -->
+<div id="lightbox" class="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center hidden" onclick="closeLightbox()">
+    <button class="absolute top-4 right-4 text-white/70 hover:text-white p-2" onclick="closeLightbox()">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+    </button>
+    <img id="lightbox-img" src="" alt="" class="max-w-[90vw] max-h-[90vh] object-contain rounded-lg">
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var eventId = {{ event.id }};
+
+document.getElementById('photo-input').addEventListener('change', function() {
+    showPreview(this.files);
+});
+
+function showPreview(files) {
+    var preview = document.getElementById('file-preview');
+    var btn = document.getElementById('upload-btn');
+    if (files.length > 0) {
+        preview.innerHTML = '';
+        preview.classList.remove('hidden');
+        btn.classList.remove('hidden');
+        btn.textContent = 'Upload ' + files.length + ' Photo' + (files.length > 1 ? 's' : '');
+        for (var i = 0; i < files.length; i++) {
+            (function(file) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    var div = document.createElement('div');
+                    div.className = 'aspect-square rounded-lg overflow-hidden bg-gray-800';
+                    div.innerHTML = '<img src="' + e.target.result + '" class="w-full h-full object-cover">';
+                    preview.appendChild(div);
+                };
+                reader.readAsDataURL(file);
+            })(files[i]);
+        }
+    } else {
+        preview.classList.add('hidden');
+        btn.classList.add('hidden');
+    }
+}
+
+function uploadPhotos() {
+    var input = document.getElementById('photo-input');
+    if (!input.files.length) return;
+
+    var btn = document.getElementById('upload-btn');
+    var status = document.getElementById('upload-status');
+    btn.disabled = true;
+    btn.textContent = 'Uploading...';
+    btn.classList.add('opacity-60');
+    status.classList.add('hidden');
+
+    var formData = new FormData();
+    for (var i = 0; i < input.files.length; i++) {
+        formData.append('files', input.files[i]);
+    }
+    var uploaderName = document.getElementById('uploader-name').value.trim();
+    var url = '/events/' + eventId + '/photos/upload';
+    if (uploaderName) url += '?uploaded_by=' + encodeURIComponent(uploaderName);
+
+    fetch(url, { method: 'POST', body: formData })
+    .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+    .then(function(res) {
+        if (res.ok) {
+            status.className = 'text-sm text-green-400';
+            status.textContent = res.data.message;
+            status.classList.remove('hidden');
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            status.className = 'text-sm text-red-400';
+            status.textContent = res.data.detail || 'Upload failed';
+            status.classList.remove('hidden');
+            btn.disabled = false;
+            btn.classList.remove('opacity-60');
+            btn.textContent = 'Upload Photos';
+        }
+    })
+    .catch(function() {
+        status.className = 'text-sm text-red-400';
+        status.textContent = 'Network error. Please try again.';
+        status.classList.remove('hidden');
+        btn.disabled = false;
+        btn.classList.remove('opacity-60');
+        btn.textContent = 'Upload Photos';
+    });
+}
+
+function openLightbox(url) {
+    document.getElementById('lightbox-img').src = url;
+    document.getElementById('lightbox').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox').classList.add('hidden');
+    document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeLightbox();
+});
+</script>
+{% endblock %}

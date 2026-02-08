@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import Event, EventCategory, EventStatus, PageView
+from app.models import Event, EventCategory, EventPhoto, EventStatus, PageView
 from app.config import get_settings
 from app.routers.announcement_queue import queue_announcement
 
@@ -20,6 +20,32 @@ router = APIRouter(tags=["public"])
 # Jinja2 template setup
 templates_dir = Path(__file__).parent.parent / "templates" / "public"
 jinja_env = Environment(loader=FileSystemLoader(str(templates_dir)))
+
+
+def _format_date(value):
+    """Format date string as 'January 10, 2026'."""
+    if not value:
+        return value
+    try:
+        from datetime import datetime as dt
+        if isinstance(value, str):
+            d = dt.strptime(value, "%Y-%m-%d")
+        else:
+            d = value
+        return d.strftime("%B %-d, %Y")
+    except (ValueError, TypeError):
+        return value
+
+jinja_env.filters["fdate"] = _format_date
+
+
+def _is_youtube(url):
+    """Check if a URL is a YouTube URL."""
+    if not url:
+        return False
+    return any(x in url for x in ["youtube.com", "youtu.be"])
+
+jinja_env.tests["youtube_url"] = _is_youtube
 
 
 def _get_branding():
@@ -113,10 +139,19 @@ def event_detail(
             "is_available": not is_sold_out and not is_paused,
         })
 
+    photos = (
+        db.query(EventPhoto)
+        .filter(EventPhoto.event_id == event_id)
+        .order_by(EventPhoto.created_at.desc())
+        .limit(20)
+        .all()
+    )
+
     template = jinja_env.get_template("event_detail.html")
     html = template.render(
         event=event,
         tiers=tiers,
+        photos=photos,
         page_type="detail",
         event_id=event_id,
         **_get_branding(),
@@ -226,7 +261,7 @@ async def admin_update_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    for field in ["name", "description", "event_date", "event_time", "promo_video_url", "doors_open_time"]:
+    for field in ["name", "description", "event_date", "event_time", "promo_video_url", "doors_open_time", "post_event_video_url"]:
         if field in body and body[field] is not None:
             setattr(event, field, body[field])
     if "is_visible" in body:
@@ -290,3 +325,82 @@ async def admin_upload_image(
     queue_announcement(event.id, event.name, "image_uploaded")
 
     return {"success": True, "image_url": event.image_url}
+
+
+# ============== Public Photo Gallery ==============
+
+@router.get("/events/{event_id}/photos", response_class=HTMLResponse)
+def event_photos_page(
+    event_id: int,
+    db: Session = Depends(get_db),
+):
+    """Public photo gallery & upload page for an event."""
+    event = db.query(Event).options(
+        joinedload(Event.venue),
+    ).filter(Event.id == event_id).first()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    photos = (
+        db.query(EventPhoto)
+        .filter(EventPhoto.event_id == event_id)
+        .order_by(EventPhoto.created_at.desc())
+        .all()
+    )
+
+    template = jinja_env.get_template("event_photos.html")
+    html = template.render(
+        event=event,
+        photos=photos,
+        page_type="photos",
+        event_id=event_id,
+        **_get_branding(),
+    )
+    return HTMLResponse(content=html)
+
+
+@router.post("/events/{event_id}/photos/upload")
+async def upload_event_photos(
+    event_id: int,
+    uploaded_by: str = Query(default=""),
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    """Public photo upload for event attendees."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    settings = get_settings()
+    uploads_dir_path = Path(settings.uploads_dir)
+    uploads_dir_path.mkdir(exist_ok=True)
+
+    uploaded = []
+    for file in files:
+        if not file.content_type or not file.content_type.startswith("image/"):
+            continue
+
+        ext = Path(file.filename).suffix if file.filename else ".jpg"
+        filename = f"photo_{event_id}_{uuid.uuid4().hex}{ext}"
+        file_path = uploads_dir_path / filename
+
+        content = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        photo = EventPhoto(
+            event_id=event_id,
+            photo_url=f"/uploads/{filename}",
+            uploaded_by_name=uploaded_by.strip() or None,
+        )
+        db.add(photo)
+        uploaded.append(filename)
+
+    db.commit()
+
+    return {
+        "success": True,
+        "uploaded_count": len(uploaded),
+        "message": f"{len(uploaded)} photo(s) uploaded successfully",
+    }

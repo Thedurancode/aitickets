@@ -12,7 +12,26 @@
                     colors: {
                         brand: '{{ org_color }}',
                         'brand-dark': '{{ org_color }}cc',
-                    }
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-out forwards',
+                        'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
+                        'scale-in': 'scaleIn 0.5s ease-out forwards',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        fadeInUp: {
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        scaleIn: {
+                            '0%': { opacity: '0', transform: 'scale(0.95)' },
+                            '100%': { opacity: '1', transform: 'scale(1)' },
+                        },
+                    },
                 }
             }
         }
@@ -23,7 +42,47 @@
         .gradient-fallback {
             background: linear-gradient(135deg, {{ org_color }}44, {{ org_color }}11);
         }
+
+        /* Elements waiting for scroll-triggered animation start invisible */
+        [data-animate] { opacity: 0; }
+
+        /* IntersectionObserver adds .is-visible */
+        [data-animate].is-visible {
+            animation: fadeInUp 0.6s ease-out forwards;
+        }
+        [data-animate="fade-in"].is-visible {
+            animation: fadeIn 0.6s ease-out forwards;
+        }
+        [data-animate="scale-in"].is-visible {
+            animation: scaleIn 0.5s ease-out forwards;
+        }
+
+        /* View Transitions API */
+        ::view-transition-old(root) {
+            animation: fadeOut 0.15s ease-in forwards;
+        }
+        ::view-transition-new(root) {
+            animation: fadeIn 0.25s ease-out forwards;
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+
+        /* Accessibility: disable all animations for users who prefer reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.01ms !important;
+            }
+            [data-animate] { opacity: 1 !important; }
+            ::view-transition-old(root),
+            ::view-transition-new(root) {
+                animation: none !important;
+            }
+        }
     </style>
+    <noscript><style>[data-animate] { opacity: 1 !important; }</style></noscript>
     {% block og_meta %}
     <meta property="og:title" content="{{ org_name }} Events">
     <meta property="og:type" content="website">
@@ -31,7 +90,7 @@
 </head>
 <body class="bg-gray-950 text-white min-h-screen flex flex-col">
     <!-- Navigation -->
-    <nav class="bg-gray-900 border-b border-gray-800 px-4 sm:px-6 py-4">
+    <nav class="bg-gray-900/95 backdrop-blur-md border-b border-gray-800 px-4 sm:px-6 py-4 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto flex items-center justify-between">
             <a href="/events" class="flex items-center gap-3 hover:opacity-90 transition-opacity">
                 {% if org_logo_url %}
@@ -39,12 +98,46 @@
                 {% endif %}
                 <span class="text-xl font-bold text-white">{{ org_name }}</span>
             </a>
-            <a href="/events" class="text-sm text-gray-400 hover:text-white transition-colors">All Events</a>
+            <button onclick="openSearch()" aria-label="Search" class="text-gray-400 hover:text-white transition-colors p-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+            </button>
         </div>
     </nav>
 
+    <!-- Fullscreen Search Overlay -->
+    <div id="search-overlay" class="fixed inset-0 z-[60] bg-gray-950/98 backdrop-blur-xl flex flex-col items-center justify-start hidden">
+        <div class="w-full max-w-2xl px-6 pt-24 sm:pt-32">
+            <div class="flex items-center justify-between mb-8">
+                <h2 class="text-2xl font-bold text-white">Search Events</h2>
+                <button onclick="closeSearch()" aria-label="Close search" class="text-gray-400 hover:text-white transition-colors p-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <form method="get" action="/events" class="relative">
+                <input
+                    type="text"
+                    id="search-overlay-input"
+                    name="search"
+                    placeholder="What are you looking for?"
+                    autocomplete="off"
+                    class="w-full bg-transparent border-b-2 border-gray-700 focus:border-brand text-white text-2xl sm:text-3xl font-light py-4 outline-none placeholder-gray-600 transition-colors"
+                >
+                <button type="submit" class="absolute right-0 top-1/2 -translate-y-1/2 text-gray-500 hover:text-brand transition-colors p-2">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                    </svg>
+                </button>
+            </form>
+            <p class="text-gray-600 text-sm mt-4">Press <kbd class="px-1.5 py-0.5 bg-gray-800 rounded text-gray-400 text-xs">Esc</kbd> to close</p>
+        </div>
+    </div>
+
     <!-- Main Content -->
-    <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-8">
+    <main class="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-8 animate-fade-in">
         {% block content %}{% endblock %}
     </main>
 
@@ -73,6 +166,67 @@
             }).catch(function() {});
         })();
     </script>
+
+    <!-- Search overlay controls -->
+    <script>
+    function openSearch() {
+        var overlay = document.getElementById('search-overlay');
+        overlay.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+        setTimeout(function() {
+            document.getElementById('search-overlay-input').focus();
+        }, 50);
+    }
+    function closeSearch() {
+        document.getElementById('search-overlay').classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeSearch();
+        if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            openSearch();
+        }
+    });
+    </script>
+
+    <!-- Scroll-triggered animations & View Transitions -->
+    <script>
+    (function() {
+        var observer = new IntersectionObserver(function(entries) {
+            entries.forEach(function(entry) {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('is-visible');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+        document.querySelectorAll('[data-animate]').forEach(function(el) {
+            observer.observe(el);
+        });
+
+        // View Transitions API — progressive enhancement for page navigation
+        if (document.startViewTransition) {
+            document.addEventListener('click', function(e) {
+                var link = e.target.closest('a[href]');
+                if (!link) return;
+                var url = link.getAttribute('href');
+                if (!url || url.startsWith('#') || url.startsWith('javascript:') ||
+                    link.target === '_blank' || e.ctrlKey || e.metaKey) return;
+                try {
+                    var resolved = new URL(url, window.location.origin);
+                    if (resolved.origin !== window.location.origin) return;
+                } catch(err) { return; }
+                e.preventDefault();
+                document.startViewTransition(function() {
+                    window.location.href = url;
+                });
+            });
+        }
+    })();
+    </script>
+
     {% block scripts %}{% endblock %}
 </body>
 </html>

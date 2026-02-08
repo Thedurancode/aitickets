@@ -7,7 +7,7 @@ primary_region = "sjc"
   dockerfile = "Dockerfile"
 
 [env]
-  UPLOADS_DIR = "uploads"
+  UPLOADS_DIR = "/app/data/uploads"
   # DATABASE_URL set via secrets (Postgres)
 
 [http_service]

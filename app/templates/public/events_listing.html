@@ -10,40 +10,31 @@
 
 {% block content %}
 <!-- Header -->
-<div class="mb-8">
+<div class="mb-8 animate-fade-in-up">
     <h1 class="text-3xl sm:text-4xl font-extrabold mb-2">Upcoming Events</h1>
     <p class="text-gray-400">Find your next experience</p>
 </div>
 
-<!-- Search + Filters -->
-<div class="mb-8 space-y-4">
-    <form method="get" action="/events" class="flex gap-3">
-        <input
-            type="text"
-            name="search"
-            value="{{ search_query or '' }}"
-            placeholder="Search events..."
-            class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
-        >
-        {% if selected_category %}
-        <input type="hidden" name="category" value="{{ selected_category }}">
-        {% endif %}
-        <button type="submit" class="bg-brand hover:bg-brand-dark text-white px-6 py-2.5 rounded-lg font-medium transition-colors">
-            Search
-        </button>
-    </form>
+<!-- Filters -->
+<div class="mb-8 animate-fade-in-up" style="animation-delay: 100ms">
+    {% if search_query %}
+    <div class="flex items-center gap-3 mb-4">
+        <span class="text-gray-400 text-sm">Results for "<span class="text-white">{{ search_query }}</span>"</span>
+        <a href="/events{% if selected_category %}?category={{ selected_category }}{% endif %}" class="text-xs text-brand hover:underline">Clear</a>
+    </div>
+    {% endif %}
 
     <!-- Category Pills -->
     {% if categories %}
     <div class="flex flex-wrap gap-2">
         <a href="/events{% if search_query %}?search={{ search_query }}{% endif %}"
-           class="px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+           class="px-4 py-2.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-medium transition-colors
                   {% if not selected_category %}bg-brand text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
             All
         </a>
         {% for cat in categories %}
         <a href="/events?category={{ cat.name }}{% if search_query %}&search={{ search_query }}{% endif %}"
-           class="px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+           class="px-4 py-2.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-medium transition-colors
                   {% if selected_category == cat.name %}text-white{% else %}text-gray-300 hover:opacity-80{% endif %}"
            style="background-color: {% if selected_category == cat.name %}{{ cat.color or org_color }}{% else %}{{ cat.color or org_color }}33{% endif %};">
             {{ cat.name }}
@@ -57,11 +48,26 @@
 {% if events %}
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
     {% for event in events %}
-    <a href="/events/{{ event.id }}" class="group bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-brand/50 transition-all hover:shadow-lg hover:shadow-brand/5">
-        <!-- Image -->
-        <div class="aspect-[16/9] overflow-hidden">
-            {% if event.image_url %}
+    <a href="/events/{{ event.id }}"
+       data-animate
+       style="animation-delay: {{ [loop.index0 * 100, 600] | min }}ms"
+       class="group bg-gray-900 rounded-xl overflow-hidden border border-gray-800 hover:border-brand/50 transition-all hover:shadow-lg hover:shadow-brand/5">
+        <!-- Image / Promo Video -->
+        <div class="aspect-[16/9] overflow-hidden relative">
+            {% if event.promo_video_url and event.promo_video_url is not youtube_url %}
+            <!-- Direct video: autoplay muted loop -->
+            <video src="{{ event.promo_video_url }}" autoplay muted loop playsinline
+                   class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"></video>
+            {% elif event.image_url %}
             <img src="{{ event.image_url }}" alt="{{ event.name }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+            {% if event.promo_video_url %}
+            <!-- YouTube promo: small play icon badge -->
+            <div class="absolute bottom-2 right-2 bg-black/60 rounded-full p-1.5">
+                <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+            </div>
+            {% endif %}
             {% else %}
             <div class="w-full h-full gradient-fallback flex items-center justify-center">
                 <span class="text-4xl font-bold text-white/20">{{ event.name[:2] | upper }}</span>
@@ -86,16 +92,16 @@
 
             <!-- Date & Time -->
             <div class="flex items-center gap-2 text-sm text-gray-400 mb-1">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                 </svg>
-                <span>{{ event.event_date }} at {{ event.event_time }}</span>
+                <span>{{ event.event_date|fdate }} at {{ event.event_time }}</span>
             </div>
 
             <!-- Venue -->
             {% if event.venue %}
             <div class="flex items-center gap-2 text-sm text-gray-400 mb-3">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
                 </svg>

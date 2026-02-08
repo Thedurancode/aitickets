@@ -87,3 +87,9 @@ def init_db():
         run_series_id_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_post_event_media import run_migration as run_post_event_media_migration
+        run_post_event_media_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

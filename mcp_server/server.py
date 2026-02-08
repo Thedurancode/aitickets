@@ -18,7 +18,7 @@ from app.models import (
     Venue, Event, TicketTier, Ticket, EventGoer, TicketStatus,
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference, EventCategory,
-    MarketingCampaign, PromoCode, DiscountType,
+    MarketingCampaign, PromoCode, DiscountType, EventPhoto,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -251,8 +251,58 @@ async def list_tools():
                     "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of category IDs to assign (replaces existing)"},
                     "doors_open_time": {"type": "string", "description": "Doors open time in HH:MM format (optional)"},
                     "is_visible": {"type": "boolean", "description": "Whether event is visible on public listing (optional)"},
+                    "promoter_phone": {"type": "string", "description": "Promoter phone number for magic link admin access (optional)"},
+                    "promoter_name": {"type": "string", "description": "Promoter name (optional)"},
+                    "post_event_video_url": {"type": "string", "description": "Post-event recap/highlight video URL (optional)"},
                 },
                 "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="set_post_event_video",
+            description="Set the post-event recap/highlight video URL for an event. Supports YouTube or direct video URLs.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "video_url": {"type": "string", "description": "YouTube or direct video URL for the event recap"},
+                },
+                "required": ["event_id", "video_url"],
+            },
+        ),
+        Tool(
+            name="send_photo_sharing_link",
+            description="Text all attendees of an event a link where they can upload and browse photos from the event. Uses SMS.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "custom_message": {"type": "string", "description": "Optional custom message to include (default: standard photo sharing invite)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_event_photos",
+            description="List all photos uploaded for an event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="text_guest_list",
+            description="Send a custom SMS text message to all attendees of an event who have a phone number on file. Use this when the promoter wants to text everyone on the guest list a custom message (e.g. doors open time, parking info, dress code, etc).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "message": {"type": "string", "description": "The message to text to all attendees"},
+                },
+                "required": ["event_id", "message"],
             },
         ),
         Tool(
@@ -1275,7 +1325,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "create_recurring_event":
         import uuid as uuid_mod
         import calendar
-        from datetime import date, timedelta
+        from datetime import date
 
         # Validate venue
         venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
@@ -1460,9 +1510,175 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             event.doors_open_time = arguments["doors_open_time"]
         if "is_visible" in arguments:
             event.is_visible = arguments["is_visible"]
+        if "promoter_phone" in arguments:
+            event.promoter_phone = arguments["promoter_phone"]
+        if "promoter_name" in arguments:
+            event.promoter_name = arguments["promoter_name"]
+        if "post_event_video_url" in arguments:
+            event.post_event_video_url = arguments["post_event_video_url"]
         db.commit()
         db.refresh(event)
         return _event_to_dict(event)
+
+    elif name == "set_post_event_video":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+        event.post_event_video_url = arguments["video_url"]
+        db.commit()
+        db.refresh(event)
+        return {
+            "success": True,
+            "event_id": event.id,
+            "event_name": event.name,
+            "post_event_video_url": event.post_event_video_url,
+            "message": f"Post-event video set for '{event.name}'",
+        }
+
+    elif name == "send_photo_sharing_link":
+        from app.services.sms import send_sms
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        # Get all attendees with phone numbers
+        tickets = (
+            db.query(Ticket)
+            .options(joinedload(Ticket.event_goer), joinedload(Ticket.ticket_tier))
+            .join(TicketTier)
+            .filter(TicketTier.event_id == arguments["event_id"])
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .all()
+        )
+
+        # Deduplicate by event_goer_id, only those with phones
+        seen_goers = set()
+        recipients = []
+        for ticket in tickets:
+            goer = ticket.event_goer
+            if goer.id not in seen_goers and goer.phone:
+                seen_goers.add(goer.id)
+                recipients.append(goer)
+
+        if not recipients:
+            return {
+                "success": False,
+                "error": "No attendees with phone numbers found for this event",
+            }
+
+        photo_url = f"{settings.base_url}/events/{event.id}/photos"
+        custom_msg = arguments.get("custom_message", "")
+
+        if custom_msg:
+            message = f"{custom_msg}\n\nUpload your photos here:\n{photo_url}"
+        else:
+            message = (
+                f"Hey! Thanks for coming to {event.name}! "
+                f"We'd love to see your photos from the event.\n\n"
+                f"Upload & browse photos here:\n{photo_url}"
+            )
+
+        sent = 0
+        failed = 0
+        for goer in recipients:
+            result = send_sms(to_phone=goer.phone, message=message)
+            if result.get("success"):
+                sent += 1
+            else:
+                failed += 1
+
+        return {
+            "success": True,
+            "event_name": event.name,
+            "total_recipients": len(recipients),
+            "sent": sent,
+            "failed": failed,
+            "photo_page_url": photo_url,
+            "message": f"Photo sharing link sent to {sent} attendee(s) for '{event.name}'",
+        }
+
+    elif name == "get_event_photos":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        photos = (
+            db.query(EventPhoto)
+            .filter(EventPhoto.event_id == arguments["event_id"])
+            .order_by(EventPhoto.created_at.desc())
+            .all()
+        )
+
+        return {
+            "event_id": event.id,
+            "event_name": event.name,
+            "photo_count": len(photos),
+            "photo_page_url": f"{settings.base_url}/events/{event.id}/photos",
+            "photos": [
+                {
+                    "id": p.id,
+                    "photo_url": p.photo_url,
+                    "uploaded_by": p.uploaded_by_name,
+                    "created_at": str(p.created_at),
+                }
+                for p in photos
+            ],
+        }
+
+    elif name == "text_guest_list":
+        from app.services.sms import send_sms
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        message_text = arguments["message"]
+
+        # Get all attendees with phone numbers (PAID or CHECKED_IN)
+        tickets = (
+            db.query(Ticket)
+            .options(joinedload(Ticket.event_goer), joinedload(Ticket.ticket_tier))
+            .join(TicketTier)
+            .filter(TicketTier.event_id == arguments["event_id"])
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .all()
+        )
+
+        seen_goers = set()
+        recipients = []
+        for ticket in tickets:
+            goer = ticket.event_goer
+            if goer.id not in seen_goers and goer.phone:
+                seen_goers.add(goer.id)
+                recipients.append(goer)
+
+        if not recipients:
+            return {
+                "success": False,
+                "error": "No attendees with phone numbers found for this event",
+            }
+
+        # Prepend event name for context
+        sms_body = f"{event.name}: {message_text}"
+
+        sent = 0
+        failed = 0
+        for goer in recipients:
+            result = send_sms(to_phone=goer.phone, message=sms_body)
+            if result.get("success"):
+                sent += 1
+            else:
+                failed += 1
+
+        return {
+            "success": True,
+            "event_name": event.name,
+            "total_recipients": len(recipients),
+            "sent": sent,
+            "failed": failed,
+            "message": f"Texted {sent} attendee(s) for '{event.name}'",
+        }
 
     elif name == "get_events_by_venue":
         venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
@@ -3978,6 +4194,7 @@ def _event_to_dict(event: Event) -> dict:
         "promoter_phone": getattr(event, 'promoter_phone', None),
         "promoter_name": getattr(event, 'promoter_name', None),
         "series_id": getattr(event, 'series_id', None),
+        "post_event_video_url": getattr(event, 'post_event_video_url', None),
         "created_at": event.created_at,
     }
     # Include venue info if loaded

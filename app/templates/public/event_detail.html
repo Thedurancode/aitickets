@@ -13,7 +13,7 @@
 
 {% block content %}
 <!-- Back link -->
-<a href="/events" class="inline-flex items-center gap-1 text-gray-400 hover:text-white text-sm mb-6 transition-colors">
+<a href="/events" class="inline-flex items-center gap-1 text-gray-400 hover:text-white text-sm mb-6 py-2 -ml-1 pl-1 transition-colors">
     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
     </svg>
@@ -33,10 +33,24 @@
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
     <!-- Left Column: Event Details -->
     <div class="lg:col-span-2 space-y-6">
-        <!-- Hero Image -->
-        <div class="aspect-[16/9] rounded-xl overflow-hidden">
-            {% if event.image_url %}
+        <!-- Hero Image / Promo Video -->
+        <div class="aspect-[16/9] rounded-xl overflow-hidden animate-scale-in relative">
+            {% if event.promo_video_url and event.promo_video_url is not youtube_url %}
+            <!-- Direct video: autoplay muted loop -->
+            <video src="{{ event.promo_video_url }}" autoplay muted loop playsinline class="w-full h-full object-cover"></video>
+            {% elif event.image_url %}
             <img src="{{ event.image_url }}" alt="{{ event.name }}" class="w-full h-full object-cover">
+            {% if event.promo_video_url %}
+            <!-- YouTube promo: play overlay on image -->
+            <a href="{{ event.promo_video_url }}" target="_blank" rel="noopener"
+               class="absolute inset-0 flex items-center justify-center bg-black/30 hover:bg-black/40 transition-colors group">
+                <div class="w-16 h-16 sm:w-20 sm:h-20 bg-white/90 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <svg class="w-8 h-8 sm:w-10 sm:h-10 text-gray-900 ml-1" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                </div>
+            </a>
+            {% endif %}
             {% else %}
             <div class="w-full h-full gradient-fallback flex items-center justify-center">
                 <span class="text-6xl font-bold text-white/10">{{ event.name[:3] | upper }}</span>
@@ -45,7 +59,7 @@
         </div>
 
         <!-- Event Info -->
-        <div>
+        <div data-animate>
             <!-- Categories -->
             {% if event.categories %}
             <div class="flex flex-wrap gap-2 mb-4">
@@ -63,17 +77,17 @@
             <!-- Date, Time, Venue -->
             <div class="space-y-3 mb-6">
                 <div class="flex items-center gap-3 text-gray-300">
-                    <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-5 h-5 text-brand shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                     </svg>
-                    <span class="text-lg">{{ event.event_date }} at {{ event.event_time }}</span>
+                    <span class="text-lg">{{ event.event_date|fdate }} at {{ event.event_time }}</span>
                     {% if event.doors_open_time %}
                     <span class="text-sm text-gray-500 ml-1">(Doors {{ event.doors_open_time }})</span>
                     {% endif %}
                 </div>
                 {% if event.venue %}
                 <div class="flex items-center gap-3 text-gray-300">
-                    <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-5 h-5 text-brand shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
                     </svg>
@@ -95,20 +109,52 @@
             {% endif %}
         </div>
 
-        <!-- Promo Video -->
-        {% if event.promo_video_url %}
-        <div class="mt-6">
+        <!-- Promo Video (YouTube only — direct videos already loop in hero) -->
+        {% if event.promo_video_url and event.promo_video_url is youtube_url %}
+        <div class="mt-6" data-animate>
             <h2 class="text-xl font-bold mb-4">Preview</h2>
             <div class="aspect-video rounded-xl overflow-hidden bg-gray-900" id="video-container">
+                <!-- JS will embed YouTube player -->
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Post-Event Recap Video -->
+        {% if event.post_event_video_url %}
+        <div class="mt-6" data-animate>
+            <h2 class="text-xl font-bold mb-4">Event Recap</h2>
+            <div class="aspect-video rounded-xl overflow-hidden bg-gray-900" id="recap-video-container">
                 <!-- JS will embed the appropriate player -->
             </div>
         </div>
         {% endif %}
 
+        <!-- Photo Gallery -->
+        {% if photos %}
+        <div class="mt-6" data-animate>
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-bold">Photos ({{ photos|length }})</h2>
+                <a href="/events/{{ event.id }}/photos" class="text-sm text-brand hover:underline">View All / Upload</a>
+            </div>
+            <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {% for photo in photos[:8] %}
+                <a href="/events/{{ event.id }}/photos" class="aspect-square rounded-lg overflow-hidden bg-gray-900 block">
+                    <img src="{{ photo.photo_url }}" alt="Event photo" class="w-full h-full object-cover hover:scale-105 transition-transform duration-300" loading="lazy">
+                </a>
+                {% endfor %}
+                {% if photos|length > 8 %}
+                <a href="/events/{{ event.id }}/photos" class="aspect-square rounded-lg bg-gray-900 flex items-center justify-center text-gray-400 hover:text-brand transition-colors">
+                    +{{ photos|length - 8 }} more
+                </a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Share -->
-        <div class="flex items-center gap-3 pt-4 border-t border-gray-800">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 pt-4 border-t border-gray-800">
             <span class="text-sm text-gray-500">Share:</span>
-            <button onclick="copyLink()" id="copy-btn" class="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition-colors">
+            <button onclick="copyLink()" id="copy-btn" class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition-colors">
                 Copy Link
             </button>
         </div>
@@ -123,7 +169,7 @@
             <!-- Ticket Tiers -->
             <div class="space-y-3" id="tiers-container">
                 {% for tier in tiers %}
-                <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 tier-card" data-tier-id="{{ tier.id }}" data-price="{{ tier.price_cents }}">
+                <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 tier-card" data-animate style="animation-delay: {{ loop.index0 * 100 }}ms" data-tier-id="{{ tier.id }}" data-price="{{ tier.price_cents }}">
                     <div class="flex justify-between items-start mb-2">
                         <h3 class="font-semibold text-lg">{{ tier.name }}</h3>
                         <div class="text-right">
@@ -140,7 +186,7 @@
                     <div class="text-yellow-400 font-medium text-sm">Currently Unavailable</div>
                     {% else %}
                     <div class="text-xs text-gray-500 mb-3">{{ tier.remaining }} remaining</div>
-                    <button onclick="selectTier({{ tier.id }})" class="w-full bg-brand hover:bg-brand-dark text-white py-2.5 rounded-lg font-medium transition-colors select-btn">
+                    <button onclick="selectTier({{ tier.id }})" class="w-full bg-brand hover:bg-brand-dark text-white py-3 rounded-lg font-medium transition-colors select-btn">
                         Get Tickets
                     </button>
                     {% endif %}
@@ -154,15 +200,15 @@
 
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Name</label>
-                    <input type="text" id="buyer-name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand" required>
+                    <input type="text" id="buyer-name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand" required>
                 </div>
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Email</label>
-                    <input type="email" id="buyer-email" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand" required>
+                    <input type="email" id="buyer-email" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand" required>
                 </div>
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Quantity</label>
-                    <select id="buyer-qty" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-brand">
+                    <select id="buyer-qty" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand">
                         <option value="1">1</option>
                         <option value="2">2</option>
                         <option value="3">3</option>
@@ -173,9 +219,9 @@
                 <!-- Promo Code -->
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Promo Code (optional)</label>
-                    <div class="flex gap-2">
-                        <input type="text" id="promo-code" placeholder="Enter code" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white uppercase focus:outline-none focus:border-brand">
-                        <button onclick="validatePromo()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">Apply</button>
+                    <div class="flex flex-col sm:flex-row gap-2">
+                        <input type="text" id="promo-code" placeholder="Enter code" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white uppercase focus:outline-none focus:border-brand">
+                        <button onclick="validatePromo()" class="w-full sm:w-auto px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors">Apply</button>
                     </div>
                     <div id="promo-result" class="mt-2 text-sm hidden"></div>
                 </div>
@@ -206,10 +252,23 @@ var eventId = {{ event.id }};
 var selectedTierId = null;
 var promoDiscount = null;
 
-{% if event.promo_video_url %}
+{% if event.promo_video_url and event.promo_video_url is youtube_url %}
 (function() {
     var url = "{{ event.promo_video_url }}";
     var container = document.getElementById('video-container');
+    if (!container) return;
+    var ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?]+)/);
+    if (ytMatch) {
+        container.innerHTML = '<iframe src="https://www.youtube.com/embed/' + ytMatch[1] + '" class="w-full h-full" frameborder="0" allowfullscreen></iframe>';
+    }
+})();
+{% endif %}
+
+{% if event.post_event_video_url %}
+(function() {
+    var url = "{{ event.post_event_video_url }}";
+    var container = document.getElementById('recap-video-container');
+    if (!container) return;
     var ytMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?]+)/);
     if (ytMatch) {
         container.innerHTML = '<iframe src="https://www.youtube.com/embed/' + ytMatch[1] + '" class="w-full h-full" frameborder="0" allowfullscreen></iframe>';

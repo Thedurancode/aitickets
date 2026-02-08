@@ -98,6 +98,7 @@ class Event(Base):
     description = Column(Text, nullable=True)
     image_url = Column(String(500), nullable=True)
     promo_video_url = Column(String(500), nullable=True)  # YouTube or video URL
+    post_event_video_url = Column(String(500), nullable=True)  # Post-event recap/highlight video
     event_date = Column(String(20), nullable=False)  # YYYY-MM-DD format
     event_time = Column(String(10), nullable=False)  # HH:MM format
     doors_open_time = Column(String(10), nullable=True)  # HH:MM format
@@ -114,6 +115,19 @@ class Event(Base):
     ticket_tiers = relationship("TicketTier", back_populates="event", cascade="all, delete-orphan")
     updates = relationship("EventUpdate", back_populates="event", cascade="all, delete-orphan")
     categories = relationship("EventCategory", secondary=event_category_link, back_populates="events")
+    photos = relationship("EventPhoto", back_populates="event", cascade="all, delete-orphan")
+
+
+class EventPhoto(Base):
+    __tablename__ = "event_photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    photo_url = Column(String(500), nullable=False)
+    uploaded_by_name = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event", back_populates="photos")
 
 
 class EventUpdate(Base):
