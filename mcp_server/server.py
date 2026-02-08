@@ -107,8 +107,24 @@ async def list_tools():
                     "name": {"type": "string", "description": "Category name (e.g. Sports, Concerts, Comedy)"},
                     "description": {"type": "string", "description": "Category description (optional)"},
                     "color": {"type": "string", "description": "Hex color for UI display (e.g. #CE1141)"},
+                    "image_url": {"type": "string", "description": "Image URL for the category (optional)"},
                 },
                 "required": ["name"],
+            },
+        ),
+        Tool(
+            name="update_category",
+            description="Update an existing event category (name, description, color, image)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "category_id": {"type": "integer", "description": "Category ID"},
+                    "name": {"type": "string", "description": "New category name"},
+                    "description": {"type": "string", "description": "New category description"},
+                    "color": {"type": "string", "description": "New hex color (e.g. #CE1141)"},
+                    "image_url": {"type": "string", "description": "New image URL for the category"},
+                },
+                "required": ["category_id"],
             },
         ),
         # Venue tools
@@ -1221,7 +1237,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     # ============== Category Tools ==============
     elif name == "list_categories":
         categories = db.query(EventCategory).order_by(EventCategory.name).all()
-        return [{"id": c.id, "name": c.name, "description": c.description, "color": c.color} for c in categories]
+        return [{"id": c.id, "name": c.name, "description": c.description, "color": c.color, "image_url": c.image_url} for c in categories]
 
     elif name == "create_category":
         existing = db.query(EventCategory).filter(EventCategory.name == arguments["name"]).first()
@@ -1231,11 +1247,23 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             name=arguments["name"],
             description=arguments.get("description"),
             color=arguments.get("color"),
+            image_url=arguments.get("image_url"),
         )
         db.add(category)
         db.commit()
         db.refresh(category)
-        return {"id": category.id, "name": category.name, "description": category.description, "color": category.color}
+        return {"id": category.id, "name": category.name, "description": category.description, "color": category.color, "image_url": category.image_url}
+
+    elif name == "update_category":
+        category = db.query(EventCategory).filter(EventCategory.id == arguments["category_id"]).first()
+        if not category:
+            return {"error": "Category not found"}
+        for field in ["name", "description", "color", "image_url"]:
+            if field in arguments:
+                setattr(category, field, arguments[field])
+        db.commit()
+        db.refresh(category)
+        return {"id": category.id, "name": category.name, "description": category.description, "color": category.color, "image_url": category.image_url}
 
     # ============== Venue Tools ==============
     elif name == "list_venues":
@@ -1491,6 +1519,11 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
         if not event:
             return {"error": "Event not found"}
+
+        # Capture old video URLs before update (for cleanup)
+        old_promo = event.promo_video_url
+        old_recap = event.post_event_video_url
+
         if "name" in arguments:
             event.name = arguments["name"]
         if "description" in arguments:
@@ -1518,21 +1551,56 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             event.post_event_video_url = arguments["post_event_video_url"]
         db.commit()
         db.refresh(event)
-        return _event_to_dict(event)
+
+        # Trigger background YouTube downloads
+        import asyncio
+        from app.services.video_download import is_youtube_url, trigger_video_download_async
+
+        download_started = False
+        if "promo_video_url" in arguments and is_youtube_url(arguments["promo_video_url"]):
+            asyncio.create_task(trigger_video_download_async(
+                event.id, "promo_video_url", arguments["promo_video_url"], old_promo,
+            ))
+            download_started = True
+        if "post_event_video_url" in arguments and is_youtube_url(arguments["post_event_video_url"]):
+            asyncio.create_task(trigger_video_download_async(
+                event.id, "post_event_video_url", arguments["post_event_video_url"], old_recap,
+            ))
+            download_started = True
+
+        result = _event_to_dict(event)
+        if download_started:
+            result["video_download_started"] = True
+        return result
 
     elif name == "set_post_event_video":
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
         if not event:
             return {"error": "Event not found"}
+
+        old_recap = event.post_event_video_url
         event.post_event_video_url = arguments["video_url"]
         db.commit()
         db.refresh(event)
+
+        # Trigger background YouTube download
+        import asyncio
+        from app.services.video_download import is_youtube_url, trigger_video_download_async
+
+        download_pending = False
+        if is_youtube_url(arguments["video_url"]):
+            asyncio.create_task(trigger_video_download_async(
+                event.id, "post_event_video_url", arguments["video_url"], old_recap,
+            ))
+            download_pending = True
+
         return {
             "success": True,
             "event_id": event.id,
             "event_name": event.name,
             "post_event_video_url": event.post_event_video_url,
-            "message": f"Post-event video set for '{event.name}'",
+            "message": f"Post-event video set for '{event.name}'"
+                + (" (YouTube download started in background)" if download_pending else ""),
         }
 
     elif name == "send_photo_sharing_link":

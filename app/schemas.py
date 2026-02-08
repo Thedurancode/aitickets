@@ -39,6 +39,7 @@ class EventCategoryBase(BaseModel):
     name: str
     description: Optional[str] = None
     color: Optional[str] = None  # Hex color e.g. #CE1141
+    image_url: Optional[str] = None
 
 
 class EventCategoryCreate(EventCategoryBase):
@@ -49,6 +50,7 @@ class EventCategoryUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+    image_url: Optional[str] = None
 
 
 class EventCategoryResponse(EventCategoryBase):

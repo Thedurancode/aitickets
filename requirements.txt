@@ -14,3 +14,4 @@ mcp
 twilio
 apscheduler
 sse-starlette
+yt-dlp

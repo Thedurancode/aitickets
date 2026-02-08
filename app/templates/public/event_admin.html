@@ -308,5 +308,28 @@ function saveDetails() {
     });
 }
 
+// Listen for video download completion via SSE
+(function() {
+    var sid = 'admin_' + eventId + '_' + Math.random().toString(36).slice(2);
+    var evtSource = new EventSource('/mcp/sse?session_id=' + sid);
+    evtSource.onmessage = function(e) {
+        try {
+            var msg = JSON.parse(e.data);
+            if (msg.type === 'video_downloaded' && msg.data.event_id === eventId) {
+                var field = msg.data.field;
+                var inputId = field === 'promo_video_url' ? 'field-video' : 'field-post-video';
+                var input = document.getElementById(inputId);
+                if (input) input.value = msg.data.mp4_url;
+                var status = document.getElementById('save-status');
+                status.className = 'text-sm text-green-400';
+                status.textContent = 'Video downloaded and converted to MP4! (' + msg.data.size_mb + ' MB)';
+                status.classList.remove('hidden');
+                setTimeout(function() { status.classList.add('hidden'); }, 8000);
+            }
+        } catch(err) {}
+    };
+    window.addEventListener('beforeunload', function() { evtSource.close(); });
+})();
+
 </script>
 {% endblock %}

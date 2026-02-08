@@ -472,6 +472,15 @@ async def voice_action(request: Request):
         "event types": "list_categories",
         "event categories": "list_categories",
         "categories": "list_categories",
+        "create category": "create_category",
+        "new category": "create_category",
+        "add category": "create_category",
+        "add event type": "create_category",
+        "update category": "update_category",
+        "edit category": "update_category",
+        "change category": "update_category",
+        "set category image": "update_category",
+        "category image": "update_category",
         # Marketing campaigns
         "send marketing": "quick_send_campaign",
         "send blast": "quick_send_campaign",
@@ -1087,7 +1096,15 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
 
     elif tool_name == "create_category":
         if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
             return f"Category '{result.get('name', '')}' created."
+
+    elif tool_name == "update_category":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            return f"Category '{result.get('name', '')}' updated."
 
     # ============== Campaign Tools ==============
     elif tool_name == "create_campaign":

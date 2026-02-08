@@ -93,3 +93,9 @@ def init_db():
         run_post_event_media_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_category_image import run_migration as run_category_image_migration
+        run_category_image_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

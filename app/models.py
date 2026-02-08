@@ -70,6 +70,7 @@ class EventCategory(Base):
     name = Column(String(100), unique=True, nullable=False, index=True)
     description = Column(Text, nullable=True)
     color = Column(String(20), nullable=True)  # Hex color for UI badges
+    image_url = Column(String(500), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     events = relationship("Event", secondary=event_category_link, back_populates="categories")

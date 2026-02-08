@@ -64,8 +64,9 @@
             {% if event.categories %}
             <div class="flex flex-wrap gap-2 mb-4">
                 {% for cat in event.categories %}
-                <a href="/events?category={{ cat.name }}" class="px-3 py-1 rounded-full text-xs font-medium hover:opacity-80 transition-opacity"
+                <a href="/events?category={{ cat.name }}" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium hover:opacity-80 transition-opacity"
                    style="background-color: {{ cat.color or org_color }}33; color: {{ cat.color or org_color }};">
+                    {% if cat.image_url %}<img src="{{ cat.image_url }}" alt="" class="w-4 h-4 rounded-full object-cover">{% endif %}
                     {{ cat.name }}
                 </a>
                 {% endfor %}

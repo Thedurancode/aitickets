@@ -24,23 +24,58 @@
     </div>
     {% endif %}
 
-    <!-- Category Pills -->
+    <!-- Category Slider -->
     {% if categories %}
-    <div class="flex flex-wrap gap-2">
-        <a href="/events{% if search_query %}?search={{ search_query }}{% endif %}"
-           class="px-4 py-2.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-medium transition-colors
-                  {% if not selected_category %}bg-brand text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
-            All
-        </a>
-        {% for cat in categories %}
-        <a href="/events?category={{ cat.name }}{% if search_query %}&search={{ search_query }}{% endif %}"
-           class="px-4 py-2.5 sm:px-3 sm:py-1.5 rounded-full text-sm font-medium transition-colors
-                  {% if selected_category == cat.name %}text-white{% else %}text-gray-300 hover:opacity-80{% endif %}"
-           style="background-color: {% if selected_category == cat.name %}{{ cat.color or org_color }}{% else %}{{ cat.color or org_color }}33{% endif %};">
-            {{ cat.name }}
-        </a>
-        {% endfor %}
+    <div class="relative group/slider">
+        <!-- Scroll container -->
+        <div id="cat-slider" class="flex gap-3 overflow-x-auto pb-2 scroll-smooth -mx-1 px-1" style="scrollbar-width: none; -ms-overflow-style: none;">
+            <!-- All -->
+            <a href="/events{% if search_query %}?search={{ search_query }}{% endif %}"
+               class="flex-shrink-0 flex flex-col items-center gap-2 w-[4.5rem] py-3 rounded-xl transition-all
+                      {% if not selected_category %}bg-brand/15 ring-2 ring-brand{% else %}hover:bg-gray-800/80{% endif %}">
+                <div class="w-12 h-12 rounded-full flex items-center justify-center transition-transform hover:scale-105
+                            {% if not selected_category %}bg-brand text-white shadow-lg shadow-brand/25{% else %}bg-gray-800 text-gray-400{% endif %}">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/>
+                    </svg>
+                </div>
+                <span class="text-xs font-medium {% if not selected_category %}text-white{% else %}text-gray-400{% endif %}">All</span>
+            </a>
+            {% for cat in categories %}
+            <a href="/events?category={{ cat.name }}{% if search_query %}&search={{ search_query }}{% endif %}"
+               class="flex-shrink-0 flex flex-col items-center gap-2 w-[4.5rem] py-3 rounded-xl transition-all
+                      {% if selected_category == cat.name %}ring-2 ring-offset-1 ring-offset-gray-950{% else %}hover:bg-gray-800/80{% endif %}"
+               {% if selected_category == cat.name %}style="background-color: {{ cat.color or org_color }}15; --tw-ring-color: {{ cat.color or org_color }};"{% endif %}>
+                {% if cat.image_url %}
+                <div class="w-12 h-12 rounded-full overflow-hidden transition-transform hover:scale-105
+                            {% if selected_category == cat.name %}ring-2 ring-white/50 shadow-lg{% else %}ring-2 ring-gray-700/50{% endif %}">
+                    <img src="{{ cat.image_url }}" alt="{{ cat.name }}" class="w-full h-full object-cover">
+                </div>
+                {% else %}
+                <div class="w-12 h-12 rounded-full flex items-center justify-center text-base font-bold transition-transform hover:scale-105
+                            {% if selected_category == cat.name %}ring-2 ring-white/30 shadow-lg{% else %}{% endif %}"
+                     style="background-color: {{ cat.color or org_color }}33; color: {{ cat.color or org_color }};">
+                    {{ cat.name[:1] | upper }}
+                </div>
+                {% endif %}
+                <span class="text-xs font-medium text-center leading-tight w-full truncate {% if selected_category == cat.name %}text-white{% else %}text-gray-400{% endif %}">{{ cat.name }}</span>
+            </a>
+            {% endfor %}
+        </div>
+        <!-- Fade edges -->
+        <div class="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-gray-950 to-transparent sm:hidden"></div>
+        <div class="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-gray-950 to-transparent sm:hidden"></div>
+        <!-- Scroll arrows (desktop) -->
+        <button onclick="document.getElementById('cat-slider').scrollBy({left:-200,behavior:'smooth'})"
+                class="hidden sm:flex absolute left-0 top-1/2 -translate-y-1/2 -translate-x-3 w-8 h-8 rounded-full bg-gray-900/90 border border-gray-700 items-center justify-center text-gray-400 hover:text-white hover:border-gray-500 opacity-0 group-hover/slider:opacity-100 transition-opacity z-10 shadow-lg">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <button onclick="document.getElementById('cat-slider').scrollBy({left:200,behavior:'smooth'})"
+                class="hidden sm:flex absolute right-0 top-1/2 -translate-y-1/2 translate-x-3 w-8 h-8 rounded-full bg-gray-900/90 border border-gray-700 items-center justify-center text-gray-400 hover:text-white hover:border-gray-500 opacity-0 group-hover/slider:opacity-100 transition-opacity z-10 shadow-lg">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </button>
     </div>
+    <style>#cat-slider::-webkit-scrollbar{display:none}</style>
     {% endif %}
 </div>
 
@@ -81,7 +116,8 @@
             {% if event.categories %}
             <div class="flex flex-wrap gap-1.5 mb-3">
                 {% for cat in event.categories %}
-                <span class="px-2 py-0.5 rounded text-xs font-medium" style="background-color: {{ cat.color or org_color }}33; color: {{ cat.color or org_color }};">
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium" style="background-color: {{ cat.color or org_color }}33; color: {{ cat.color or org_color }};">
+                    {% if cat.image_url %}<img src="{{ cat.image_url }}" alt="" class="w-3.5 h-3.5 rounded-full object-cover">{% endif %}
                     {{ cat.name }}
                 </span>
                 {% endfor %}

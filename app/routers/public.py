@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import HTMLResponse
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import Session, joinedload
@@ -248,6 +248,7 @@ def event_admin_page(
 async def admin_update_event(
     event_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Token-protected event update from admin page."""
@@ -261,6 +262,10 @@ async def admin_update_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
+    # Capture old video URLs before update (for cleanup)
+    old_promo = event.promo_video_url
+    old_recap = event.post_event_video_url
+
     for field in ["name", "description", "event_date", "event_time", "promo_video_url", "doors_open_time", "post_event_video_url"]:
         if field in body and body[field] is not None:
             setattr(event, field, body[field])
@@ -269,6 +274,23 @@ async def admin_update_event(
 
     db.commit()
     db.refresh(event)
+
+    # Trigger background YouTube downloads for video fields
+    from app.services.video_download import is_youtube_url, download_youtube_video
+
+    new_promo = body.get("promo_video_url")
+    if new_promo and is_youtube_url(new_promo):
+        background_tasks.add_task(
+            download_youtube_video, event.id, "promo_video_url",
+            new_promo, old_promo,
+        )
+
+    new_recap = body.get("post_event_video_url")
+    if new_recap and is_youtube_url(new_recap):
+        background_tasks.add_task(
+            download_youtube_video, event.id, "post_event_video_url",
+            new_recap, old_recap,
+        )
 
     # Broadcast SSE + queue voice announcement
     from app.routers.mcp import sse_manager
