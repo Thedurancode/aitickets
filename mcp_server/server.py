@@ -312,14 +312,15 @@ async def list_tools():
         ),
         Tool(
             name="text_guest_list",
-            description="Send a custom SMS text message to all attendees of an event who have a phone number on file. Use this when the promoter wants to text everyone on the guest list a custom message (e.g. doors open time, parking info, dress code, etc).",
+            description="Send a custom SMS text message to all attendees who have a phone number on file. Provide event_id for one event, or event_ids for multiple events (cross-event re-engagement). Bypasses marketing opt-in.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "event_id": {"type": "integer", "description": "Single event ID"},
+                    "event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Multiple event IDs for cross-event SMS blast"},
                     "message": {"type": "string", "description": "The message to text to all attendees"},
                 },
-                "required": ["event_id", "message"],
+                "required": ["message"],
             },
         ),
         Tool(
@@ -751,6 +752,11 @@ async def list_tools():
                     "target_min_events": {"type": "integer", "description": "Target customers who attended at least this many events (e.g. 3 for repeat customers)"},
                     "target_min_spent_cents": {"type": "integer", "description": "Target customers who spent at least this amount in cents (e.g. 50000 for $500+)"},
                     "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Target customers who attended events in these category IDs. Use list_categories to find IDs."},
+                    "target_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Target attendees of ANY of these events (multi-event re-engagement)"},
+                    "target_series_id": {"type": "string", "description": "Target all attendees of a recurring event series (use series_id UUID from the event)"},
+                    "target_exclude_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Exclude attendees of these events (e.g. already have tickets to this show)"},
+                    "target_days_since_last_event": {"type": "integer", "description": "Only target lapsed customers inactive for N+ days (e.g. 60 = haven't attended in 2 months)"},
+                    "target_attended_since_days": {"type": "integer", "description": "Only target customers who attended an event within the last N days (e.g. 90 = last 3 months)"},
                 },
                 "required": ["name", "subject", "content"],
             },
@@ -809,10 +815,37 @@ async def list_tools():
                     "target_min_events": {"type": "integer", "description": "Target customers who attended at least this many events"},
                     "target_min_spent_cents": {"type": "integer", "description": "Target customers who spent at least this amount in cents"},
                     "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Target customers who attended events in these category IDs"},
+                    "target_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Target attendees of ANY of these events (multi-event re-engagement)"},
+                    "target_series_id": {"type": "string", "description": "Target all attendees of a recurring event series (use series_id UUID from the event)"},
+                    "target_exclude_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Exclude attendees of these events"},
+                    "target_days_since_last_event": {"type": "integer", "description": "Only target lapsed customers inactive for N+ days"},
+                    "target_attended_since_days": {"type": "integer", "description": "Only target customers who attended within the last N days"},
                     "use_email": {"type": "boolean", "description": "Send via email (default true)"},
                     "use_sms": {"type": "boolean", "description": "Also send via SMS (default false)"},
                 },
                 "required": ["subject", "content"],
+            },
+        ),
+        Tool(
+            name="preview_audience",
+            description="Preview how many people would receive a campaign with the given targeting. Use BEFORE sending to check audience size. Returns count, SMS-eligible count, and sample names.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target_all": {"type": "boolean", "description": "Target all opted-in users"},
+                    "target_event_id": {"type": "integer", "description": "Target attendees of one event"},
+                    "target_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Target attendees of multiple events"},
+                    "target_series_id": {"type": "string", "description": "Target all attendees of a recurring series"},
+                    "target_vip": {"type": "boolean", "description": "VIP customers only"},
+                    "target_vip_tier": {"type": "string", "description": "Specific VIP tier"},
+                    "target_min_events": {"type": "integer", "description": "Min events attended"},
+                    "target_min_spent_cents": {"type": "integer", "description": "Min spent in cents"},
+                    "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Event category IDs"},
+                    "target_exclude_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Exclude attendees of these events"},
+                    "target_days_since_last_event": {"type": "integer", "description": "Inactive for N+ days"},
+                    "target_attended_since_days": {"type": "integer", "description": "Active within last N days"},
+                },
+                "required": [],
             },
         ),
         # ============== Promo Code Tools ==============
@@ -1807,18 +1840,31 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "text_guest_list":
         from app.services.sms import send_sms
 
-        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
-        if not event:
-            return {"error": "Event not found"}
+        # Support single or multiple events
+        event_ids_list = list(arguments.get("event_ids", []))
+        if arguments.get("event_id"):
+            if arguments["event_id"] not in event_ids_list:
+                event_ids_list.insert(0, arguments["event_id"])
+
+        if not event_ids_list:
+            return {"error": "Provide event_id or event_ids"}
+
+        # Validate all events
+        event_names = []
+        for eid in event_ids_list:
+            ev = db.query(Event).filter(Event.id == eid).first()
+            if not ev:
+                return {"error": f"Event {eid} not found"}
+            event_names.append(ev.name)
 
         message_text = arguments["message"]
 
-        # Get all attendees with phone numbers (PAID or CHECKED_IN)
+        # Get all attendees with phone numbers across all events (deduped)
         tickets = (
             db.query(Ticket)
             .options(joinedload(Ticket.event_goer), joinedload(Ticket.ticket_tier))
             .join(TicketTier)
-            .filter(TicketTier.event_id == arguments["event_id"])
+            .filter(TicketTier.event_id.in_(event_ids_list))
             .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
             .all()
         )
@@ -1834,11 +1880,17 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if not recipients:
             return {
                 "success": False,
-                "error": "No attendees with phone numbers found for this event",
+                "error": "No attendees with phone numbers found",
             }
 
-        # Prepend event name for context
-        sms_body = f"{event.name}: {message_text}"
+        # Build SMS label from event names
+        if len(event_names) == 1:
+            label = event_names[0]
+        else:
+            label = ", ".join(event_names[:3])
+            if len(event_names) > 3:
+                label += f" (+{len(event_names) - 3} more)"
+        sms_body = f"{label}: {message_text}"
 
         sent = 0
         failed = 0
@@ -1851,11 +1903,11 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         return {
             "success": True,
-            "event_name": event.name,
+            "events": event_names,
             "total_recipients": len(recipients),
             "sent": sent,
             "failed": failed,
-            "message": f"Texted {sent} attendee(s) for '{event.name}'",
+            "message": f"Texted {sent} attendee(s) across {len(event_ids_list)} event(s)",
         }
 
     elif name == "get_events_by_venue":
@@ -3053,6 +3105,44 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         result["campaign_name"] = campaign_name
         result["message"] = f"Campaign '{campaign_name}' created and sent to {result.get('total_recipients', 0)} recipients"
         return result
+
+    elif name == "preview_audience":
+        target_all = arguments.get("target_all", False)
+        target_event_id = arguments.get("target_event_id")
+        segments = _build_segments(arguments)
+
+        query = db.query(EventGoer).filter(EventGoer.marketing_opt_in == True)
+
+        if target_event_id:
+            event_goer_ids = (
+                db.query(Ticket.event_goer_id)
+                .join(TicketTier)
+                .filter(TicketTier.event_id == target_event_id)
+                .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+                .distinct()
+            )
+            query = query.filter(EventGoer.id.in_(event_goer_ids))
+
+        if segments:
+            query = _apply_segment_filters(db, query, segments)
+
+        total = query.count()
+        samples = query.limit(5).all()
+        sample_names = [s.name for s in samples]
+        sms_eligible = query.filter(
+            EventGoer.sms_opt_in == True, EventGoer.phone.isnot(None)
+        ).count()
+
+        target_desc = _describe_campaign_target(target_all, target_event_id, segments)
+
+        return {
+            "total_recipients": total,
+            "sms_eligible": sms_eligible,
+            "email_eligible": total,
+            "sample_names": sample_names,
+            "target_description": target_desc,
+            "message": f"{total} people match this audience ({sms_eligible} eligible for SMS). Sample: {', '.join(sample_names[:3]) if sample_names else 'none'}.",
+        }
 
     # ============== Phone Verification Tools ==============
     elif name == "send_verification_code":
@@ -4483,6 +4573,16 @@ def _build_segments(arguments: dict) -> dict:
         segments["min_spent_cents"] = arguments["target_min_spent_cents"]
     if arguments.get("target_category_ids"):
         segments["category_ids"] = arguments["target_category_ids"]
+    if arguments.get("target_event_ids"):
+        segments["event_ids"] = arguments["target_event_ids"]
+    if arguments.get("target_series_id"):
+        segments["series_id"] = arguments["target_series_id"]
+    if arguments.get("target_exclude_event_ids"):
+        segments["exclude_event_ids"] = arguments["target_exclude_event_ids"]
+    if arguments.get("target_days_since_last_event"):
+        segments["days_since_last_event"] = arguments["target_days_since_last_event"]
+    if arguments.get("target_attended_since_days"):
+        segments["attended_since_days"] = arguments["target_attended_since_days"]
     return segments
 
 
@@ -4498,6 +4598,16 @@ def _describe_segments(segments: dict) -> str:
         parts.append(f"${segments['min_spent_cents'] / 100:.0f}+ spent")
     if segments.get("category_ids"):
         parts.append(f"categories {segments['category_ids']}")
+    if segments.get("event_ids"):
+        parts.append(f"attended events {segments['event_ids']}")
+    if segments.get("series_id"):
+        parts.append(f"series {segments['series_id'][:8]}...")
+    if segments.get("exclude_event_ids"):
+        parts.append(f"excluding events {segments['exclude_event_ids']}")
+    if segments.get("days_since_last_event"):
+        parts.append(f"inactive {segments['days_since_last_event']}+ days")
+    if segments.get("attended_since_days"):
+        parts.append(f"active in last {segments['attended_since_days']} days")
     return ", ".join(parts)
 
 
@@ -4567,6 +4677,70 @@ def _apply_segment_filters(db, query, segments: dict):
             .distinct()
         )
         query = query.filter(EventGoer.id.in_(category_goer_ids))
+
+    # Multi-event targeting (attended ANY of these events)
+    if segments.get("event_ids"):
+        multi_event_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .filter(TicketTier.event_id.in_(segments["event_ids"]))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(multi_event_goer_ids))
+
+    # Series targeting (all events sharing a series_id)
+    if segments.get("series_id"):
+        series_event_ids = db.query(Event.id).filter(Event.series_id == segments["series_id"])
+        series_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .filter(TicketTier.event_id.in_(series_event_ids))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(series_goer_ids))
+
+    # Exclude event filter (NOT attended these events)
+    if segments.get("exclude_event_ids"):
+        excluded_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .filter(TicketTier.event_id.in_(segments["exclude_event_ids"]))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(~EventGoer.id.in_(excluded_goer_ids))
+
+    # Lapsed customers (last purchase > N days ago)
+    if segments.get("days_since_last_event"):
+        from datetime import datetime as dt, timedelta, timezone
+        cutoff = dt.now(timezone.utc) - timedelta(days=int(segments["days_since_last_event"]))
+        last_purchase_subq = (
+            db.query(
+                Ticket.event_goer_id,
+                func.max(Ticket.purchased_at).label("last_purchase")
+            )
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .group_by(Ticket.event_goer_id)
+            .having(func.max(Ticket.purchased_at) < cutoff)
+            .subquery()
+        )
+        query = query.filter(EventGoer.id.in_(db.query(last_purchase_subq.c.event_goer_id)))
+
+    # Recently active (attended within last N days)
+    if segments.get("attended_since_days"):
+        from datetime import datetime as dt, timedelta, timezone
+        since_cutoff = dt.now(timezone.utc) - timedelta(days=int(segments["attended_since_days"]))
+        recent_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .join(Event, TicketTier.event_id == Event.id)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .filter(Event.event_date >= since_cutoff.strftime("%Y-%m-%d"))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(recent_goer_ids))
 
     return query
 

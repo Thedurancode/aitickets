@@ -916,6 +916,13 @@ async def voice_action(request: Request):
         "remove from waitlist": "remove_from_waitlist",
         "take off waitlist": "remove_from_waitlist",
         "delete from waitlist": "remove_from_waitlist",
+        # Audience preview
+        "preview audience": "preview_audience",
+        "how many would get": "preview_audience",
+        "audience size": "preview_audience",
+        "who would get": "preview_audience",
+        "campaign preview": "preview_audience",
+        "how many people": "preview_audience",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -1528,6 +1535,16 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     elif tool_name == "remove_from_waitlist":
         if isinstance(result, dict):
             return result.get("message", "Removed from waitlist.")
+
+    elif tool_name == "preview_audience":
+        if isinstance(result, dict):
+            total = result.get("total_recipients", 0)
+            sms = result.get("sms_eligible", 0)
+            if total == 0:
+                return "No one matches that audience targeting."
+            samples = result.get("sample_names", [])
+            sample_text = f" Including {', '.join(samples[:3])}." if samples else ""
+            return f"{total} people would receive this message. {sms} are eligible for SMS.{sample_text}"
 
     # Default response
     return "Done."

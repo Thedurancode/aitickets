@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -650,6 +650,68 @@ def send_marketing_campaign(
             .distinct()
         )
         query = query.filter(EventGoer.id.in_(category_goer_ids))
+
+    # Multi-event targeting (attended ANY of these events)
+    if segments.get("event_ids"):
+        multi_event_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .filter(TicketTier.event_id.in_(segments["event_ids"]))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(multi_event_goer_ids))
+
+    # Series targeting (all events sharing a series_id)
+    if segments.get("series_id"):
+        series_event_ids = db.query(Event.id).filter(Event.series_id == segments["series_id"])
+        series_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .filter(TicketTier.event_id.in_(series_event_ids))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(series_goer_ids))
+
+    # Exclude event filter (NOT attended these events)
+    if segments.get("exclude_event_ids"):
+        excluded_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .filter(TicketTier.event_id.in_(segments["exclude_event_ids"]))
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .distinct()
+        )
+        query = query.filter(~EventGoer.id.in_(excluded_goer_ids))
+
+    # Lapsed customers (last purchase > N days ago)
+    if segments.get("days_since_last_event"):
+        cutoff = datetime.now(timezone.utc) - timedelta(days=int(segments["days_since_last_event"]))
+        last_purchase_subq = (
+            db.query(
+                Ticket.event_goer_id,
+                func.max(Ticket.purchased_at).label("last_purchase")
+            )
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .group_by(Ticket.event_goer_id)
+            .having(func.max(Ticket.purchased_at) < cutoff)
+            .subquery()
+        )
+        query = query.filter(EventGoer.id.in_(db.query(last_purchase_subq.c.event_goer_id)))
+
+    # Recently active (attended within last N days)
+    if segments.get("attended_since_days"):
+        since_cutoff = datetime.now(timezone.utc) - timedelta(days=int(segments["attended_since_days"]))
+        recent_goer_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .join(Event, TicketTier.event_id == Event.id)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .filter(Event.event_date >= since_cutoff.strftime("%Y-%m-%d"))
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(recent_goer_ids))
 
     recipients = query.all()
 
