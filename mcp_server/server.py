@@ -508,6 +508,21 @@ async def list_tools():
             },
         ),
         Tool(
+            name="refund_ticket",
+            description="Refund a ticket and return money to the customer via Stripe. Can look up tickets by ticket ID or by customer name. Marks ticket as refunded, restores inventory, and optionally notifies the customer.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "Refund a specific ticket by ID"},
+                    "customer_name": {"type": "string", "description": "Find and refund tickets by customer name"},
+                    "event_id": {"type": "integer", "description": "When using customer_name, limit to this event"},
+                    "notify_customer": {"type": "boolean", "description": "Send refund confirmation email/SMS (default true)"},
+                    "reason": {"type": "string", "description": "Reason for refund (for internal records)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="list_event_goers",
             description="List attendees for an event",
             inputSchema={
@@ -5250,6 +5265,170 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             result["comparison"] = comparison
 
         return result
+
+    # ============== Refund Tool ==============
+    elif name == "refund_ticket":
+        import stripe
+        from app.config import get_settings
+
+        settings = get_settings()
+        stripe.api_key = settings.stripe_secret_key
+
+        ticket_id = arguments.get("ticket_id")
+        customer_name = arguments.get("customer_name")
+        event_id = arguments.get("event_id")
+        notify_customer = arguments.get("notify_customer", True)
+        reason = arguments.get("reason", "")
+
+        if not ticket_id and not customer_name:
+            return {"error": "Provide either ticket_id or customer_name to identify which ticket(s) to refund."}
+
+        # Resolve tickets
+        tickets_to_refund = []
+
+        if ticket_id:
+            ticket = (
+                db.query(Ticket)
+                .options(
+                    joinedload(Ticket.ticket_tier).joinedload(TicketTier.event),
+                    joinedload(Ticket.event_goer),
+                )
+                .filter(Ticket.id == ticket_id)
+                .first()
+            )
+            if not ticket:
+                return {"error": f"Ticket {ticket_id} not found"}
+            tickets_to_refund = [ticket]
+        else:
+            # Find by customer name
+            query = (
+                db.query(Ticket)
+                .options(
+                    joinedload(Ticket.ticket_tier).joinedload(TicketTier.event),
+                    joinedload(Ticket.event_goer),
+                )
+                .join(EventGoer, Ticket.event_goer_id == EventGoer.id)
+                .filter(EventGoer.name.ilike(f"%{customer_name}%"))
+                .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            )
+            if event_id:
+                query = query.join(TicketTier, Ticket.ticket_tier_id == TicketTier.id).filter(TicketTier.event_id == event_id)
+            tickets_to_refund = query.all()
+
+            if not tickets_to_refund:
+                return {"error": f"No refundable tickets found for '{customer_name}'" + (f" at event {event_id}" if event_id else "")}
+
+        # Process refunds
+        refunded = []
+        skipped = []
+        errors = []
+        refund_total_cents = 0
+        stripe_refunds_created = {}  # track payment_intent → refund to avoid duplicates
+
+        for ticket in tickets_to_refund:
+            # Skip already refunded/cancelled
+            if ticket.status in (TicketStatus.REFUNDED, TicketStatus.CANCELLED):
+                skipped.append({"ticket_id": ticket.id, "reason": f"Already {ticket.status.value}"})
+                continue
+
+            was_checked_in = ticket.status == TicketStatus.CHECKED_IN
+            tier_price = ticket.ticket_tier.price if ticket.ticket_tier else 0
+            discount = ticket.discount_amount_cents or 0
+            ticket_revenue = tier_price - discount
+
+            # Call Stripe if there's a payment intent and we haven't already refunded it
+            stripe_refund_id = None
+            if ticket.stripe_payment_intent_id:
+                pi = ticket.stripe_payment_intent_id
+                if pi not in stripe_refunds_created:
+                    try:
+                        refund = stripe.Refund.create(payment_intent=pi)
+                        stripe_refund_id = refund.id
+                        stripe_refunds_created[pi] = refund.id
+                    except stripe.error.InvalidRequestError as e:
+                        if "already been refunded" in str(e).lower() or "has already been reversed" in str(e).lower():
+                            stripe_refunds_created[pi] = "already_refunded"
+                            stripe_refund_id = "already_refunded"
+                        else:
+                            errors.append({"ticket_id": ticket.id, "error": str(e)})
+                            continue
+                    except Exception as e:
+                        errors.append({"ticket_id": ticket.id, "error": str(e)})
+                        continue
+                else:
+                    stripe_refund_id = stripe_refunds_created[pi]
+
+            # Update local DB
+            ticket.status = TicketStatus.REFUNDED
+            if ticket.ticket_tier:
+                ticket.ticket_tier.quantity_sold = max(0, ticket.ticket_tier.quantity_sold - 1)
+
+            refund_total_cents += ticket_revenue
+            refunded.append({
+                "ticket_id": ticket.id,
+                "customer_name": ticket.event_goer.name if ticket.event_goer else "Unknown",
+                "event_name": ticket.ticket_tier.event.name if ticket.ticket_tier and ticket.ticket_tier.event else "Unknown",
+                "amount_cents": ticket_revenue,
+                "stripe_refund_id": stripe_refund_id,
+                "was_checked_in": was_checked_in,
+            })
+
+        db.commit()
+
+        # Auto-notify waitlist for freed-up tickets
+        event_ids_affected = set()
+        for r in refunded:
+            for ticket in tickets_to_refund:
+                if ticket.id == r["ticket_id"] and ticket.ticket_tier:
+                    event_ids_affected.add(ticket.ticket_tier.event_id)
+
+        for eid in event_ids_affected:
+            count_for_event = sum(1 for r in refunded for t in tickets_to_refund if t.id == r["ticket_id"] and t.ticket_tier and t.ticket_tier.event_id == eid)
+            try:
+                from app.routers.payments import _auto_notify_waitlist
+                _auto_notify_waitlist(eid, count_for_event, db)
+            except Exception:
+                pass  # Don't fail refund if waitlist notification fails
+
+        # Notify customer
+        if notify_customer and refunded:
+            customer = tickets_to_refund[0].event_goer if tickets_to_refund else None
+            if customer:
+                refund_dollars = refund_total_cents / 100
+                event_names = list(set(r["event_name"] for r in refunded))
+                events_str = ", ".join(event_names)
+
+                # SMS notification
+                if customer.phone:
+                    try:
+                        from app.services.sms import send_sms
+                        msg = f"Your refund of ${refund_dollars:.2f} for {events_str} has been processed. It may take 5-10 business days to appear on your statement."
+                        send_sms(customer.phone, msg)
+                    except Exception:
+                        pass
+
+                # Email notification
+                if customer.email:
+                    try:
+                        from app.services.email_service import send_email
+                        send_email(
+                            to_email=customer.email,
+                            subject=f"Refund Confirmation - {events_str}",
+                            html_content=f"<p>Hi {customer.name},</p><p>Your refund of <strong>${refund_dollars:.2f}</strong> for {events_str} has been processed.</p><p>{f'Reason: {reason}' if reason else ''}</p><p>It may take 5-10 business days to appear on your statement.</p>",
+                        )
+                    except Exception:
+                        pass
+
+        return {
+            "success": True,
+            "refunded_count": len(refunded),
+            "refund_total_cents": refund_total_cents,
+            "refund_total_dollars": round(refund_total_cents / 100, 2),
+            "refunded": refunded,
+            "skipped": skipped,
+            "errors": errors,
+            "reason": reason,
+        }
 
     return {"error": f"Unknown tool: {name}"}
 

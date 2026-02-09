@@ -718,6 +718,13 @@ async def voice_action(request: Request):
         "total revenue": "get_all_sales",
         "all sales": "get_all_sales",
         "all event sales": "get_all_sales",
+        # Refunds
+        "refund": "refund_ticket",
+        "refund ticket": "refund_ticket",
+        "issue refund": "refund_ticket",
+        "cancel ticket": "refund_ticket",
+        "give refund": "refund_ticket",
+        "process refund": "refund_ticket",
         # Search
         "find event": "search_events",
         "search events": "search_events",
@@ -1295,6 +1302,23 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
                     direction = "up" if change_pct > 0 else "down"
                     speech += f" That's {direction} {abs(change_pct)}% from the previous period."
             return speech
+
+    elif tool_name == "refund_ticket":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            count = result.get("refunded_count", 0)
+            total = result.get("refund_total_dollars", 0)
+            if count == 0:
+                skipped = result.get("skipped", [])
+                if skipped:
+                    return f"No tickets refunded. {skipped[0].get('reason', 'Already processed')}."
+                return "No refundable tickets found."
+            names = list(set(r.get("customer_name", "") for r in result.get("refunded", [])))
+            customer = names[0] if names else "the customer"
+            if total > 0:
+                return f"Refunded {count} ticket{'s' if count > 1 else ''} for {customer}. ${total:.2f} will be returned to their card."
+            return f"Cancelled {count} ticket{'s' if count > 1 else ''} for {customer}. No payment to refund."
 
     elif tool_name == "list_ticket_tiers":
         if isinstance(result, list):
