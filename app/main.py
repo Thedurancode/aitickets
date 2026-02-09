@@ -42,8 +42,24 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 @app.on_event("startup")
 def on_startup():
-    """Initialize database on startup."""
+    """Initialize database and scheduler on startup."""
     init_db()
+    try:
+        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders
+        init_scheduler()
+        bootstrap_existing_reminders()
+    except Exception as e:
+        print(f"Scheduler init note: {e}")
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    """Shut down scheduler gracefully."""
+    try:
+        from app.services.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:
+        pass
 
 
 @app.get("/")

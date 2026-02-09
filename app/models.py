@@ -117,6 +117,8 @@ class Event(Base):
     promoter_phone = Column(String(50), nullable=True)
     promoter_name = Column(String(255), nullable=True)
     series_id = Column(String(36), nullable=True, index=True)  # UUID linking recurring events
+    auto_reminder_hours = Column(Integer, nullable=True, default=24)  # hours before event; NULL = disabled
+    auto_reminder_use_sms = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

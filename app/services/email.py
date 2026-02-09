@@ -65,6 +65,7 @@ def send_ticket_email(
         ticket_id=ticket_id,
         qr_code_base64=qr_code_base64,
         validation_url=f"{settings.base_url}/tickets/validate/{qr_code_token}",
+        base_url=settings.base_url,
     )
 
     return _send_email(to_email, f"Your Ticket for {event_name}", html_content)

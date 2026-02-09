@@ -343,3 +343,89 @@ def _build_ticket_full_response(ticket: Ticket) -> TicketFullResponse:
         venue=VenueResponse.model_validate(ticket.ticket_tier.event.venue),
         event_goer=EventGoerResponse.model_validate(ticket.event_goer),
     )
+
+
+def _load_ticket_with_relations(ticket_id: int, db: Session) -> Ticket:
+    """Load a ticket with all relations needed for PDF/wallet generation."""
+    ticket = (
+        db.query(Ticket)
+        .options(
+            joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
+            joinedload(Ticket.event_goer),
+        )
+        .filter(Ticket.id == ticket_id)
+        .first()
+    )
+    return ticket
+
+
+@router.get("/{ticket_id}/pdf")
+def download_ticket_pdf(ticket_id: int, db: Session = Depends(get_db)):
+    """Download a ticket as a branded PDF."""
+    ticket = _load_ticket_with_relations(ticket_id, db)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    if ticket.status not in (TicketStatus.PAID, TicketStatus.CHECKED_IN):
+        raise HTTPException(status_code=400, detail=f"Ticket is {ticket.status.value}, not downloadable")
+    if not ticket.qr_code_token:
+        raise HTTPException(status_code=400, detail="Ticket has no QR code")
+
+    from app.services.pdf_ticket import generate_ticket_pdf
+
+    event = ticket.ticket_tier.event
+    venue = event.venue
+
+    pdf_bytes = generate_ticket_pdf(
+        event_name=event.name,
+        event_date=event.event_date,
+        event_time=event.event_time,
+        venue_name=venue.name,
+        venue_address=venue.address or "",
+        attendee_name=ticket.event_goer.name,
+        tier_name=ticket.ticket_tier.name,
+        ticket_id=ticket.id,
+        qr_token=ticket.qr_code_token,
+        doors_open_time=getattr(event, "doors_open_time", None),
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=ticket-{ticket.id}.pdf"},
+    )
+
+
+@router.get("/{ticket_id}/wallet")
+def download_wallet_pass(ticket_id: int, db: Session = Depends(get_db)):
+    """Download a ticket as an Apple Wallet .pkpass file."""
+    ticket = _load_ticket_with_relations(ticket_id, db)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    if ticket.status not in (TicketStatus.PAID, TicketStatus.CHECKED_IN):
+        raise HTTPException(status_code=400, detail=f"Ticket is {ticket.status.value}, not downloadable")
+    if not ticket.qr_code_token:
+        raise HTTPException(status_code=400, detail="Ticket has no QR code")
+
+    from app.services.wallet_pass import generate_wallet_pass
+
+    event = ticket.ticket_tier.event
+    venue = event.venue
+
+    pass_bytes = generate_wallet_pass(
+        event_name=event.name,
+        event_date=event.event_date,
+        event_time=event.event_time,
+        venue_name=venue.name,
+        venue_address=venue.address or "",
+        attendee_name=ticket.event_goer.name,
+        tier_name=ticket.ticket_tier.name,
+        ticket_id=ticket.id,
+        qr_token=ticket.qr_code_token,
+        doors_open_time=getattr(event, "doors_open_time", None),
+    )
+
+    return Response(
+        content=pass_bytes,
+        media_type="application/vnd.apple.pkpass",
+        headers={"Content-Disposition": f"attachment; filename=ticket-{ticket.id}.pkpass"},
+    )

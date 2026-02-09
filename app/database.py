@@ -111,3 +111,9 @@ def init_db():
         run_marketing_lists_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_auto_reminders import run_migration as run_auto_reminders_migration
+        run_auto_reminders_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

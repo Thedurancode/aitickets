@@ -142,6 +142,19 @@
                     Present this QR code at the venue entrance for quick check-in.
                     <br>Please don't share this code with others.
                 </p>
+
+                {% if base_url and ticket_id %}
+                <div style="margin-top: 20px; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                    <a href="{{ base_url }}/api/tickets/{{ ticket_id }}/pdf"
+                       style="display: inline-block; padding: 10px 20px; background: #333; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 600;">
+                        Download PDF
+                    </a>
+                    <a href="{{ base_url }}/api/tickets/{{ ticket_id }}/wallet"
+                       style="display: inline-block; padding: 10px 20px; background: #000; color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 600;">
+                        Add to Apple Wallet
+                    </a>
+                </div>
+                {% endif %}
             </div>
         </div>
 
