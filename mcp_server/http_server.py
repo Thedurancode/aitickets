@@ -923,6 +923,21 @@ async def voice_action(request: Request):
         "who would get": "preview_audience",
         "campaign preview": "preview_audience",
         "how many people": "preview_audience",
+        # Marketing lists
+        "create list": "create_marketing_list",
+        "new list": "create_marketing_list",
+        "save list": "create_marketing_list",
+        "create marketing list": "create_marketing_list",
+        "show lists": "list_marketing_lists",
+        "my lists": "list_marketing_lists",
+        "marketing lists": "list_marketing_lists",
+        "view lists": "list_marketing_lists",
+        "all lists": "list_marketing_lists",
+        "delete list": "delete_marketing_list",
+        "remove list": "delete_marketing_list",
+        "send to list": "send_to_marketing_list",
+        "blast list": "send_to_marketing_list",
+        "email list": "send_to_marketing_list",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -1545,6 +1560,36 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             samples = result.get("sample_names", [])
             sample_text = f" Including {', '.join(samples[:3])}." if samples else ""
             return f"{total} people would receive this message. {sms} are eligible for SMS.{sample_text}"
+
+    # ============== Marketing Lists ==============
+    elif tool_name == "create_marketing_list":
+        if isinstance(result, dict) and result.get("success"):
+            name = result.get("name", "the list")
+            count = result.get("member_count", 0)
+            return f"Created list '{name}' with {count} members."
+        elif isinstance(result, dict):
+            return result.get("error", "Failed to create list.")
+
+    elif tool_name == "list_marketing_lists":
+        if isinstance(result, dict):
+            total = result.get("total_lists", 0)
+            if total == 0:
+                return "You don't have any marketing lists yet."
+            lists = result.get("lists", [])
+            summaries = [f"{l['name']} ({l['member_count']} members)" for l in lists[:5]]
+            return f"You have {total} list{'s' if total != 1 else ''}: {', '.join(summaries)}."
+
+    elif tool_name == "get_marketing_list":
+        if isinstance(result, dict) and result.get("success"):
+            return result.get("message", "List retrieved.")
+
+    elif tool_name == "delete_marketing_list":
+        if isinstance(result, dict):
+            return result.get("message", "List deleted.")
+
+    elif tool_name == "send_to_marketing_list":
+        if isinstance(result, dict):
+            return result.get("message", "Sent to list.")
 
     # Default response
     return "Done."

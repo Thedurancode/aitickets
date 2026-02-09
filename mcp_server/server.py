@@ -18,7 +18,7 @@ from app.models import (
     Venue, Event, TicketTier, Ticket, EventGoer, TicketStatus,
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference, EventCategory,
-    MarketingCampaign, PromoCode, DiscountType, EventPhoto,
+    MarketingCampaign, MarketingList, PromoCode, DiscountType, EventPhoto,
     WaitlistEntry, WaitlistStatus,
 )
 from app.services.stripe_sync import (
@@ -846,6 +846,73 @@ async def list_tools():
                     "target_attended_since_days": {"type": "integer", "description": "Active within last N days"},
                 },
                 "required": [],
+            },
+        ),
+        # ============== Marketing List Tools ==============
+        Tool(
+            name="create_marketing_list",
+            description="Create a saved, reusable audience list with segment filters. Use the same targeting params as campaigns. The list auto-updates — new matching customers are included when you send.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "List name (e.g. 'Latin Night VIPs', 'Comedy Regulars')"},
+                    "description": {"type": "string", "description": "Optional description of this audience"},
+                    "target_event_id": {"type": "integer", "description": "Attendees of a specific event"},
+                    "target_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Attendees of multiple events"},
+                    "target_series_id": {"type": "string", "description": "All attendees of a recurring series"},
+                    "target_vip": {"type": "boolean", "description": "VIP customers only"},
+                    "target_vip_tier": {"type": "string", "description": "Specific VIP tier"},
+                    "target_min_events": {"type": "integer", "description": "Min events attended"},
+                    "target_min_spent_cents": {"type": "integer", "description": "Min spent in cents"},
+                    "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Event category IDs"},
+                    "target_exclude_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Exclude attendees of these events"},
+                    "target_days_since_last_event": {"type": "integer", "description": "Inactive for N+ days"},
+                    "target_attended_since_days": {"type": "integer", "description": "Active within last N days"},
+                },
+                "required": ["name"],
+            },
+        ),
+        Tool(
+            name="list_marketing_lists",
+            description="Show all saved marketing lists with live member counts.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="get_marketing_list",
+            description="View a marketing list's details, live member count, and sample member names.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "list_id": {"type": "integer", "description": "The marketing list ID"},
+                },
+                "required": ["list_id"],
+            },
+        ),
+        Tool(
+            name="delete_marketing_list",
+            description="Delete a saved marketing list by ID or name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "list_id": {"type": "integer", "description": "The marketing list ID"},
+                    "name": {"type": "string", "description": "Or delete by name"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="send_to_marketing_list",
+            description="Send a campaign to a saved marketing list. Creates the campaign and sends immediately.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "list_id": {"type": "integer", "description": "The marketing list ID to send to"},
+                    "subject": {"type": "string", "description": "Email subject line"},
+                    "content": {"type": "string", "description": "Message content"},
+                    "use_email": {"type": "boolean", "description": "Send via email (default true)"},
+                    "use_sms": {"type": "boolean", "description": "Also send via SMS (default false)"},
+                },
+                "required": ["list_id", "subject", "content"],
             },
         ),
         # ============== Promo Code Tools ==============
@@ -3143,6 +3210,148 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "target_description": target_desc,
             "message": f"{total} people match this audience ({sms_eligible} eligible for SMS). Sample: {', '.join(sample_names[:3]) if sample_names else 'none'}.",
         }
+
+    # ============== Marketing List Tools ==============
+
+    elif name == "create_marketing_list":
+        list_name = arguments.get("name", "").strip()
+        if not list_name:
+            return {"error": "List name is required"}
+
+        existing = db.query(MarketingList).filter(MarketingList.name == list_name).first()
+        if existing:
+            return {"error": f"A list named '{list_name}' already exists (ID: {existing.id})"}
+
+        segments = _build_segments(arguments)
+        if arguments.get("target_event_id"):
+            event_ids = segments.get("event_ids", [])
+            if arguments["target_event_id"] not in event_ids:
+                event_ids.insert(0, arguments["target_event_id"])
+            segments["event_ids"] = event_ids
+
+        if not segments:
+            return {"error": "At least one targeting filter is required (e.g. target_vip, target_event_ids, target_category_ids)"}
+
+        ml = MarketingList(
+            name=list_name,
+            description=arguments.get("description", ""),
+            segment_filters=json.dumps(segments),
+        )
+        db.add(ml)
+        db.commit()
+        db.refresh(ml)
+
+        query = db.query(EventGoer).filter(EventGoer.marketing_opt_in == True)
+        query = _apply_segment_filters(db, query, segments)
+        count = query.count()
+
+        return {
+            "success": True,
+            "list_id": ml.id,
+            "name": ml.name,
+            "description": ml.description,
+            "filters": segments,
+            "member_count": count,
+            "message": f"Created list '{ml.name}' with {count} members. Use send_to_marketing_list to send campaigns to this list.",
+        }
+
+    elif name == "list_marketing_lists":
+        lists = db.query(MarketingList).order_by(MarketingList.created_at.desc()).all()
+
+        results = []
+        for ml in lists:
+            segments = json.loads(ml.segment_filters) if ml.segment_filters else {}
+            query = db.query(EventGoer).filter(EventGoer.marketing_opt_in == True)
+            query = _apply_segment_filters(db, query, segments)
+            count = query.count()
+
+            results.append({
+                "id": ml.id,
+                "name": ml.name,
+                "description": ml.description,
+                "member_count": count,
+                "filters": _describe_segments(segments),
+                "created_at": str(ml.created_at),
+            })
+
+        return {
+            "success": True,
+            "total_lists": len(results),
+            "lists": results,
+            "message": f"{len(results)} marketing list(s) found.",
+        }
+
+    elif name == "get_marketing_list":
+        ml = db.query(MarketingList).filter(MarketingList.id == arguments["list_id"]).first()
+        if not ml:
+            return {"error": "Marketing list not found"}
+
+        segments = json.loads(ml.segment_filters) if ml.segment_filters else {}
+        query = db.query(EventGoer).filter(EventGoer.marketing_opt_in == True)
+        query = _apply_segment_filters(db, query, segments)
+        total = query.count()
+        samples = query.limit(5).all()
+        sms_eligible = query.filter(
+            EventGoer.sms_opt_in == True, EventGoer.phone.isnot(None)
+        ).count()
+
+        return {
+            "success": True,
+            "list_id": ml.id,
+            "name": ml.name,
+            "description": ml.description,
+            "filters": segments,
+            "filters_description": _describe_segments(segments),
+            "member_count": total,
+            "sms_eligible": sms_eligible,
+            "sample_names": [s.name for s in samples],
+            "created_at": str(ml.created_at),
+            "message": f"'{ml.name}' has {total} members ({sms_eligible} SMS-eligible).",
+        }
+
+    elif name == "delete_marketing_list":
+        ml = None
+        if arguments.get("list_id"):
+            ml = db.query(MarketingList).filter(MarketingList.id == arguments["list_id"]).first()
+        elif arguments.get("name"):
+            ml = db.query(MarketingList).filter(MarketingList.name == arguments["name"]).first()
+
+        if not ml:
+            return {"error": "Marketing list not found"}
+
+        name = ml.name
+        db.delete(ml)
+        db.commit()
+        return {"success": True, "message": f"Deleted marketing list '{name}'."}
+
+    elif name == "send_to_marketing_list":
+        from app.services.notifications import send_marketing_campaign
+
+        ml = db.query(MarketingList).filter(MarketingList.id == arguments["list_id"]).first()
+        if not ml:
+            return {"error": "Marketing list not found"}
+
+        campaign = MarketingCampaign(
+            name=f"Send to '{ml.name}' - {datetime.utcnow().strftime('%b %d')}",
+            subject=arguments["subject"],
+            content=arguments["content"],
+            target_segments=ml.segment_filters,
+            status="draft",
+        )
+        db.add(campaign)
+        db.commit()
+        db.refresh(campaign)
+
+        channels = []
+        if arguments.get("use_email", True):
+            channels.append(NotificationChannel.EMAIL)
+        if arguments.get("use_sms", False):
+            channels.append(NotificationChannel.SMS)
+
+        result = send_marketing_campaign(db=db, campaign_id=campaign.id, channels=channels)
+        result["list_name"] = ml.name
+        result["message"] = f"Sent to '{ml.name}' list — {result.get('total_recipients', 0)} recipients"
+        return result
 
     # ============== Phone Verification Tools ==============
     elif name == "send_verification_code":

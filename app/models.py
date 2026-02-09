@@ -281,6 +281,18 @@ class MarketingCampaign(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class MarketingList(Base):
+    """Saved audience segments for reusable targeting."""
+    __tablename__ = "marketing_lists"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    segment_filters = Column(Text, nullable=False)  # JSON, same format as MarketingCampaign.target_segments
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
 class CustomerNote(Base):
     """Store notes about customers from AI agent conversations."""
     __tablename__ = "customer_notes"

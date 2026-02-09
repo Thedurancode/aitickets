@@ -105,3 +105,9 @@ def init_db():
         run_waitlist_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_marketing_lists import run_migration as run_marketing_lists_migration
+        run_marketing_lists_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")
