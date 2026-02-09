@@ -446,22 +446,42 @@ async def list_tools():
         # Sales and attendee tools
         Tool(
             name="get_event_sales",
-            description="Get sales statistics for an event",
+            description="Get sales statistics for an event. Optionally filter by date range.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "event_id": {"type": "integer", "description": "The event ID"},
+                    "start_date": {"type": "string", "description": "Start date filter (YYYY-MM-DD). When provided, revenue is calculated from actual ticket records."},
+                    "end_date": {"type": "string", "description": "End date filter (YYYY-MM-DD). When provided, revenue is calculated from actual ticket records."},
                 },
                 "required": ["event_id"],
             },
         ),
         Tool(
             name="get_all_sales",
-            description="Get total sales across all events",
+            description="Get total sales across all events. Optionally filter by date range.",
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "start_date": {"type": "string", "description": "Start date filter (YYYY-MM-DD). When provided, revenue is calculated from actual ticket records."},
+                    "end_date": {"type": "string", "description": "End date filter (YYYY-MM-DD). When provided, revenue is calculated from actual ticket records."},
+                },
                 "required": [],
+            },
+        ),
+        Tool(
+            name="get_revenue_report",
+            description="Generate a detailed revenue report with daily/weekly breakdowns, top events by revenue, and optional comparison to a previous period.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "Report start date (YYYY-MM-DD)"},
+                    "end_date": {"type": "string", "description": "Report end date (YYYY-MM-DD). Defaults to today."},
+                    "breakdown": {"type": "string", "enum": ["daily", "weekly"], "description": "How to break down revenue over the period. Default: daily."},
+                    "compare_previous": {"type": "boolean", "description": "If true, include comparison to the equivalent previous period. Default: false."},
+                    "event_id": {"type": "integer", "description": "Optional: limit report to a specific event."},
+                },
+                "required": ["start_date"],
             },
         ),
         Tool(
@@ -2228,6 +2248,79 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if not event:
             return {"error": "Event not found"}
 
+        start_date_str = arguments.get("start_date")
+        end_date_str = arguments.get("end_date")
+
+        if start_date_str or end_date_str:
+            # Date-filtered path: query actual Ticket records
+            from sqlalchemy import func as sqlfunc
+
+            start_dt = datetime.strptime(start_date_str, "%Y-%m-%d") if start_date_str else None
+            end_dt = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) if end_date_str else None
+
+            base_filter = [
+                TicketTier.event_id == arguments["event_id"],
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            ]
+            if start_dt:
+                base_filter.append(Ticket.purchased_at >= start_dt)
+            if end_dt:
+                base_filter.append(Ticket.purchased_at < end_dt)
+
+            tier_rows = (
+                db.query(
+                    TicketTier.id,
+                    TicketTier.name,
+                    TicketTier.price,
+                    sqlfunc.count(Ticket.id).label("sold"),
+                    sqlfunc.sum(
+                        TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                    ).label("revenue"),
+                )
+                .join(Ticket, Ticket.ticket_tier_id == TicketTier.id)
+                .filter(*base_filter)
+                .group_by(TicketTier.id, TicketTier.name, TicketTier.price)
+                .all()
+            )
+
+            checked_in = (
+                db.query(sqlfunc.count(Ticket.id))
+                .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+                .filter(
+                    TicketTier.event_id == arguments["event_id"],
+                    Ticket.status == TicketStatus.CHECKED_IN,
+                    *([Ticket.purchased_at >= start_dt] if start_dt else []),
+                    *([Ticket.purchased_at < end_dt] if end_dt else []),
+                )
+                .scalar() or 0
+            )
+
+            total_sold = sum(r.sold for r in tier_rows)
+            total_revenue = sum(r.revenue or 0 for r in tier_rows)
+
+            tiers_data = [
+                {
+                    "tier_id": r.id,
+                    "tier_name": r.name,
+                    "price_cents": r.price,
+                    "quantity_sold": r.sold,
+                    "revenue_cents": int(r.revenue or 0),
+                }
+                for r in tier_rows
+            ]
+
+            return {
+                "event_id": event.id,
+                "event_name": event.name,
+                "date_range": {"start_date": start_date_str, "end_date": end_date_str},
+                "total_tickets_sold": total_sold,
+                "total_revenue_cents": int(total_revenue),
+                "total_revenue_dollars": round(total_revenue / 100, 2),
+                "tickets_checked_in": checked_in,
+                "tiers": tiers_data,
+            }
+
+        # Original aggregate path (no date filter)
         total_sold = 0
         total_available = 0
         total_revenue = 0
@@ -2269,6 +2362,65 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_all_sales":
+        start_date_str = arguments.get("start_date")
+        end_date_str = arguments.get("end_date")
+
+        if start_date_str or end_date_str:
+            # Date-filtered path: query actual Ticket records
+            from sqlalchemy import func as sqlfunc
+
+            start_dt = datetime.strptime(start_date_str, "%Y-%m-%d") if start_date_str else None
+            end_dt = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1) if end_date_str else None
+
+            base_filter = [
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            ]
+            if start_dt:
+                base_filter.append(Ticket.purchased_at >= start_dt)
+            if end_dt:
+                base_filter.append(Ticket.purchased_at < end_dt)
+
+            event_rows = (
+                db.query(
+                    Event.id,
+                    Event.name,
+                    Event.event_date,
+                    sqlfunc.count(Ticket.id).label("sold"),
+                    sqlfunc.sum(
+                        TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                    ).label("revenue"),
+                )
+                .join(TicketTier, TicketTier.event_id == Event.id)
+                .join(Ticket, Ticket.ticket_tier_id == TicketTier.id)
+                .filter(*base_filter)
+                .group_by(Event.id, Event.name, Event.event_date)
+                .all()
+            )
+
+            grand_total_sold = sum(r.sold for r in event_rows)
+            grand_total_revenue = sum(r.revenue or 0 for r in event_rows)
+
+            events_data = [
+                {
+                    "event_id": r.id,
+                    "event_name": r.name,
+                    "event_date": r.event_date,
+                    "tickets_sold": r.sold,
+                    "revenue_cents": int(r.revenue or 0),
+                }
+                for r in event_rows
+            ]
+
+            return {
+                "date_range": {"start_date": start_date_str, "end_date": end_date_str},
+                "total_tickets_sold": grand_total_sold,
+                "total_revenue_cents": int(grand_total_revenue),
+                "total_revenue_dollars": round(grand_total_revenue / 100, 2),
+                "events_with_sales": len(events_data),
+                "events": events_data,
+            }
+
+        # Original aggregate path (no date filter)
         events = db.query(Event).options(joinedload(Event.ticket_tiers)).all()
 
         grand_total_sold = 0
@@ -2312,6 +2464,173 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "events_with_sales": len(events_data),
             "events": events_data,
         }
+
+    elif name == "get_revenue_report":
+        from sqlalchemy import func as sqlfunc
+
+        start_date_str = arguments["start_date"]
+        end_date_str = arguments.get("end_date")
+        breakdown = arguments.get("breakdown", "daily")
+        compare_previous = arguments.get("compare_previous", False)
+        report_event_id = arguments.get("event_id")
+
+        start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
+        if end_date_str:
+            end_dt = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1)
+        else:
+            end_dt = datetime.utcnow()
+            end_date_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+        period_days = (end_dt - start_dt).days
+
+        base_filter = [
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            Ticket.purchased_at >= start_dt,
+            Ticket.purchased_at < end_dt,
+        ]
+        if report_event_id:
+            base_filter.append(TicketTier.event_id == report_event_id)
+
+        # Totals
+        total_query = (
+            db.query(
+                sqlfunc.count(Ticket.id).label("tickets"),
+                sqlfunc.sum(
+                    TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                ).label("revenue"),
+                sqlfunc.sum(sqlfunc.coalesce(Ticket.discount_amount_cents, 0)).label("total_discounts"),
+            )
+            .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(*base_filter)
+            .first()
+        )
+
+        total_tickets = total_query.tickets or 0
+        total_revenue = int(total_query.revenue or 0)
+        total_discounts = int(total_query.total_discounts or 0)
+
+        # Top events by revenue
+        top_events = (
+            db.query(
+                Event.id,
+                Event.name,
+                Event.event_date,
+                sqlfunc.count(Ticket.id).label("tickets"),
+                sqlfunc.sum(
+                    TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                ).label("revenue"),
+            )
+            .join(TicketTier, TicketTier.event_id == Event.id)
+            .join(Ticket, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(*base_filter)
+            .group_by(Event.id, Event.name, Event.event_date)
+            .order_by(sqlfunc.sum(TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)).desc())
+            .limit(10)
+            .all()
+        )
+
+        # Time breakdown
+        if breakdown == "weekly":
+            date_expr = sqlfunc.strftime("%Y-W%W", Ticket.purchased_at)
+        else:
+            date_expr = sqlfunc.date(Ticket.purchased_at)
+
+        breakdown_rows = (
+            db.query(
+                date_expr.label("period"),
+                sqlfunc.count(Ticket.id).label("tickets"),
+                sqlfunc.sum(
+                    TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                ).label("revenue"),
+            )
+            .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(*base_filter)
+            .group_by(date_expr)
+            .order_by(date_expr)
+            .all()
+        )
+
+        # Comparison period (optional)
+        comparison = None
+        if compare_previous:
+            prev_start = start_dt - timedelta(days=period_days)
+            prev_end = start_dt
+            prev_filter = [
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+                Ticket.purchased_at >= prev_start,
+                Ticket.purchased_at < prev_end,
+            ]
+            if report_event_id:
+                prev_filter.append(TicketTier.event_id == report_event_id)
+
+            prev_query = (
+                db.query(
+                    sqlfunc.count(Ticket.id).label("tickets"),
+                    sqlfunc.sum(
+                        TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                    ).label("revenue"),
+                )
+                .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+                .filter(*prev_filter)
+                .first()
+            )
+            prev_tickets = prev_query.tickets or 0
+            prev_revenue = int(prev_query.revenue or 0)
+
+            comparison = {
+                "previous_period": {
+                    "start_date": prev_start.strftime("%Y-%m-%d"),
+                    "end_date": (prev_end - timedelta(days=1)).strftime("%Y-%m-%d"),
+                },
+                "previous_tickets": prev_tickets,
+                "previous_revenue_cents": prev_revenue,
+                "previous_revenue_dollars": round(prev_revenue / 100, 2),
+                "ticket_change": total_tickets - prev_tickets,
+                "revenue_change_cents": total_revenue - prev_revenue,
+                "revenue_change_percent": round((total_revenue - prev_revenue) / prev_revenue * 100, 1) if prev_revenue > 0 else None,
+            }
+
+        report_result = {
+            "report_period": {
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "days": period_days,
+            },
+            "total_tickets": total_tickets,
+            "total_revenue_cents": total_revenue,
+            "total_revenue_dollars": round(total_revenue / 100, 2),
+            "total_discounts_cents": total_discounts,
+            "average_ticket_revenue_cents": round(total_revenue / total_tickets) if total_tickets > 0 else 0,
+            "top_events": [
+                {
+                    "event_id": r.id,
+                    "event_name": r.name,
+                    "event_date": r.event_date,
+                    "tickets": r.tickets,
+                    "revenue_cents": int(r.revenue or 0),
+                    "revenue_dollars": round(int(r.revenue or 0) / 100, 2),
+                }
+                for r in top_events
+            ],
+            "breakdown": [
+                {
+                    "period": str(r.period),
+                    "tickets": r.tickets,
+                    "revenue_cents": int(r.revenue or 0),
+                    "revenue_dollars": round(int(r.revenue or 0) / 100, 2),
+                }
+                for r in breakdown_rows
+            ],
+            "breakdown_type": breakdown,
+        }
+        if report_event_id:
+            event = db.query(Event).filter(Event.id == report_event_id).first()
+            report_result["event_id"] = report_event_id
+            report_result["event_name"] = event.name if event else "Unknown"
+        if comparison:
+            report_result["comparison"] = comparison
+
+        return report_result
 
     elif name == "refresh_dashboard":
         # This tool signals a refresh - the actual broadcast happens in http_server.py
@@ -4761,6 +5080,175 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "data": result["data"],
                 "message": f"Social media post {arguments['post_id']} deleted",
             }
+        return result
+
+    # ============== Revenue Report Tool ==============
+    elif name == "get_revenue_report":
+        from sqlalchemy import func as sqlfunc
+
+        start_date_str = arguments["start_date"]
+        end_date_str = arguments.get("end_date")
+        breakdown = arguments.get("breakdown", "daily")
+        compare_previous = arguments.get("compare_previous", False)
+        event_id = arguments.get("event_id")
+
+        start_dt = datetime.strptime(start_date_str, "%Y-%m-%d")
+        if end_date_str:
+            end_dt = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1)
+        else:
+            end_dt = datetime.utcnow()
+            end_date_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+        period_days = (end_dt - start_dt).days
+
+        # Base query filters
+        base_filter = [
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            Ticket.purchased_at >= start_dt,
+            Ticket.purchased_at < end_dt,
+        ]
+        if event_id:
+            base_filter.append(TicketTier.event_id == event_id)
+
+        # Totals
+        total_query = (
+            db.query(
+                sqlfunc.count(Ticket.id).label("tickets"),
+                sqlfunc.sum(
+                    TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                ).label("revenue"),
+                sqlfunc.sum(sqlfunc.coalesce(Ticket.discount_amount_cents, 0)).label("total_discounts"),
+            )
+            .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(*base_filter)
+            .first()
+        )
+
+        total_tickets = total_query.tickets or 0
+        total_revenue = int(total_query.revenue or 0)
+        total_discounts = int(total_query.total_discounts or 0)
+
+        # Top events by revenue
+        top_events = (
+            db.query(
+                Event.id,
+                Event.name,
+                Event.event_date,
+                sqlfunc.count(Ticket.id).label("tickets"),
+                sqlfunc.sum(
+                    TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                ).label("revenue"),
+            )
+            .join(TicketTier, TicketTier.event_id == Event.id)
+            .join(Ticket, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(*base_filter)
+            .group_by(Event.id, Event.name, Event.event_date)
+            .order_by(sqlfunc.sum(TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)).desc())
+            .limit(10)
+            .all()
+        )
+
+        # Time breakdown (daily or weekly)
+        if breakdown == "weekly":
+            date_expr = sqlfunc.strftime("%Y-W%W", Ticket.purchased_at)
+        else:
+            date_expr = sqlfunc.date(Ticket.purchased_at)
+
+        breakdown_rows = (
+            db.query(
+                date_expr.label("period"),
+                sqlfunc.count(Ticket.id).label("tickets"),
+                sqlfunc.sum(
+                    TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                ).label("revenue"),
+            )
+            .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(*base_filter)
+            .group_by(date_expr)
+            .order_by(date_expr)
+            .all()
+        )
+
+        # Optional comparison to previous period
+        comparison = None
+        if compare_previous and period_days > 0:
+            prev_start = start_dt - timedelta(days=period_days)
+            prev_end = start_dt
+            prev_filter = [
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+                Ticket.purchased_at >= prev_start,
+                Ticket.purchased_at < prev_end,
+            ]
+            if event_id:
+                prev_filter.append(TicketTier.event_id == event_id)
+
+            prev_query = (
+                db.query(
+                    sqlfunc.count(Ticket.id).label("tickets"),
+                    sqlfunc.sum(
+                        TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                    ).label("revenue"),
+                )
+                .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+                .filter(*prev_filter)
+                .first()
+            )
+            prev_tickets = prev_query.tickets or 0
+            prev_revenue = int(prev_query.revenue or 0)
+
+            comparison = {
+                "previous_period": {
+                    "start_date": prev_start.strftime("%Y-%m-%d"),
+                    "end_date": (prev_end - timedelta(days=1)).strftime("%Y-%m-%d"),
+                },
+                "previous_tickets": prev_tickets,
+                "previous_revenue_cents": prev_revenue,
+                "previous_revenue_dollars": round(prev_revenue / 100, 2),
+                "ticket_change": total_tickets - prev_tickets,
+                "revenue_change_cents": total_revenue - prev_revenue,
+                "revenue_change_percent": round((total_revenue - prev_revenue) / prev_revenue * 100, 1) if prev_revenue > 0 else None,
+            }
+
+        result = {
+            "report_period": {
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "days": period_days,
+            },
+            "total_tickets": total_tickets,
+            "total_revenue_cents": total_revenue,
+            "total_revenue_dollars": round(total_revenue / 100, 2),
+            "total_discounts_cents": total_discounts,
+            "average_ticket_revenue_cents": round(total_revenue / total_tickets) if total_tickets > 0 else 0,
+            "top_events": [
+                {
+                    "event_id": r.id,
+                    "event_name": r.name,
+                    "event_date": r.event_date,
+                    "tickets": r.tickets,
+                    "revenue_cents": int(r.revenue or 0),
+                    "revenue_dollars": round(int(r.revenue or 0) / 100, 2),
+                }
+                for r in top_events
+            ],
+            "breakdown": [
+                {
+                    "period": str(r.period),
+                    "tickets": r.tickets,
+                    "revenue_cents": int(r.revenue or 0),
+                    "revenue_dollars": round(int(r.revenue or 0) / 100, 2),
+                }
+                for r in breakdown_rows
+            ],
+            "breakdown_type": breakdown,
+        }
+        if event_id:
+            event = db.query(Event).filter(Event.id == event_id).first()
+            result["event_id"] = event_id
+            result["event_name"] = event.name if event else "Unknown"
+        if comparison:
+            result["comparison"] = comparison
+
         return result
 
     return {"error": f"Unknown tool: {name}"}

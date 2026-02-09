@@ -709,6 +709,15 @@ async def voice_action(request: Request):
         "event sales": "get_event_sales",
         "event_sales": "get_event_sales",
         "sales": "get_event_sales",
+        "revenue report": "get_revenue_report",
+        "revenue breakdown": "get_revenue_report",
+        "sales report": "get_revenue_report",
+        "how much revenue": "get_revenue_report",
+        "how much money": "get_revenue_report",
+        "revenue": "get_revenue_report",
+        "total revenue": "get_all_sales",
+        "all sales": "get_all_sales",
+        "all event sales": "get_all_sales",
         # Search
         "find event": "search_events",
         "search events": "search_events",
@@ -1251,14 +1260,41 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
         if isinstance(result, dict):
             total = result.get("total_tickets_sold", 0)
             revenue = result.get("total_revenue_cents", 0) / 100
-            return f"{result.get('event_name', 'Event')} has sold {total} tickets for ${revenue:.2f} total revenue."
+            name = result.get("event_name", "Event")
+            dr = result.get("date_range")
+            if dr:
+                period = f"from {dr['start_date']} to {dr['end_date']}" if dr.get("start_date") and dr.get("end_date") else f"since {dr.get('start_date', 'the start')}" if dr.get("start_date") else f"through {dr.get('end_date', 'now')}"
+                return f"{name} sold {total} tickets for ${revenue:.2f} {period}."
+            return f"{name} has sold {total} tickets for ${revenue:.2f} total revenue."
 
     elif tool_name == "get_all_sales":
         if isinstance(result, dict):
             total = result.get("total_tickets_sold", 0)
             revenue = result.get("total_revenue_dollars", 0)
             events = result.get("events_with_sales", 0)
+            dr = result.get("date_range")
+            if dr:
+                period = f"from {dr['start_date']} to {dr['end_date']}" if dr.get("start_date") and dr.get("end_date") else f"since {dr.get('start_date', 'the start')}" if dr.get("start_date") else f"through {dr.get('end_date', 'now')}"
+                return f"Across {events} events {period}: {total} tickets sold for ${revenue:.2f} revenue."
             return f"Total across {events} events: {total} tickets sold for ${revenue:.2f} revenue."
+
+    elif tool_name == "get_revenue_report":
+        if isinstance(result, dict):
+            period = result.get("report_period", {})
+            total = result.get("total_tickets", 0)
+            revenue = result.get("total_revenue_dollars", 0)
+            top = result.get("top_events", [])
+            days = period.get("days", 0)
+            speech = f"Revenue report for {period.get('start_date', '')} to {period.get('end_date', '')}: {total} tickets sold for ${revenue:.2f} over {days} days."
+            if top:
+                speech += f" Top event: {top[0]['event_name']} with ${top[0]['revenue_dollars']:.2f}."
+            comparison = result.get("comparison")
+            if comparison:
+                change_pct = comparison.get("revenue_change_percent")
+                if change_pct is not None:
+                    direction = "up" if change_pct > 0 else "down"
+                    speech += f" That's {direction} {abs(change_pct)}% from the previous period."
+            return speech
 
     elif tool_name == "list_ticket_tiers":
         if isinstance(result, list):
