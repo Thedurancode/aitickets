@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     postiz_api_key: str = ""
     postiz_url: str = "https://api.postiz.com"  # or self-hosted URL
 
+    # Apple Wallet
+    apple_wallet_team_id: str = ""
+    apple_wallet_pass_type_id: str = "pass.com.example.event"
+    apple_wallet_cert_path: str = ""
+    apple_wallet_key_path: str = ""
+    apple_wallet_wwdr_cert_path: str = ""
+
     # Application
     base_url: str = "http://localhost:8000"
     uploads_dir: str = "uploads"
@@ -35,6 +42,13 @@ class Settings(BaseSettings):
 
     # Notifications
     reminder_hours_before: int = 24
+
+    # LLM Routing (supports OpenRouter, Zhipu, OpenAI)
+    openrouter_api_key: str = ""
+    openai_api_key: str = ""
+    zhipu_api_key: str = ""
+    zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
+    llm_router_model: str = "openai/gpt-4o-mini"
 
     class Config:
         env_file = ".env"

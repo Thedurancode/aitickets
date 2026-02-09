@@ -15,3 +15,7 @@ twilio
 apscheduler
 sse-starlette
 yt-dlp
+fpdf2
+cryptography
+requests
+openai

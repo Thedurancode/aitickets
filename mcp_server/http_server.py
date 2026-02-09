@@ -18,6 +18,7 @@ Endpoints:
 import json
 import asyncio
 import argparse
+import os
 from datetime import datetime
 from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
@@ -38,6 +39,126 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.database import SessionLocal, init_db
 from mcp_server.server import list_tools, _execute_tool
+
+
+# ============== Voice Command Keyword Map (Fallback) ==============
+# Used when LLM routing is unavailable or fails
+
+ACTION_MAP = {
+    "list events": "list_events",
+    "list_events": "list_events",
+    "show events": "list_events",
+    "get events": "list_events",
+    "list venues": "list_venues",
+    "list_venues": "list_venues",
+    "show venues": "list_venues",
+    "check in": "check_in_ticket",
+    "check_in": "check_in_ticket",
+    "checkin": "check_in_ticket",
+    "check in by name": "check_in_by_name",
+    "check in guest": "check_in_by_name",
+    "check out": "check_out_by_name",
+    "check_out": "check_out_by_name",
+    "checkout": "check_out_by_name",
+    "undo check in": "check_out_by_name",
+    "undo checkin": "check_out_by_name",
+    "send reminder": "send_event_reminders",
+    "send_reminder": "send_event_reminders",
+    "ticket status": "get_ticket_status",
+    "ticket_status": "get_ticket_status",
+    "event sales": "get_event_sales",
+    "event_sales": "get_event_sales",
+    "sales": "get_event_sales",
+    "revenue report": "get_revenue_report",
+    "revenue breakdown": "get_revenue_report",
+    "sales report": "get_revenue_report",
+    "how much revenue": "get_revenue_report",
+    "how much money": "get_revenue_report",
+    "revenue": "get_revenue_report",
+    "total revenue": "get_all_sales",
+    "all sales": "get_all_sales",
+    "all event sales": "get_all_sales",
+    "refund": "refund_ticket",
+    "refund ticket": "refund_ticket",
+    "issue refund": "refund_ticket",
+    "cancel ticket": "refund_ticket",
+    "give refund": "refund_ticket",
+    "process refund": "refund_ticket",
+    "download pdf": "download_ticket_pdf",
+    "ticket pdf": "download_ticket_pdf",
+    "pdf ticket": "download_ticket_pdf",
+    "send pdf": "send_ticket_pdf",
+    "email pdf": "send_ticket_pdf",
+    "wallet pass": "download_wallet_pass",
+    "apple wallet": "download_wallet_pass",
+    "add to wallet": "download_wallet_pass",
+    "send wallet pass": "send_wallet_pass",
+    "send apple wallet": "send_wallet_pass",
+    "email wallet": "send_wallet_pass",
+    "set reminder": "configure_auto_reminder",
+    "set auto reminder": "configure_auto_reminder",
+    "configure reminder": "configure_auto_reminder",
+    "auto reminder": "configure_auto_reminder",
+    "enable reminders": "configure_auto_reminder",
+    "disable reminders": "configure_auto_reminder",
+    "turn off reminders": "configure_auto_reminder",
+    "turn on reminders": "configure_auto_reminder",
+    "check reminders": "list_scheduled_reminders",
+    "list reminders": "list_scheduled_reminders",
+    "scheduled reminders": "list_scheduled_reminders",
+    "find event": "search_events",
+    "search events": "search_events",
+    "book ticket": "search_events",
+    "buy ticket": "search_events",
+    "buy tickets": "search_events",
+    "find customer": "search_customers",
+    "search customers": "search_customers",
+    "look up guest": "find_guest",
+    "find guest": "find_guest",
+    "guest list": "guest_list",
+    "who's coming": "guest_list",
+    "whos coming": "guest_list",
+    "attendee list": "guest_list",
+    "availability": "get_ticket_availability",
+    "how many tickets": "get_ticket_availability",
+    "tickets left": "get_ticket_availability",
+    "customer profile": "get_customer_profile",
+    "list categories": "list_categories",
+    "categories": "list_categories",
+    "create category": "create_category",
+    "send marketing": "quick_send_campaign",
+    "send blast": "quick_send_campaign",
+    "marketing blast": "quick_send_campaign",
+    "send campaign": "send_campaign",
+    "create campaign": "create_campaign",
+    "list campaigns": "list_campaigns",
+    "create promo code": "create_promo_code",
+    "list promo codes": "list_promo_codes",
+    "validate promo code": "validate_promo_code",
+    "event analytics": "get_event_analytics",
+    "analytics": "get_event_analytics",
+    "share event": "share_event_link",
+    "send admin link": "send_admin_link",
+    "hide event": "set_event_visibility",
+    "publish event": "set_event_visibility",
+    "toggle all tickets": "toggle_all_tickets",
+    "add tickets": "add_tickets",
+    "postpone event": "postpone_event",
+    "conversion analytics": "get_conversion_analytics",
+    "create recurring event": "create_recurring_event",
+    "set recap video": "set_post_event_video",
+    "send photo link": "send_photo_sharing_link",
+    "get event photos": "get_event_photos",
+    "text guest list": "text_guest_list",
+    "text everyone": "text_guest_list",
+    "check waitlist": "get_waitlist",
+    "waitlist": "get_waitlist",
+    "notify waitlist": "notify_waitlist",
+    "preview audience": "preview_audience",
+    "create list": "create_marketing_list",
+    "marketing lists": "list_marketing_lists",
+    "send to list": "send_to_marketing_list",
+}
 
 
 # ============== Pydantic Models ==============
@@ -114,9 +235,20 @@ sse_manager = SSEManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize database on startup."""
+    """Initialize database and scheduler on startup."""
     init_db()
+    try:
+        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders
+        init_scheduler()
+        bootstrap_existing_reminders()
+    except Exception as e:
+        print(f"Scheduler init note: {e}")
     yield
+    try:
+        from app.services.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -669,294 +801,104 @@ async def chat_completions(request: ChatRequest):
 # ============== Voice Agent Specific Endpoints ==============
 
 @app.post("/voice/action")
-async def voice_action(request: Request):
+async def voice_action(request: Request, use_llm: bool = True):
     """
     Simplified endpoint for voice agents.
 
-    Accepts natural language or structured commands.
+    Accepts natural language commands and uses LLM to route to the appropriate tool.
+
+    Args:
+        use_llm: If True (default), use LLM-based routing. If False, use keyword matching.
 
     Example requests:
     {"action": "list_events"}
-    {"action": "check_in", "qr_token": "abc123"}
-    {"action": "send_reminder", "event_id": 1}
+    {"action": "check in John Smith for tonight's event"}
+    {"action": "how much revenue did we make last week?"}
+    {"action": "send a reminder to everyone coming to the Raptors game"}
     """
     body = await request.json()
     action = body.get("action", "")
 
-    # Map common voice commands to tools
-    action_map = {
-        "list events": "list_events",
-        "list_events": "list_events",
-        "show events": "list_events",
-        "get events": "list_events",
-        "list venues": "list_venues",
-        "list_venues": "list_venues",
-        "show venues": "list_venues",
-        "check in": "check_in_ticket",
-        "check_in": "check_in_ticket",
-        "checkin": "check_in_ticket",
-        "check in by name": "check_in_by_name",
-        "check in guest": "check_in_by_name",
-        "check out": "check_out_by_name",
-        "check_out": "check_out_by_name",
-        "checkout": "check_out_by_name",
-        "undo check in": "check_out_by_name",
-        "undo checkin": "check_out_by_name",
-        "send reminder": "send_event_reminders",
-        "send_reminder": "send_event_reminders",
-        "ticket status": "get_ticket_status",
-        "ticket_status": "get_ticket_status",
-        "event sales": "get_event_sales",
-        "event_sales": "get_event_sales",
-        "sales": "get_event_sales",
-        "revenue report": "get_revenue_report",
-        "revenue breakdown": "get_revenue_report",
-        "sales report": "get_revenue_report",
-        "how much revenue": "get_revenue_report",
-        "how much money": "get_revenue_report",
-        "revenue": "get_revenue_report",
-        "total revenue": "get_all_sales",
-        "all sales": "get_all_sales",
-        "all event sales": "get_all_sales",
-        # Refunds
-        "refund": "refund_ticket",
-        "refund ticket": "refund_ticket",
-        "issue refund": "refund_ticket",
-        "cancel ticket": "refund_ticket",
-        "give refund": "refund_ticket",
-        "process refund": "refund_ticket",
-        # Search
-        "find event": "search_events",
-        "search events": "search_events",
-        "search event": "search_events",
-        "book ticket": "search_events",
-        "buy ticket": "search_events",
-        "buy tickets": "search_events",
-        "purchase ticket": "search_events",
-        "get tickets": "search_events",
-        "find customer": "search_customers",
-        "search customer": "search_customers",
-        "search customers": "search_customers",
-        "look up guest": "find_guest",
-        "lookup guest": "find_guest",
-        "find guest": "find_guest",
-        "guest list": "guest_list",
-        "who's coming": "guest_list",
-        "whos coming": "guest_list",
-        "how many people": "guest_list",
-        "attendee list": "guest_list",
-        "who's on the list": "guest_list",
-        # Availability
-        "availability": "get_ticket_availability",
-        "how many tickets": "get_ticket_availability",
-        "tickets left": "get_ticket_availability",
-        "tickets available": "get_ticket_availability",
-        "tickets remaining": "get_ticket_availability",
-        # Customer
-        "customer profile": "get_customer_profile",
-        "customer info": "get_customer_profile",
-        "customer details": "get_customer_profile",
-        # Categories
-        "list categories": "list_categories",
-        "show categories": "list_categories",
-        "event types": "list_categories",
-        "event categories": "list_categories",
-        "categories": "list_categories",
-        "create category": "create_category",
-        "new category": "create_category",
-        "add category": "create_category",
-        "add event type": "create_category",
-        "update category": "update_category",
-        "edit category": "update_category",
-        "change category": "update_category",
-        "set category image": "update_category",
-        "category image": "update_category",
-        # Marketing campaigns
-        "send marketing": "quick_send_campaign",
-        "send blast": "quick_send_campaign",
-        "marketing blast": "quick_send_campaign",
-        "email blast": "quick_send_campaign",
-        "sms blast": "quick_send_campaign",
-        "send campaign": "send_campaign",
-        "create campaign": "create_campaign",
-        "new campaign": "create_campaign",
-        "list campaigns": "list_campaigns",
-        "show campaigns": "list_campaigns",
-        "campaigns": "list_campaigns",
-        "marketing campaigns": "list_campaigns",
-        # Segment targeting shortcuts
-        "vip blast": "quick_send_campaign",
-        "blast vips": "quick_send_campaign",
-        "blast high spenders": "quick_send_campaign",
-        "blast repeat customers": "quick_send_campaign",
-        "edit campaign": "update_campaign",
-        "update campaign": "update_campaign",
-        "change campaign message": "update_campaign",
-        # Promo codes
-        "create promo code": "create_promo_code",
-        "new promo code": "create_promo_code",
-        "create discount code": "create_promo_code",
-        "add coupon": "create_promo_code",
-        "list promo codes": "list_promo_codes",
-        "show promo codes": "list_promo_codes",
-        "promo codes": "list_promo_codes",
-        "discount codes": "list_promo_codes",
-        "validate promo code": "validate_promo_code",
-        "check promo code": "validate_promo_code",
-        "check coupon": "validate_promo_code",
-        "deactivate promo code": "deactivate_promo_code",
-        "disable promo code": "deactivate_promo_code",
-        "remove promo code": "deactivate_promo_code",
-        # Analytics
-        "event analytics": "get_event_analytics",
-        "page views": "get_event_analytics",
-        "event page views": "get_event_analytics",
-        "analytics": "get_event_analytics",
-        "traffic": "get_event_analytics",
-        "how many views": "get_event_analytics",
-        # Share event link
-        "share event": "share_event_link",
-        "share event link": "share_event_link",
-        "send event link": "share_event_link",
-        "send link": "share_event_link",
-        "invite to event": "share_event_link",
-        "text event link": "share_event_link",
-        "email event link": "share_event_link",
-        # Magic link admin
-        "send admin link": "send_admin_link",
-        "admin link": "send_admin_link",
-        "edit event link": "send_admin_link",
-        "change event picture": "send_admin_link",
-        "upload event image": "send_admin_link",
-        "manage event link": "send_admin_link",
-        "event admin link": "send_admin_link",
-        # Event visibility
-        "hide event": "set_event_visibility",
-        "hide the event": "set_event_visibility",
-        "make event live": "set_event_visibility",
-        "make event visible": "set_event_visibility",
-        "show event": "set_event_visibility",
-        "publish event": "set_event_visibility",
-        # Bulk ticket controls
-        "turn off all tickets": "toggle_all_tickets",
-        "disable all tickets": "toggle_all_tickets",
-        "pause all tickets": "toggle_all_tickets",
-        "turn on all tickets": "toggle_all_tickets",
-        "enable all tickets": "toggle_all_tickets",
-        "activate all tickets": "toggle_all_tickets",
-        "make tickets live": "toggle_all_tickets",
-        "open ticket sales": "toggle_all_tickets",
-        "close ticket sales": "toggle_all_tickets",
-        # Add tickets
-        "add more tickets": "add_tickets",
-        "add tickets": "add_tickets",
-        "add another": "add_tickets",
-        "increase tickets": "add_tickets",
-        "increase inventory": "add_tickets",
-        # Update tier
-        "update ticket tier": "update_ticket_tier",
-        "update tier": "update_ticket_tier",
-        "change tier": "update_ticket_tier",
-        "pause tier": "update_ticket_tier",
-        "activate tier": "update_ticket_tier",
-        # Postpone event
-        "postpone event": "postpone_event",
-        "postpone_event": "postpone_event",
-        "reschedule event": "postpone_event",
-        "delay event": "postpone_event",
-        "push back event": "postpone_event",
-        "move event date": "postpone_event",
-        # Conversion analytics
-        "conversion analytics": "get_conversion_analytics",
-        "conversion rate": "get_conversion_analytics",
-        "conversions": "get_conversion_analytics",
-        "funnel": "get_conversion_analytics",
-        "how many converted": "get_conversion_analytics",
-        "purchase analytics": "get_conversion_analytics",
-        # Recurring events
-        "create recurring event": "create_recurring_event",
-        "recurring event": "create_recurring_event",
-        "set up recurring event": "create_recurring_event",
-        "set up weekly event": "create_recurring_event",
-        "weekly event": "create_recurring_event",
-        "create weekly event": "create_recurring_event",
-        "repeating event": "create_recurring_event",
-        "every week event": "create_recurring_event",
-        # Post-event media
-        "set recap video": "set_post_event_video",
-        "set post event video": "set_post_event_video",
-        "add recap video": "set_post_event_video",
-        "event recap video": "set_post_event_video",
-        "post event video": "set_post_event_video",
-        "highlight video": "set_post_event_video",
-        "send photo link": "send_photo_sharing_link",
-        "share photos": "send_photo_sharing_link",
-        "send photo sharing link": "send_photo_sharing_link",
-        "text photo link": "send_photo_sharing_link",
-        "text everyone photos": "send_photo_sharing_link",
-        "send photo link to attendees": "send_photo_sharing_link",
-        "share event photos": "send_photo_sharing_link",
-        "collect photos": "send_photo_sharing_link",
-        "get event photos": "get_event_photos",
-        "event photos": "get_event_photos",
-        "show photos": "get_event_photos",
-        "how many photos": "get_event_photos",
-        "list photos": "get_event_photos",
-        "check photos": "get_event_photos",
-        # Text guest list
-        "text guest list": "text_guest_list",
-        "text the guest list": "text_guest_list",
-        "text everyone": "text_guest_list",
-        "text all attendees": "text_guest_list",
-        "text all guests": "text_guest_list",
-        "message guest list": "text_guest_list",
-        "message attendees": "text_guest_list",
-        "text attendees": "text_guest_list",
-        "sms guest list": "text_guest_list",
-        "notify guest list": "text_guest_list",
-        "send text to guests": "text_guest_list",
-        "text tonight's guests": "text_guest_list",
-        "text tonights guests": "text_guest_list",
-        # Waitlist
-        "check waitlist": "get_waitlist",
-        "show waitlist": "get_waitlist",
-        "waitlist": "get_waitlist",
-        "how many on waitlist": "get_waitlist",
-        "view waitlist": "get_waitlist",
-        "waitlist status": "get_waitlist",
-        "notify waitlist": "notify_waitlist",
-        "alert waitlist": "notify_waitlist",
-        "tell the waitlist": "notify_waitlist",
-        "notify waiting list": "notify_waitlist",
-        "send waitlist notifications": "notify_waitlist",
-        "remove from waitlist": "remove_from_waitlist",
-        "take off waitlist": "remove_from_waitlist",
-        "delete from waitlist": "remove_from_waitlist",
-        # Audience preview
-        "preview audience": "preview_audience",
-        "how many would get": "preview_audience",
-        "audience size": "preview_audience",
-        "who would get": "preview_audience",
-        "campaign preview": "preview_audience",
-        "how many people": "preview_audience",
-        # Marketing lists
-        "create list": "create_marketing_list",
-        "new list": "create_marketing_list",
-        "save list": "create_marketing_list",
-        "create marketing list": "create_marketing_list",
-        "show lists": "list_marketing_lists",
-        "my lists": "list_marketing_lists",
-        "marketing lists": "list_marketing_lists",
-        "view lists": "list_marketing_lists",
-        "all lists": "list_marketing_lists",
-        "delete list": "delete_marketing_list",
-        "remove list": "delete_marketing_list",
-        "send to list": "send_to_marketing_list",
-        "blast list": "send_to_marketing_list",
-        "email list": "send_to_marketing_list",
-    }
+    # Try LLM-based routing first (if enabled and configured)
+    if use_llm and action:
+        try:
+            from app.services.llm_router import route_with_fallback
+            tools = await list_tools()
 
-    tool_name = action_map.get(action.lower(), action)
+            # Build context from session or body
+            context = {
+                "last_event_id": body.get("event_id") or body.get("last_event_id"),
+                "last_customer_id": body.get("customer_id") or body.get("last_customer_id"),
+            }
+
+            # Route using LLM
+            route_result = await route_with_fallback(
+                user_input=action,
+                tools=tools,
+                keyword_map=ACTION_MAP,  # Fallback to keyword matching
+                context=context,
+                org_name=os.getenv("ORG_NAME", "Event Tickets"),
+            )
+
+            if route_result.get("tool"):
+                tool_name = route_result["tool"]
+                # Merge LLM-extracted arguments with any explicit arguments from body
+                arguments = {k: v for k, v in body.items() if k != "action"}
+                arguments.update(route_result.get("arguments", {}))
+
+                db = SessionLocal()
+                try:
+                    result = await _execute_tool(tool_name, arguments, db)
+
+                    # Generate speech response
+                    if "error" in result:
+                        speech = f"Sorry, there was an error: {result['error']}"
+                        success = False
+                    else:
+                        speech = _generate_speech_response(tool_name, result)
+                        success = True
+
+                    # Prepend any pending announcements
+                    from app.routers.announcement_queue import (
+                        get_pending_announcements, format_announcement_speech, clear_announcements,
+                    )
+                    pending = get_pending_announcements()
+                    announcement = format_announcement_speech(pending)
+                    if announcement:
+                        speech = f"{announcement} {speech}"
+                        clear_announcements()
+
+                    return {
+                        "success": success,
+                        "speech": speech,
+                        "data": result,
+                        "routing": {
+                            "method": route_result.get("routed_by", "llm"),
+                            "tool": tool_name,
+                            "extracted_args": route_result.get("arguments", {}),
+                        }
+                    }
+                finally:
+                    db.close()
+
+            # LLM chose not to call a tool - return its message
+            elif route_result.get("message"):
+                return {
+                    "success": True,
+                    "speech": route_result["message"],
+                    "data": {},
+                    "routing": {"method": "llm", "tool": None}
+                }
+
+        except ImportError:
+            # LLM router not available, fall through to keyword matching
+            pass
+        except Exception as e:
+            # Log error but fall through to keyword matching
+            print(f"LLM routing error: {e}")
+
+    # Fall back to keyword matching
+    tool_name = ACTION_MAP.get(action.lower(), action)
 
     # Extract arguments
     arguments = {k: v for k, v in body.items() if k != "action"}
@@ -971,6 +913,7 @@ async def voice_action(request: Request):
                 "success": False,
                 "speech": f"Sorry, there was an error: {result['error']}",
                 "data": result,
+                "routing": {"method": "keyword", "tool": tool_name}
             }
 
         # Generate speech-friendly response
@@ -990,6 +933,7 @@ async def voice_action(request: Request):
             "success": True,
             "speech": speech,
             "data": result,
+            "routing": {"method": "keyword", "tool": tool_name}
         }
     except Exception as e:
         return {
@@ -1319,6 +1263,63 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             if total > 0:
                 return f"Refunded {count} ticket{'s' if count > 1 else ''} for {customer}. ${total:.2f} will be returned to their card."
             return f"Cancelled {count} ticket{'s' if count > 1 else ''} for {customer}. No payment to refund."
+
+    elif tool_name == "download_ticket_pdf":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            return f"The PDF ticket for {result.get('customer_name', 'the customer')} is ready. They can download it from their ticket page."
+
+    elif tool_name == "download_wallet_pass":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            return f"The Apple Wallet pass for {result.get('customer_name', 'the customer')} is ready."
+
+    elif tool_name == "send_ticket_pdf":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            return f"Done! I sent the PDF ticket to {result.get('customer_name', 'the customer')} at {result.get('email', 'their email')}."
+
+    elif tool_name == "send_wallet_pass":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            return f"Done! I sent the Apple Wallet pass to {result.get('customer_name', 'the customer')} at {result.get('email', 'their email')}."
+
+    elif tool_name == "configure_auto_reminder":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            event_name = result.get("event_name", "the event")
+            if result.get("auto_reminder") == "disabled":
+                return f"Auto-reminders have been turned off for {event_name}."
+            hours = result.get("hours_before", 24)
+            sms = " and SMS" if result.get("use_sms") else ""
+            if result.get("scheduled"):
+                return f"Auto-reminder set for {event_name}. An email{sms} will be sent {hours} hours before the event."
+            return f"Auto-reminder configured for {event_name} at {hours} hours before, but the reminder time has already passed."
+
+    elif tool_name == "list_scheduled_reminders":
+        if isinstance(result, dict):
+            if result.get("error"):
+                return result["error"]
+            if result.get("event_id"):
+                event_name = result.get("event_name", "the event")
+                if result.get("has_scheduled_job"):
+                    return f"{event_name} has an auto-reminder scheduled for {result.get('scheduled_time', 'upcoming')}."
+                hours = result.get("auto_reminder_hours")
+                if hours:
+                    return f"{event_name} has auto-reminders configured at {hours} hours before, but no job is currently scheduled."
+                return f"{event_name} does not have auto-reminders enabled."
+            total = result.get("total_scheduled", 0)
+            if total == 0:
+                return "There are no scheduled auto-reminders."
+            reminders = result.get("reminders", [])
+            if total == 1:
+                return f"There is 1 scheduled reminder: {reminders[0].get('event_name', 'event')} at {reminders[0].get('scheduled_time', 'upcoming')}."
+            return f"There are {total} scheduled reminders. The next one is for {reminders[0].get('event_name', 'event')} at {reminders[0].get('scheduled_time', 'upcoming')}."
 
     elif tool_name == "list_ticket_tiers":
         if isinstance(result, list):
