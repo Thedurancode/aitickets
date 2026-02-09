@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 from app.database import get_db
-from app.models import Ticket, TicketTier, Event, TicketStatus
+from app.models import Ticket, TicketTier, Event, TicketStatus, WaitlistEntry, WaitlistStatus
 from app.config import get_settings
 from app.services.email import send_ticket_email
 
@@ -135,10 +135,50 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
         .all()
     )
 
+    refunded_count = 0
+    event_id = None
     for ticket in tickets:
         if ticket.status == TicketStatus.PAID:
             ticket.status = TicketStatus.REFUNDED
             # Restore tier availability
             ticket.ticket_tier.quantity_sold -= 1
+            refunded_count += 1
+            if not event_id and ticket.ticket_tier:
+                event_id = ticket.ticket_tier.event_id
+
+    db.commit()
+
+    # Auto-notify waitlisted people when tickets freed up
+    if refunded_count > 0 and event_id:
+        _auto_notify_waitlist(event_id, refunded_count, db)
+
+
+def _auto_notify_waitlist(event_id: int, count: int, db: Session):
+    """Notify next N waitlisted people that tickets are available."""
+    from app.services.sms import send_sms
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return
+
+    settings = get_settings()
+    entries = (
+        db.query(WaitlistEntry)
+        .filter(
+            WaitlistEntry.event_id == event_id,
+            WaitlistEntry.status == WaitlistStatus.WAITING,
+        )
+        .order_by(WaitlistEntry.position.asc())
+        .limit(count)
+        .all()
+    )
+
+    ticket_url = f"{settings.base_url}/events/{event_id}"
+    for entry in entries:
+        if entry.phone:
+            msg = f"Great news! Tickets are now available for \"{event.name}\"! Grab yours: {ticket_url}"
+            send_sms(entry.phone, msg)
+        entry.status = WaitlistStatus.NOTIFIED
+        entry.notified_at = datetime.utcnow()
 
     db.commit()

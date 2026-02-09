@@ -55,6 +55,14 @@ class TierStatus(str, enum.Enum):
     SOLD_OUT = "sold_out"
 
 
+class WaitlistStatus(str, enum.Enum):
+    WAITING = "waiting"
+    NOTIFIED = "notified"
+    PURCHASED = "purchased"
+    EXPIRED = "expired"
+    CANCELLED = "cancelled"
+
+
 event_category_link = Table(
     "event_category_link",
     Base.metadata,
@@ -117,6 +125,7 @@ class Event(Base):
     updates = relationship("EventUpdate", back_populates="event", cascade="all, delete-orphan")
     categories = relationship("EventCategory", secondary=event_category_link, back_populates="events")
     photos = relationship("EventPhoto", back_populates="event", cascade="all, delete-orphan")
+    waitlist_entries = relationship("WaitlistEntry", back_populates="event", cascade="all, delete-orphan")
 
 
 class EventPhoto(Base):
@@ -353,3 +362,20 @@ class PageView(Base):
     utm_medium = Column(String(100), nullable=True)
     utm_campaign = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class WaitlistEntry(Base):
+    __tablename__ = "waitlist_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    email = Column(String(255), nullable=False)
+    name = Column(String(255), nullable=False)
+    phone = Column(String(50), nullable=True)
+    preferred_channel = Column(String(10), default="email")
+    status = Column(Enum(WaitlistStatus), default=WaitlistStatus.WAITING, index=True)
+    position = Column(Integer, nullable=False)
+    notified_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    event = relationship("Event", back_populates="waitlist_entries")

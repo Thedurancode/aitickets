@@ -99,3 +99,9 @@ def init_db():
         run_category_image_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_waitlist import run_migration as run_waitlist_migration
+        run_waitlist_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

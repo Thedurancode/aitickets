@@ -627,6 +627,21 @@ async def voice_action(request: Request):
         "send text to guests": "text_guest_list",
         "text tonight's guests": "text_guest_list",
         "text tonights guests": "text_guest_list",
+        # Waitlist
+        "check waitlist": "get_waitlist",
+        "show waitlist": "get_waitlist",
+        "waitlist": "get_waitlist",
+        "how many on waitlist": "get_waitlist",
+        "view waitlist": "get_waitlist",
+        "waitlist status": "get_waitlist",
+        "notify waitlist": "notify_waitlist",
+        "alert waitlist": "notify_waitlist",
+        "tell the waitlist": "notify_waitlist",
+        "notify waiting list": "notify_waitlist",
+        "send waitlist notifications": "notify_waitlist",
+        "remove from waitlist": "remove_from_waitlist",
+        "take off waitlist": "remove_from_waitlist",
+        "delete from waitlist": "remove_from_waitlist",
     }
 
     tool_name = action_map.get(action.lower(), action)
@@ -1253,6 +1268,32 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     # ============== Dashboard ==============
     elif tool_name == "refresh_dashboard":
         return "Dashboard refreshed."
+
+    # ============== Waitlist ==============
+    elif tool_name == "get_waitlist":
+        if isinstance(result, dict):
+            waiting = result.get("waiting", 0)
+            event_name = result.get("event", "the event")
+            if waiting == 0:
+                return f"No one is on the waitlist for {event_name}."
+            elif waiting == 1:
+                entry = result.get("entries", [{}])[0]
+                return f"There is 1 person on the waitlist for {event_name}: {entry.get('name', 'someone')}."
+            else:
+                return f"There are {waiting} people on the waitlist for {event_name}."
+
+    elif tool_name == "notify_waitlist":
+        if isinstance(result, dict):
+            count = result.get("notified", 0)
+            event_name = result.get("event", "the event")
+            if count == 0:
+                return f"No one is waiting on the waitlist for {event_name}."
+            else:
+                return f"Notified {count} {'person' if count == 1 else 'people'} from the waitlist for {event_name}."
+
+    elif tool_name == "remove_from_waitlist":
+        if isinstance(result, dict):
+            return result.get("message", "Removed from waitlist.")
 
     return "Done."
 

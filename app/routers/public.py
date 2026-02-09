@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import Event, EventCategory, EventPhoto, EventStatus, PageView
+from app.models import Event, EventCategory, EventPhoto, EventStatus, PageView, WaitlistEntry, WaitlistStatus
 from app.config import get_settings
 from app.routers.announcement_queue import queue_announcement
 
@@ -147,11 +147,22 @@ def event_detail(
         .all()
     )
 
+    # Waitlist: check if all tiers are sold out
+    all_sold_out = all(t["sold_out"] or t["paused"] for t in tiers) if tiers else False
+    waitlist_count = 0
+    if all_sold_out:
+        waitlist_count = db.query(func.count(WaitlistEntry.id)).filter(
+            WaitlistEntry.event_id == event_id,
+            WaitlistEntry.status == WaitlistStatus.WAITING,
+        ).scalar() or 0
+
     template = jinja_env.get_template("event_detail.html")
     html = template.render(
         event=event,
         tiers=tiers,
         photos=photos,
+        all_sold_out=all_sold_out,
+        waitlist_count=waitlist_count,
         page_type="detail",
         event_id=event_id,
         **_get_branding(),
@@ -426,3 +437,58 @@ async def upload_event_photos(
         "uploaded_count": len(uploaded),
         "message": f"{len(uploaded)} photo(s) uploaded successfully",
     }
+
+
+@router.post("/events/{event_id}/waitlist")
+async def join_waitlist(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Public endpoint to join the waitlist for a sold-out event."""
+    body = await request.json()
+    email = body.get("email", "").strip().lower()
+    name = body.get("name", "").strip()
+    phone = body.get("phone", "").strip() or None
+    preferred_channel = body.get("preferred_channel", "email")
+
+    if not email or not name:
+        raise HTTPException(status_code=400, detail="Name and email are required")
+
+    if preferred_channel not in ("email", "sms"):
+        preferred_channel = "email"
+    if preferred_channel == "sms" and not phone:
+        preferred_channel = "email"
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Check for duplicate
+    existing = db.query(WaitlistEntry).filter(
+        WaitlistEntry.event_id == event_id,
+        WaitlistEntry.email == email,
+        WaitlistEntry.status == WaitlistStatus.WAITING,
+    ).first()
+    if existing:
+        return {"success": True, "message": f"You're already on the waitlist! (#{existing.position})", "position": existing.position}
+
+    # Compute next position
+    max_pos = db.query(func.max(WaitlistEntry.position)).filter(
+        WaitlistEntry.event_id == event_id,
+    ).scalar() or 0
+
+    entry = WaitlistEntry(
+        event_id=event_id,
+        email=email,
+        name=name,
+        phone=phone,
+        preferred_channel=preferred_channel,
+        status=WaitlistStatus.WAITING,
+        position=max_pos + 1,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+
+    return {"success": True, "message": f"You're #{entry.position} on the waitlist!", "position": entry.position}

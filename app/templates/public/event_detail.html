@@ -195,6 +195,45 @@
                 {% endfor %}
             </div>
 
+            <!-- Waitlist Form (shown when all tiers sold out) -->
+            {% if all_sold_out %}
+            <div id="waitlist-section" class="mt-4 bg-gray-900 border border-yellow-700/30 rounded-xl p-5 space-y-4" data-animate>
+                <div class="flex items-center gap-2 mb-1">
+                    <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <h3 class="font-semibold text-yellow-400">Join the Waitlist</h3>
+                </div>
+                <p class="text-sm text-gray-400">This event is sold out. Join the waitlist and we'll notify you when tickets become available.</p>
+                {% if waitlist_count > 0 %}
+                <p class="text-xs text-gray-500">{{ waitlist_count }} {{ 'person' if waitlist_count == 1 else 'people' }} on the waitlist</p>
+                {% endif %}
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Name</label>
+                    <input type="text" id="wl-name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Email</label>
+                    <input type="email" id="wl-email" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Phone <span class="text-gray-600">(optional)</span></label>
+                    <input type="tel" id="wl-phone" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Notify me via</label>
+                    <select id="wl-channel" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-yellow-500">
+                        <option value="email">Email</option>
+                        <option value="sms">SMS</option>
+                    </select>
+                </div>
+                <button onclick="joinWaitlist()" id="wl-btn" class="w-full bg-yellow-600 hover:bg-yellow-700 text-white py-3 rounded-lg font-medium transition-colors">
+                    Join Waitlist
+                </button>
+                <div id="wl-status" class="text-sm hidden"></div>
+            </div>
+            {% endif %}
+
             <!-- Purchase Form (hidden until tier selected) -->
             <div id="purchase-form" class="hidden mt-4 bg-gray-900 border border-brand/30 rounded-xl p-5 space-y-4">
                 <h3 class="font-semibold" id="selected-tier-name"></h3>
@@ -436,6 +475,58 @@ function purchase() {
         errEl.classList.remove('hidden');
         btn.disabled = false;
         btn.textContent = 'Buy Tickets';
+    });
+}
+
+function joinWaitlist() {
+    var name = document.getElementById('wl-name').value.trim();
+    var email = document.getElementById('wl-email').value.trim();
+    var phone = document.getElementById('wl-phone').value.trim();
+    var channel = document.getElementById('wl-channel').value;
+    var btn = document.getElementById('wl-btn');
+    var statusEl = document.getElementById('wl-status');
+
+    statusEl.classList.add('hidden');
+
+    if (!name || !email) {
+        statusEl.textContent = 'Name and email are required.';
+        statusEl.className = 'text-sm text-red-400';
+        statusEl.classList.remove('hidden');
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Joining...';
+
+    fetch('/events/' + {{ event.id }} + '/waitlist', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, email: email, phone: phone, preferred_channel: channel})
+    })
+    .then(function(r) { return r.json().then(function(data) { return {ok: r.ok, data: data}; }); })
+    .then(function(res) {
+        if (!res.ok) {
+            statusEl.textContent = res.data.detail || 'Something went wrong. Please try again.';
+            statusEl.className = 'text-sm text-red-400';
+            statusEl.classList.remove('hidden');
+            btn.disabled = false;
+            btn.textContent = 'Join Waitlist';
+            return;
+        }
+        statusEl.innerHTML = '<div class="p-3 bg-green-900/30 border border-green-800 rounded-lg">' +
+            '<p class="font-semibold text-green-300">' + res.data.message + '</p>' +
+            '<p class="text-green-400 text-xs mt-1">We\'ll notify you when tickets become available.</p></div>';
+        statusEl.className = 'text-sm';
+        statusEl.classList.remove('hidden');
+        btn.disabled = true;
+        btn.textContent = 'On the Waitlist!';
+    })
+    .catch(function() {
+        statusEl.textContent = 'Network error. Please try again.';
+        statusEl.className = 'text-sm text-red-400';
+        statusEl.classList.remove('hidden');
+        btn.disabled = false;
+        btn.textContent = 'Join Waitlist';
     });
 }
 
