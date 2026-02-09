@@ -104,6 +104,39 @@ def post_to_social(
         return {"success": False, "error": str(e)}
 
 
+def get_post_history(start_date: str | None = None, end_date: str | None = None) -> dict:
+    """
+    Get history of social media posts within a date range.
+
+    Args:
+        start_date: ISO 8601 start date (default: 30 days ago).
+        end_date: ISO 8601 end date (default: now).
+    """
+    headers = _get_headers()
+    if not headers:
+        return {"success": False, "error": "Postiz not configured (missing API key)"}
+
+    from datetime import datetime, timedelta, timezone
+    if not end_date:
+        end_date = datetime.now(timezone.utc).isoformat()
+    if not start_date:
+        start_date = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    try:
+        r = requests.get(
+            f"{_get_base_url()}/posts",
+            params={"startDate": start_date, "endDate": end_date},
+            headers=headers,
+            timeout=30,
+        )
+        data = r.json()
+        if r.status_code >= 400:
+            return {"success": False, "error": data}
+        return {"success": True, "data": data}
+    except requests.RequestException as e:
+        return {"success": False, "error": str(e)}
+
+
 def delete_social_post(post_id: str) -> dict:
     """Delete a previously published social media post."""
     headers = _get_headers()

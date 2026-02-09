@@ -1198,6 +1198,18 @@ async def list_tools():
             },
         ),
         Tool(
+            name="get_social_post_history",
+            description="Get history of social media posts. Shows what was posted, when, and to which platforms. Defaults to last 30 days.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "ISO 8601 start date (default: 30 days ago)"},
+                    "end_date": {"type": "string", "description": "ISO 8601 end date (default: now)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="delete_social_post",
             description="Delete a previously published social media post by its Postiz post ID",
             inputSchema={
@@ -4376,7 +4388,12 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 if len(event.description) > 150:
                     desc += "..."
                 text += f"\n\n{desc}"
-            text += f"\n\n🎟️ Tickets: {settings.base_url}/events/{event.id}"
+            # UTM-tracked ticket link for attribution
+            from urllib.parse import quote
+            event_url = f"{settings.base_url}/events/{event.id}"
+            slug = quote(event.name.lower().replace(" ", "_")[:50])
+            utm = f"?utm_source=postiz&utm_medium=social&utm_campaign={slug}"
+            text += f"\n\n🎟️ Tickets: {event_url}{utm}"
 
         if not image_urls and event.image_url:
             image_urls = [event.image_url]
@@ -4416,6 +4433,21 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "scheduled_for": arguments["schedule_date"],
                 "data": result["data"],
                 "message": f"Post scheduled for {arguments['schedule_date']} on {len(arguments['integration_ids'])} channel(s)",
+            }
+        return result
+
+    elif name == "get_social_post_history":
+        from app.services.social_media import get_post_history
+
+        result = get_post_history(
+            start_date=arguments.get("start_date"),
+            end_date=arguments.get("end_date"),
+        )
+        if result["success"]:
+            return {
+                "success": True,
+                "data": result["data"],
+                "message": "Retrieved social media post history",
             }
         return result
 
