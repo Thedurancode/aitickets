@@ -680,6 +680,31 @@ async def list_tools():
             },
         ),
         Tool(
+            name="configure_auto_reminder",
+            description="Configure automatic reminders for an event. Set how many hours before the event to send reminders, enable/disable SMS, or turn off auto-reminders entirely.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "hours_before": {"type": "integer", "description": "Hours before event to send reminder (e.g. 24, 48, 2). Set to 0 to disable."},
+                    "use_sms": {"type": "boolean", "description": "Also send SMS reminders (default: false, email only)"},
+                    "enabled": {"type": "boolean", "description": "Set to false to disable auto-reminders for this event"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="list_scheduled_reminders",
+            description="List all upcoming scheduled auto-reminders across all events, or check the reminder status for a specific event.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Optional: check reminder for a specific event only"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="send_event_update",
             description="Send an update notification to all ticket holders about event changes",
             inputSchema={
@@ -1186,6 +1211,51 @@ async def list_tools():
                 "required": [],
             },
         ),
+        # ============== Ticket Download Tools ==============
+        Tool(
+            name="download_ticket_pdf",
+            description="Get a PDF download URL for a ticket. The customer can download a branded PDF with QR code.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "The ticket ID"},
+                },
+                "required": ["ticket_id"],
+            },
+        ),
+        Tool(
+            name="download_wallet_pass",
+            description="Get an Apple Wallet download URL for a ticket. The customer can add the ticket to their iPhone wallet.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "The ticket ID"},
+                },
+                "required": ["ticket_id"],
+            },
+        ),
+        Tool(
+            name="send_ticket_pdf",
+            description="Email a PDF ticket download link to the ticket holder.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "The ticket ID"},
+                },
+                "required": ["ticket_id"],
+            },
+        ),
+        Tool(
+            name="send_wallet_pass",
+            description="Email an Apple Wallet pass download link to the ticket holder.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "The ticket ID"},
+                },
+                "required": ["ticket_id"],
+            },
+        ),
         # ============== Customer Memory Tools ==============
         Tool(
             name="get_customer_profile",
@@ -1593,6 +1663,15 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         db.add(event)
         db.commit()
         db.refresh(event)
+
+        # Auto-schedule reminder
+        if getattr(event, "auto_reminder_hours", None) is not None:
+            try:
+                from app.services.scheduler import schedule_auto_reminder
+                schedule_auto_reminder(event.id, event.event_date, event.event_time, event.auto_reminder_hours, getattr(event, "auto_reminder_use_sms", False))
+            except Exception:
+                pass
+
         return _event_to_dict(event)
 
     elif name == "create_recurring_event":
@@ -1758,6 +1837,19 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             if stripe_errors:
                 response["stripe_errors"] = stripe_errors
 
+        # Auto-schedule reminders for each event in the series
+        reminder_count = 0
+        try:
+            from app.services.scheduler import schedule_auto_reminder
+            for evt in created_events:
+                if getattr(evt, "auto_reminder_hours", None) is not None:
+                    r = schedule_auto_reminder(evt.id, evt.event_date, evt.event_time, evt.auto_reminder_hours, getattr(evt, "auto_reminder_use_sms", False))
+                    if r.get("scheduled"):
+                        reminder_count += 1
+        except Exception:
+            pass
+        response["reminders_scheduled"] = reminder_count
+
         return response
 
     elif name == "update_event":
@@ -1812,6 +1904,14 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 event.id, "post_event_video_url", arguments["post_event_video_url"], old_recap,
             ))
             download_started = True
+
+        # Reschedule auto-reminder if date/time changed
+        if ("event_date" in arguments or "event_time" in arguments) and getattr(event, "auto_reminder_hours", None) is not None:
+            try:
+                from app.services.scheduler import schedule_auto_reminder
+                schedule_auto_reminder(event.id, event.event_date, event.event_time, event.auto_reminder_hours, getattr(event, "auto_reminder_use_sms", False))
+            except Exception:
+                pass
 
         result = _event_to_dict(event)
         if download_started:
@@ -2924,6 +3024,27 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         guest_name = arguments["name"].strip().lower()
         event_id = arguments.get("event_id")
 
+        # If no event specified, auto-detect today's event
+        if not event_id:
+            from datetime import date
+            today = date.today().isoformat()
+            todays_events = db.query(Event).filter(
+                Event.event_date == today,
+                Event.status == "scheduled"
+            ).all()
+
+            if len(todays_events) == 1:
+                # One event today - use it automatically
+                event_id = todays_events[0].id
+            elif len(todays_events) > 1:
+                # Multiple events today - ask which one
+                return {
+                    "success": False,
+                    "message": f"Multiple events today. Please specify: {', '.join(e.name for e in todays_events)}",
+                    "events": [{"id": e.id, "name": e.name, "time": e.event_time} for e in todays_events]
+                }
+            # If no events today, search all (might be pre-checking for tomorrow)
+
         # Build query for tickets
         query = (
             db.query(Ticket)
@@ -2936,7 +3057,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             .filter(Ticket.status == TicketStatus.PAID)
         )
 
-        # Filter by event if specified
+        # Filter by event if specified or auto-detected
         if event_id:
             query = query.filter(TicketTier.event_id == event_id)
 
@@ -2994,6 +3115,24 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "check_out_by_name":
         guest_name = arguments["name"].strip().lower()
         event_id = arguments.get("event_id")
+
+        # If no event specified, auto-detect today's event
+        if not event_id:
+            from datetime import date
+            today = date.today().isoformat()
+            todays_events = db.query(Event).filter(
+                Event.event_date == today,
+                Event.status == "scheduled"
+            ).all()
+
+            if len(todays_events) == 1:
+                event_id = todays_events[0].id
+            elif len(todays_events) > 1:
+                return {
+                    "success": False,
+                    "message": f"Multiple events today. Please specify: {', '.join(e.name for e in todays_events)}",
+                    "events": [{"id": e.id, "name": e.name, "time": e.event_time} for e in todays_events]
+                }
 
         # Build query for checked-in tickets
         query = (
@@ -3156,6 +3295,89 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         )
         return result
 
+    elif name == "configure_auto_reminder":
+        from app.services.scheduler import schedule_auto_reminder, cancel_auto_reminder
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        enabled = arguments.get("enabled", True)
+        hours_before = arguments.get("hours_before", 24)
+        use_sms = arguments.get("use_sms", False)
+
+        if not enabled or hours_before == 0:
+            event.auto_reminder_hours = None
+            event.auto_reminder_use_sms = False
+            db.commit()
+            cancel_result = cancel_auto_reminder(event.id)
+            return {
+                "event_id": event.id,
+                "event_name": event.name,
+                "auto_reminder": "disabled",
+                "cancelled_job": cancel_result.get("cancelled", False),
+            }
+        else:
+            event.auto_reminder_hours = hours_before
+            event.auto_reminder_use_sms = use_sms
+            db.commit()
+
+            schedule_result = schedule_auto_reminder(
+                event_id=event.id,
+                event_date=event.event_date,
+                event_time=event.event_time,
+                hours_before=hours_before,
+                use_sms=use_sms,
+            )
+            return {
+                "event_id": event.id,
+                "event_name": event.name,
+                "auto_reminder": "enabled",
+                "hours_before": hours_before,
+                "use_sms": use_sms,
+                "scheduled": schedule_result.get("scheduled", False),
+                "reminder_time": schedule_result.get("reminder_time"),
+            }
+
+    elif name == "list_scheduled_reminders":
+        from app.services.scheduler import get_scheduled_reminders, get_reminder_for_event
+
+        event_id = arguments.get("event_id")
+
+        if event_id:
+            event = db.query(Event).filter(Event.id == event_id).first()
+            if not event:
+                return {"error": "Event not found"}
+
+            reminder = get_reminder_for_event(event_id)
+            return {
+                "event_id": event_id,
+                "event_name": event.name,
+                "event_date": event.event_date,
+                "event_time": event.event_time,
+                "auto_reminder_hours": getattr(event, "auto_reminder_hours", None),
+                "auto_reminder_use_sms": getattr(event, "auto_reminder_use_sms", False),
+                "has_scheduled_job": reminder is not None,
+                "scheduled_time": reminder["scheduled_time"] if reminder else None,
+            }
+        else:
+            reminders = get_scheduled_reminders()
+            if reminders:
+                event_ids = [r["event_id"] for r in reminders]
+                events = db.query(Event).filter(Event.id.in_(event_ids)).all()
+                event_map = {e.id: e for e in events}
+                for r in reminders:
+                    event = event_map.get(r["event_id"])
+                    if event:
+                        r["event_name"] = event.name
+                        r["event_date"] = event.event_date
+                        r["event_time"] = event.event_time
+
+            return {
+                "total_scheduled": len(reminders),
+                "reminders": reminders,
+            }
+
     elif name == "send_event_update":
         from app.services.notifications import send_event_update_notifications
 
@@ -3195,6 +3417,14 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             channels=channels,
         )
         result["event_status"] = "cancelled"
+
+        # Cancel auto-reminder
+        try:
+            from app.services.scheduler import cancel_auto_reminder
+            cancel_auto_reminder(arguments["event_id"])
+        except Exception:
+            pass
+
         return result
 
     elif name == "postpone_event":
@@ -3242,6 +3472,22 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             result["new_date"] = new_date
         if new_time:
             result["new_time"] = new_time
+
+        # Reschedule or cancel auto-reminder
+        if getattr(event, "auto_reminder_hours", None) is not None:
+            if new_date or new_time:
+                try:
+                    from app.services.scheduler import schedule_auto_reminder
+                    schedule_auto_reminder(event.id, event.event_date, event.event_time, event.auto_reminder_hours, getattr(event, "auto_reminder_use_sms", False))
+                except Exception:
+                    pass
+            else:
+                try:
+                    from app.services.scheduler import cancel_auto_reminder
+                    cancel_auto_reminder(event.id)
+                except Exception:
+                    pass
+
         return result
 
     elif name == "send_sms_ticket":
@@ -4323,6 +4569,97 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 for t in tickets
             ],
         }
+
+    # ============== Ticket Download Tools ==============
+    elif name in ("download_ticket_pdf", "download_wallet_pass", "send_ticket_pdf", "send_wallet_pass"):
+        ticket = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
+                joinedload(Ticket.event_goer),
+            )
+            .filter(Ticket.id == arguments["ticket_id"])
+            .first()
+        )
+        if not ticket:
+            return {"error": "Ticket not found"}
+        if ticket.status not in (TicketStatus.PAID, TicketStatus.CHECKED_IN):
+            return {"error": f"Ticket is {ticket.status.value}, not downloadable"}
+        if not ticket.qr_code_token:
+            return {"error": "Ticket has no QR code"}
+
+        settings = get_settings()
+        base_url = settings.base_url
+        event = ticket.ticket_tier.event
+        venue = event.venue
+        customer = ticket.event_goer
+
+        pdf_url = f"{base_url}/api/tickets/{ticket.id}/pdf"
+        wallet_url = f"{base_url}/api/tickets/{ticket.id}/wallet"
+
+        if name == "download_ticket_pdf":
+            return {
+                "success": True,
+                "ticket_id": ticket.id,
+                "customer_name": customer.name,
+                "event_name": event.name,
+                "pdf_url": pdf_url,
+                "message": f"PDF ticket ready for {customer.name}. Download: {pdf_url}",
+            }
+
+        elif name == "download_wallet_pass":
+            from app.services.wallet_pass import is_wallet_configured
+            return {
+                "success": True,
+                "ticket_id": ticket.id,
+                "customer_name": customer.name,
+                "event_name": event.name,
+                "wallet_url": wallet_url,
+                "wallet_configured": is_wallet_configured(),
+                "message": f"Apple Wallet pass ready for {customer.name}. Download: {wallet_url}",
+            }
+
+        elif name == "send_ticket_pdf":
+            if not customer.email:
+                return {"error": f"{customer.name} has no email on file"}
+            try:
+                from app.services.email_service import send_email
+                send_email(
+                    to_email=customer.email,
+                    subject=f"Your Ticket for {event.name} - PDF Download",
+                    html_content=f"<p>Hi {customer.name},</p><p>Here's your ticket for <strong>{event.name}</strong>:</p><p><a href='{pdf_url}' style='display:inline-block;padding:12px 24px;background:#333;color:white;text-decoration:none;border-radius:6px;font-weight:600;'>Download PDF Ticket</a></p><p><a href='{wallet_url}' style='display:inline-block;padding:12px 24px;background:#000;color:white;text-decoration:none;border-radius:6px;font-weight:600;'>Add to Apple Wallet</a></p><p>See you at {venue.name}!</p>",
+                )
+            except Exception:
+                pass
+            return {
+                "success": True,
+                "ticket_id": ticket.id,
+                "customer_name": customer.name,
+                "email": customer.email,
+                "event_name": event.name,
+                "message": f"PDF ticket link emailed to {customer.name} at {customer.email}",
+            }
+
+        elif name == "send_wallet_pass":
+            if not customer.email:
+                return {"error": f"{customer.name} has no email on file"}
+            try:
+                from app.services.email_service import send_email
+                send_email(
+                    to_email=customer.email,
+                    subject=f"Your Ticket for {event.name} - Apple Wallet",
+                    html_content=f"<p>Hi {customer.name},</p><p>Add your ticket for <strong>{event.name}</strong> to Apple Wallet:</p><p><a href='{wallet_url}' style='display:inline-block;padding:12px 24px;background:#000;color:white;text-decoration:none;border-radius:6px;font-weight:600;'>Add to Apple Wallet</a></p><p><a href='{pdf_url}' style='display:inline-block;padding:12px 24px;background:#333;color:white;text-decoration:none;border-radius:6px;font-weight:600;margin-top:8px;'>Or Download PDF</a></p><p>See you at {venue.name}!</p>",
+                )
+            except Exception:
+                pass
+            return {
+                "success": True,
+                "ticket_id": ticket.id,
+                "customer_name": customer.name,
+                "email": customer.email,
+                "event_name": event.name,
+                "message": f"Apple Wallet pass link emailed to {customer.name} at {customer.email}",
+            }
 
     # ============== Customer Memory Tools ==============
     elif name == "get_customer_profile":
@@ -5650,6 +5987,8 @@ def _event_to_dict(event: Event) -> dict:
         "promoter_name": getattr(event, 'promoter_name', None),
         "series_id": getattr(event, 'series_id', None),
         "post_event_video_url": getattr(event, 'post_event_video_url', None),
+        "auto_reminder_hours": getattr(event, 'auto_reminder_hours', None),
+        "auto_reminder_use_sms": getattr(event, 'auto_reminder_use_sms', False),
         "created_at": event.created_at,
     }
     # Include venue info if loaded
