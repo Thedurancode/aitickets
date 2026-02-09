@@ -19,6 +19,7 @@ from app.models import (
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference, EventCategory,
     MarketingCampaign, PromoCode, DiscountType, EventPhoto,
+    WaitlistEntry, WaitlistStatus,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -1108,6 +1109,103 @@ async def list_tools():
                     "note_type": {"type": "string", "description": "Filter by type (optional)"},
                 },
                 "required": [],
+            },
+        ),
+        # Waitlist tools
+        Tool(
+            name="get_waitlist",
+            description="View the waitlist for a sold-out event. Shows position, name, email, status.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="notify_waitlist",
+            description="Send availability notifications to the next N people on the waitlist (default 5). Use when tickets become available.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "count": {"type": "integer", "description": "Number of people to notify (default 5)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="remove_from_waitlist",
+            description="Remove someone from the waitlist by email",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "email": {"type": "string", "description": "Email of person to remove"},
+                },
+                "required": ["event_id", "email"],
+            },
+        ),
+        # ============== Social Media Tools (Postiz) ==============
+        Tool(
+            name="list_social_integrations",
+            description="List all connected social media accounts/channels. CALL THIS FIRST before posting to social media — you need the integration IDs. Returns id, platform name, and account details for each connected channel.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="post_event_to_social",
+            description="Post about an event to connected social media accounts. Use list_social_integrations first to get integration IDs. Can include event flyer/image. Supports X, Instagram, Facebook, LinkedIn, TikTok, Bluesky, Threads, and 20+ more platforms.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to promote"},
+                    "integration_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Postiz integration IDs to post to (from list_social_integrations)",
+                    },
+                    "custom_text": {"type": "string", "description": "Optional custom post text. If not provided, auto-generates from event details."},
+                    "image_urls": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional public URLs for images/videos to attach",
+                    },
+                },
+                "required": ["event_id", "integration_ids"],
+            },
+        ),
+        Tool(
+            name="schedule_social_post",
+            description="Schedule a social media post for a future date/time. Use list_social_integrations first to get integration IDs. Useful for timed promos like '2 hours before the event'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The post content"},
+                    "integration_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Postiz integration IDs to post to (from list_social_integrations)",
+                    },
+                    "schedule_date": {"type": "string", "description": "ISO 8601 datetime to publish (e.g. '2025-12-01T10:00:00Z')"},
+                    "image_urls": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional public URLs for images/videos to attach",
+                    },
+                },
+                "required": ["text", "integration_ids", "schedule_date"],
+            },
+        ),
+        Tool(
+            name="delete_social_post",
+            description="Delete a previously published social media post by its Postiz post ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "string", "description": "The Postiz post ID to delete"},
+                },
+                "required": ["post_id"],
             },
         ),
     ]
@@ -4126,6 +4224,213 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "expires_in": "1 hour",
             "sms_error": sms_result.get("error"),
         }
+
+    # ============== Waitlist Tools ==============
+    elif name == "get_waitlist":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        entries = (
+            db.query(WaitlistEntry)
+            .filter(WaitlistEntry.event_id == event.id)
+            .order_by(WaitlistEntry.position.asc())
+            .all()
+        )
+
+        return {
+            "event": event.name,
+            "event_id": event.id,
+            "total": len(entries),
+            "waiting": sum(1 for e in entries if e.status == WaitlistStatus.WAITING),
+            "entries": [
+                {
+                    "position": e.position,
+                    "name": e.name,
+                    "email": e.email,
+                    "phone": e.phone,
+                    "preferred_channel": e.preferred_channel,
+                    "status": e.status.value,
+                    "created_at": str(e.created_at),
+                }
+                for e in entries
+            ],
+        }
+
+    elif name == "notify_waitlist":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        count = arguments.get("count", 5)
+
+        entries = (
+            db.query(WaitlistEntry)
+            .filter(
+                WaitlistEntry.event_id == event.id,
+                WaitlistEntry.status == WaitlistStatus.WAITING,
+            )
+            .order_by(WaitlistEntry.position.asc())
+            .limit(count)
+            .all()
+        )
+
+        if not entries:
+            return {"event": event.name, "notified": 0, "message": "No one is waiting on the waitlist."}
+
+        notified = []
+        from app.services.sms import send_sms
+
+        for entry in entries:
+            ticket_url = f"{settings.base_url}/events/{event.id}"
+            if entry.preferred_channel == "sms" and entry.phone:
+                msg = f"Great news! Tickets are now available for \"{event.name}\"! Grab yours: {ticket_url}"
+                send_sms(entry.phone, msg)
+            else:
+                # For email channel, use SMS if phone available, otherwise just mark notified
+                if entry.phone:
+                    msg = f"Great news! Tickets are now available for \"{event.name}\"! Grab yours: {ticket_url}"
+                    send_sms(entry.phone, msg)
+
+            entry.status = WaitlistStatus.NOTIFIED
+            entry.notified_at = datetime.utcnow()
+            notified.append({"name": entry.name, "email": entry.email, "channel": entry.preferred_channel})
+
+        db.commit()
+
+        return {
+            "event": event.name,
+            "notified": len(notified),
+            "people": notified,
+            "message": f"Notified {len(notified)} {'person' if len(notified) == 1 else 'people'} from the waitlist.",
+        }
+
+    elif name == "remove_from_waitlist":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        email = arguments["email"].strip().lower()
+        entry = db.query(WaitlistEntry).filter(
+            WaitlistEntry.event_id == event.id,
+            WaitlistEntry.email == email,
+        ).first()
+
+        if not entry:
+            return {"error": f"No waitlist entry found for {email}"}
+
+        entry.status = WaitlistStatus.CANCELLED
+        db.commit()
+
+        return {
+            "event": event.name,
+            "removed": email,
+            "message": f"Removed {entry.name} ({email}) from the waitlist.",
+        }
+
+    # ============== Social Media Handlers (Postiz) ==============
+
+    elif name == "list_social_integrations":
+        from app.services.social_media import get_integrations
+
+        result = get_integrations()
+        if result["success"]:
+            return {
+                "success": True,
+                "integrations": result["data"],
+                "message": "Use the integration IDs when calling post_event_to_social or schedule_social_post.",
+            }
+        return result
+
+    elif name == "post_event_to_social":
+        from app.services.social_media import post_to_social
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        venue = db.query(Venue).filter(Venue.id == event.venue_id).first() if event.venue_id else None
+
+        integration_ids = arguments["integration_ids"]
+        custom_text = arguments.get("custom_text")
+        image_urls = arguments.get("image_urls")
+
+        if custom_text:
+            text = custom_text
+        else:
+            # Auto-generate post from event details
+            text = f"{event.name}"
+            if event.event_date:
+                try:
+                    from datetime import datetime as dt
+                    parsed = dt.strptime(event.event_date, "%Y-%m-%d")
+                    text += f"\n{parsed.strftime('%A, %B %d')}"
+                except ValueError:
+                    text += f"\n{event.event_date}"
+                if event.event_time:
+                    text += f" at {event.event_time}"
+            if venue:
+                text += f"\n📍 {venue.name}"
+            if event.description:
+                desc = event.description[:150]
+                if len(event.description) > 150:
+                    desc += "..."
+                text += f"\n\n{desc}"
+            text += f"\n\n🎟️ Tickets: {settings.base_url}/events/{event.id}"
+
+        if not image_urls and event.image_url:
+            image_urls = [event.image_url]
+
+        result = post_to_social(
+            text=text,
+            integration_ids=integration_ids,
+            image_urls=image_urls,
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "event_name": event.name,
+                "integration_ids": integration_ids,
+                "post_text": text,
+                "data": result["data"],
+                "message": f"Posted '{event.name}' to {len(integration_ids)} channel(s)",
+            }
+        return result
+
+    elif name == "schedule_social_post":
+        from app.services.social_media import post_to_social
+
+        result = post_to_social(
+            text=arguments["text"],
+            integration_ids=arguments["integration_ids"],
+            post_type="schedule",
+            schedule_date=arguments["schedule_date"],
+            image_urls=arguments.get("image_urls"),
+        )
+
+        if result["success"]:
+            return {
+                "success": True,
+                "integration_ids": arguments["integration_ids"],
+                "scheduled_for": arguments["schedule_date"],
+                "data": result["data"],
+                "message": f"Post scheduled for {arguments['schedule_date']} on {len(arguments['integration_ids'])} channel(s)",
+            }
+        return result
+
+    elif name == "delete_social_post":
+        from app.services.social_media import delete_social_post
+
+        result = delete_social_post(arguments["post_id"])
+        if result["success"]:
+            return {
+                "success": True,
+                "post_id": arguments["post_id"],
+                "data": result["data"],
+                "message": f"Social media post {arguments['post_id']} deleted",
+            }
+        return result
 
     return {"error": f"Unknown tool: {name}"}
 

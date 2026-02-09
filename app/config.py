@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
 
+    # Postiz (Social Media)
+    postiz_api_key: str = ""
+    postiz_url: str = "https://api.postiz.com"  # or self-hosted URL
+
     # Application
     base_url: str = "http://localhost:8000"
     uploads_dir: str = "uploads"
