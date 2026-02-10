@@ -211,6 +211,7 @@ class Ticket(Base):
     stripe_payment_intent_id = Column(String(255), nullable=True, index=True)
     stripe_checkout_session_id = Column(String(255), nullable=True, index=True)
     qr_code_token = Column(String(100), unique=True, nullable=True, index=True)
+    description = Column(Text, nullable=True)
     status = Column(Enum(TicketStatus), default=TicketStatus.PENDING)
     purchased_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)

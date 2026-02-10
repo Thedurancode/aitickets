@@ -31,6 +31,12 @@ def run_migration():
             ))
             results.append("Added recovery_sent_at column to tickets")
 
+        if "description" not in ticket_cols:
+            conn.execute(text(
+                "ALTER TABLE tickets ADD COLUMN description TEXT"
+            ))
+            results.append("Added description column to tickets")
+
         # --- auto_triggers table ---
         if "auto_triggers" not in existing_tables:
             if is_sqlite:
