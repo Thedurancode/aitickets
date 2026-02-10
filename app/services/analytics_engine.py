@@ -262,6 +262,42 @@ def predict_demand(db: Session, event_id: int) -> dict:
         if days_until == 0 or projected <= event_dt:
             projected_sellout_date = projected.strftime("%Y-%m-%d")
 
+    # Sell-out pace targets
+    required_per_day = round(total_remaining / max(days_until, 1), 2) if total_remaining > 0 else 0
+    on_track = current_velocity >= required_per_day if required_per_day > 0 else True
+    if required_per_day > 0 and current_velocity > 0:
+        pace_ratio = round(current_velocity / required_per_day, 2)
+    else:
+        pace_ratio = 0.0
+
+    # Per-tier pace breakdown
+    tier_pace = []
+    for t in tiers:
+        tier_remaining = max(t.quantity_available - t.quantity_sold, 0)
+        tier_required = round(tier_remaining / max(days_until, 1), 2) if tier_remaining > 0 else 0
+        # Tier-level velocity from actual purchases
+        tier_sold_count = (
+            db.query(sqlfunc.count(Ticket.id))
+            .filter(
+                Ticket.ticket_tier_id == t.id,
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            )
+            .scalar()
+            or 0
+        )
+        tier_velocity = round(tier_sold_count / max(days_on_sale, 1), 2)
+        tier_on_track = tier_velocity >= tier_required if tier_required > 0 else True
+        tier_pace.append({
+            "tier_id": t.id,
+            "tier_name": t.name,
+            "sold": t.quantity_sold,
+            "remaining": tier_remaining,
+            "capacity": t.quantity_available,
+            "required_per_day": tier_required,
+            "current_per_day": tier_velocity,
+            "on_track": tier_on_track,
+        })
+
     return {
         "event_id": event.id,
         "event_name": event.name,
@@ -278,6 +314,21 @@ def predict_demand(db: Session, event_id: int) -> dict:
         "velocity": {
             "tickets_per_day": round(current_velocity, 2),
             "days_on_sale": days_on_sale,
+        },
+        "sellout_pace": {
+            "days_until_event": days_until,
+            "required_per_day": required_per_day,
+            "current_per_day": round(current_velocity, 2),
+            "pace_ratio": pace_ratio,
+            "on_track": on_track,
+            "message": (
+                f"Selling {round(current_velocity, 1)}/day — need {required_per_day}/day to sell out by {event.event_date}."
+                if not on_track and required_per_day > 0
+                else f"On track at {round(current_velocity, 1)}/day (need {required_per_day}/day)."
+                if on_track and required_per_day > 0
+                else "No remaining inventory."
+            ),
+            "tiers": tier_pace,
         },
         "signals": {
             "waitlist_size": waitlist_count,

@@ -1973,15 +1973,23 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     # ============== Predictive Analytics ==============
     elif tool_name == "predict_demand":
         if isinstance(result, dict) and "error" not in result:
-            prob = result.get("sellout_probability_pct", 0)
+            prob = result.get("sellout_probability_percent", 0)
             score = result.get("demand_score", 0)
             event_name = result.get("event_name", "this event")
+            pace = result.get("sellout_pace", {})
+            pace_msg = ""
+            if pace.get("required_per_day", 0) > 0:
+                pace_msg = f" You need to sell {pace['required_per_day']} tickets per day to sell out."
+                if not pace.get("on_track"):
+                    pace_msg += f" Currently at {pace['current_per_day']} per day — below target."
+                else:
+                    pace_msg += f" Currently at {pace['current_per_day']} per day — on track."
             if prob >= 80:
-                return f"{event_name} has very high demand — {prob}% chance of selling out."
+                return f"{event_name} has very high demand — {prob}% chance of selling out.{pace_msg}"
             elif prob >= 50:
-                return f"{event_name} is trending well with a {prob}% sell-out probability and a demand score of {score}."
+                return f"{event_name} is trending well with a {prob}% sell-out probability.{pace_msg}"
             else:
-                return f"{event_name} has moderate demand — {prob}% sell-out chance. Demand score is {score} out of 100."
+                return f"{event_name} has moderate demand — {prob}% sell-out chance. Demand score is {score} out of 100.{pace_msg}"
         elif isinstance(result, dict):
             return result.get("error", "Couldn't predict demand.")
 
