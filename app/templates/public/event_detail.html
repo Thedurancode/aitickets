@@ -59,7 +59,7 @@
         </div>
 
         <!-- Event Info -->
-        <div data-animate>
+        <div>
             <!-- Categories -->
             {% if event.categories %}
             <div class="flex flex-wrap gap-2 mb-4">
@@ -170,7 +170,7 @@
             <!-- Ticket Tiers -->
             <div class="space-y-3" id="tiers-container">
                 {% for tier in tiers %}
-                <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 tier-card" data-animate style="animation-delay: {{ loop.index0 * 100 }}ms" data-tier-id="{{ tier.id }}" data-price="{{ tier.price_cents }}">
+                <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 tier-card" data-tier-id="{{ tier.id }}" data-price="{{ tier.price_cents }}">
                     <div class="flex justify-between items-start mb-2">
                         <h3 class="font-semibold text-lg">{{ tier.name }}</h3>
                         <div class="text-right">
@@ -197,7 +197,7 @@
 
             <!-- Waitlist Form (shown when all tiers sold out) -->
             {% if all_sold_out %}
-            <div id="waitlist-section" class="mt-4 bg-gray-900 border border-yellow-700/30 rounded-xl p-5 space-y-4" data-animate>
+            <div id="waitlist-section" class="mt-4 bg-gray-900 border border-yellow-700/30 rounded-xl p-5 space-y-4">
                 <div class="flex items-center gap-2 mb-1">
                     <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
