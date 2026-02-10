@@ -117,3 +117,9 @@ def init_db():
         run_auto_reminders_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_missing_indexes import run_migration as run_missing_indexes_migration
+        run_missing_indexes_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

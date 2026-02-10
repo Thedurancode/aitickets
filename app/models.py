@@ -102,7 +102,7 @@ class Event(Base):
     __tablename__ = "events"
 
     id = Column(Integer, primary_key=True, index=True)
-    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=False)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     image_url = Column(String(500), nullable=True)
@@ -134,7 +134,7 @@ class EventPhoto(Base):
     __tablename__ = "event_photos"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
     photo_url = Column(String(500), nullable=False)
     uploaded_by_name = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow)
@@ -147,7 +147,7 @@ class EventUpdate(Base):
     __tablename__ = "event_updates"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
     update_type = Column(String(50), nullable=False)  # date_change, time_change, venue_change, cancelled, etc.
     message = Column(Text, nullable=False)
     old_value = Column(String(255), nullable=True)
@@ -162,7 +162,7 @@ class TicketTier(Base):
     __tablename__ = "ticket_tiers"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     price = Column(Integer, nullable=False)  # Price in cents
@@ -204,10 +204,10 @@ class Ticket(Base):
     __tablename__ = "tickets"
 
     id = Column(Integer, primary_key=True, index=True)
-    ticket_tier_id = Column(Integer, ForeignKey("ticket_tiers.id"), nullable=False)
-    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False)
-    stripe_payment_intent_id = Column(String(255), nullable=True)
-    stripe_checkout_session_id = Column(String(255), nullable=True)
+    ticket_tier_id = Column(Integer, ForeignKey("ticket_tiers.id"), nullable=False, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, index=True)
+    stripe_payment_intent_id = Column(String(255), nullable=True, index=True)
+    stripe_checkout_session_id = Column(String(255), nullable=True, index=True)
     qr_code_token = Column(String(100), unique=True, nullable=True, index=True)
     status = Column(Enum(TicketStatus), default=TicketStatus.PENDING)
     purchased_at = Column(DateTime(timezone=True), nullable=True)
@@ -235,9 +235,9 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
-    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True, index=True)
 
     notification_type = Column(Enum(NotificationType), nullable=False)
     channel = Column(Enum(NotificationChannel), nullable=False)
@@ -300,7 +300,7 @@ class CustomerNote(Base):
     __tablename__ = "customer_notes"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, index=True)
     note_type = Column(String(50), nullable=False)  # preference, interaction, issue, vip, etc.
     note = Column(Text, nullable=False)
     created_by = Column(String(100), default="ai_agent")  # ai_agent, staff, system
@@ -357,7 +357,7 @@ class PromoCode(Base):
     valid_until = Column(DateTime(timezone=True), nullable=True)
     max_uses = Column(Integer, nullable=True)  # null = unlimited
     uses_count = Column(Integer, default=0)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # null = all events
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)  # null = all events
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     event = relationship("Event")
@@ -367,7 +367,7 @@ class PageView(Base):
     __tablename__ = "page_views"
 
     id = Column(Integer, primary_key=True, index=True)
-    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # null for listing page
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)  # null for listing page
     page = Column(String(50), nullable=False)  # "listing" or "detail"
     ip_hash = Column(String(64), nullable=False)
     user_agent = Column(String(500), nullable=True)
