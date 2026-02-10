@@ -181,3 +181,41 @@ def send_marketing_email(
     )
 
     return _send_email(to_email, subject, html_content)
+
+
+def send_cart_recovery_email(
+    to_email: str,
+    recipient_name: str,
+    items: list[dict],
+    total_dollars: float,
+) -> bool:
+    """Send an abandoned cart recovery email."""
+    settings = get_settings()
+    template = env.get_template("cart_recovery_email.html")
+    html_content = template.render(
+        recipient_name=recipient_name,
+        items=items,
+        total_dollars=total_dollars,
+        checkout_url=f"{settings.base_url}/events",
+    )
+
+    return _send_email(to_email, "You left tickets in your cart!", html_content)
+
+
+def send_survey_email(
+    to_email: str,
+    recipient_name: str,
+    event_name: str,
+    event_date: str,
+    survey_url: str,
+) -> bool:
+    """Send a post-event survey email."""
+    template = env.get_template("survey_email.html")
+    html_content = template.render(
+        recipient_name=recipient_name,
+        event_name=event_name,
+        event_date=event_date,
+        survey_url=survey_url,
+    )
+
+    return _send_email(to_email, f"How was {event_name}?", html_content)

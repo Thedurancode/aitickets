@@ -181,6 +181,29 @@ ACTION_MAP = {
     "what's trending": "get_trending_events",
     "hot events": "get_trending_events",
     "trending": "get_trending_events",
+    # Automation
+    "abandoned carts": "get_abandoned_carts",
+    "pending carts": "get_abandoned_carts",
+    "stale tickets": "get_abandoned_carts",
+    "cart recovery": "send_cart_recovery",
+    "recover carts": "send_cart_recovery",
+    "list triggers": "list_auto_triggers",
+    "auto triggers": "list_auto_triggers",
+    "marketing triggers": "list_auto_triggers",
+    "create trigger": "create_auto_trigger",
+    "add trigger": "create_auto_trigger",
+    "delete trigger": "delete_auto_trigger",
+    "remove trigger": "delete_auto_trigger",
+    "trigger history": "get_trigger_history",
+    "revenue forecast": "get_revenue_forecast",
+    "forecast revenue": "get_revenue_forecast",
+    "projected revenue": "get_revenue_forecast",
+    "revenue projection": "get_revenue_forecast",
+    "survey results": "get_survey_results",
+    "nps score": "get_survey_results",
+    "event feedback": "get_survey_results",
+    "send survey": "send_event_survey",
+    "send feedback survey": "send_event_survey",
 }
 
 
@@ -302,9 +325,10 @@ async def lifespan(app: FastAPI):
     """Initialize database and scheduler on startup."""
     init_db()
     try:
-        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders
+        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders, bootstrap_automation_jobs
         init_scheduler()
         bootstrap_existing_reminders()
+        bootstrap_automation_jobs()
     except Exception as e:
         print(f"Scheduler init note: {e}")
     yield
@@ -2044,6 +2068,75 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
             return f"Top trending: {top['event_name']} with a trend score of {top['trend_score']}. {len(events)} events trending total."
         elif isinstance(result, dict):
             return result.get("error", "Couldn't get trending events.")
+
+    # ============== Automation ==============
+    elif tool_name == "get_abandoned_carts":
+        if isinstance(result, dict):
+            count = result.get("abandoned_count", 0)
+            tickets = result.get("total_tickets", 0)
+            if count == 0:
+                return "No abandoned carts right now. All checkouts are converting!"
+            return f"Found {count} abandoned cart(s) with {tickets} pending ticket(s). Send recovery emails to remind them to complete their purchase."
+
+    elif tool_name == "send_cart_recovery":
+        if isinstance(result, dict):
+            return result.get("message", "Cart recovery processed.")
+
+    elif tool_name == "list_auto_triggers":
+        if isinstance(result, dict):
+            total = result.get("total", 0)
+            if total == 0:
+                return "No auto triggers configured yet. Create one to automate your marketing."
+            active = sum(1 for t in result.get("triggers", []) if t.get("is_active"))
+            return f"{total} trigger(s) configured, {active} active."
+
+    elif tool_name == "create_auto_trigger":
+        if isinstance(result, dict):
+            return result.get("message", "Trigger created.")
+
+    elif tool_name == "delete_auto_trigger":
+        if isinstance(result, dict):
+            return result.get("message", "Trigger deleted.")
+
+    elif tool_name == "get_trigger_history":
+        if isinstance(result, dict) and "error" not in result:
+            name = result.get("name", "Trigger")
+            count = result.get("fire_count", 0)
+            last = result.get("last_fired_at")
+            if count == 0:
+                return f"{name} hasn't fired yet. It runs automatically every hour when conditions are met."
+            return f"{name} has fired {count} time(s). Last fired: {last}."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't get trigger history.")
+
+    elif tool_name == "get_revenue_forecast":
+        if isinstance(result, dict) and "error" not in result:
+            days = result.get("time_horizon_days", 90)
+            total_events = result.get("total_events", 0)
+            projected = result.get("projected_revenue_dollars", {})
+            current = result.get("current_revenue_dollars", 0)
+            if total_events == 0:
+                return result.get("message", "No upcoming events to forecast.")
+            mid = projected.get("mid", 0)
+            low = projected.get("low", 0)
+            high = projected.get("high", 0)
+            return f"Revenue forecast for the next {days} days: ${mid:,.2f} projected across {total_events} events. Range: ${low:,.2f} to ${high:,.2f}. Current revenue: ${current:,.2f}."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't generate forecast.")
+
+    elif tool_name == "get_survey_results":
+        if isinstance(result, dict) and "error" not in result:
+            total = result.get("total_responses", 0)
+            if total == 0:
+                return result.get("message", "No survey responses yet.")
+            avg = result.get("avg_rating", 0)
+            nps = result.get("nps_score", 0)
+            rate = result.get("response_rate_percent", 0)
+            return f"Survey results: {total} responses, average rating {avg}/10, NPS score {nps}. Response rate: {rate}%."
+
+    elif tool_name == "send_event_survey":
+        if isinstance(result, dict):
+            return result.get("message", "Survey sent.")
 
     # Default response
     return "Done."

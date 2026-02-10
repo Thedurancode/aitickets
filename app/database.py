@@ -123,3 +123,9 @@ def init_db():
         run_missing_indexes_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_automation_tables import run_migration as run_automation_migration
+        run_automation_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

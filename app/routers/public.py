@@ -492,3 +492,122 @@ async def join_waitlist(
     db.refresh(entry)
 
     return {"success": True, "message": f"You're #{entry.position} on the waitlist!", "position": entry.position}
+
+
+# ============== Survey Endpoints ==============
+
+
+@router.get("/survey/{token}", response_class=HTMLResponse)
+async def survey_form(token: str, db: Session = Depends(get_db)):
+    """Render the survey form for an attendee."""
+    from app.models import SurveyResponse
+    survey = db.query(SurveyResponse).filter(SurveyResponse.survey_token == token).first()
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+
+    event = db.query(Event).filter(Event.id == survey.event_id).first()
+    event_name = event.name if event else "the event"
+    already_submitted = survey.submitted_at is not None
+    settings = get_settings()
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rate Your Experience - {event_name}</title>
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }}
+        .card {{ background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); max-width: 500px; width: 100%; overflow: hidden; }}
+        .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }}
+        .header h1 {{ font-size: 22px; margin-top: 10px; }}
+        .body {{ padding: 30px; }}
+        .rating-group {{ display: flex; gap: 8px; justify-content: center; margin: 20px 0; flex-wrap: wrap; }}
+        .rating-btn {{ width: 44px; height: 44px; border-radius: 50%; border: 2px solid #ddd; background: white; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.2s; }}
+        .rating-btn:hover {{ border-color: #667eea; background: #f0f0ff; }}
+        .rating-btn.selected {{ border-color: #667eea; background: #667eea; color: white; }}
+        .labels {{ display: flex; justify-content: space-between; font-size: 12px; color: #888; margin-bottom: 20px; }}
+        textarea {{ width: 100%; border: 2px solid #eee; border-radius: 8px; padding: 12px; font-size: 14px; resize: vertical; min-height: 80px; font-family: inherit; }}
+        textarea:focus {{ outline: none; border-color: #667eea; }}
+        .submit-btn {{ width: 100%; padding: 14px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 25px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 20px; }}
+        .submit-btn:disabled {{ opacity: 0.5; cursor: not-allowed; }}
+        .thankyou {{ text-align: center; padding: 40px 20px; }}
+        .thankyou h2 {{ color: #667eea; margin-bottom: 10px; }}
+        label {{ display: block; font-weight: 600; margin-bottom: 8px; color: #333; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="header">
+            <div style="font-size: 40px;">&#11088;</div>
+            <h1>How was {event_name}?</h1>
+        </div>
+        <div class="body">
+            {"<div class='thankyou'><h2>Thank you!</h2><p>Your feedback has already been recorded.</p></div>" if already_submitted else f'''
+            <form method="POST" action="/survey/{token}">
+                <label>Your Rating</label>
+                <div class="rating-group">
+                    {"".join(f'<button type="button" class="rating-btn" onclick="selectRating({i})">{i}</button>' for i in range(1, 11))}
+                </div>
+                <div class="labels"><span>Not great</span><span>Amazing!</span></div>
+                <input type="hidden" name="rating" id="rating-input" value="">
+                <label>Comments (optional)</label>
+                <textarea name="comment" placeholder="Tell us what you loved or what we could improve..."></textarea>
+                <button type="submit" class="submit-btn" id="submit-btn" disabled>Submit Feedback</button>
+            </form>
+            <script>
+                function selectRating(r) {{
+                    document.getElementById("rating-input").value = r;
+                    document.getElementById("submit-btn").disabled = false;
+                    document.querySelectorAll(".rating-btn").forEach(b => b.classList.remove("selected"));
+                    event.target.classList.add("selected");
+                }}
+            </script>
+            '''}
+        </div>
+    </div>
+</body>
+</html>"""
+
+
+@router.post("/survey/{token}")
+async def submit_survey(token: str, request: Request, db: Session = Depends(get_db)):
+    """Submit a survey response."""
+    from app.services.surveys import submit_survey as do_submit
+
+    form = await request.form()
+    rating_str = form.get("rating", "")
+    comment = form.get("comment", "")
+
+    try:
+        rating = int(rating_str)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid rating")
+
+    result = do_submit(db, token, rating, comment.strip() if comment else None)
+
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return HTMLResponse("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thank You!</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .card { background: white; border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); max-width: 500px; width: 100%; text-align: center; padding: 50px 30px; }
+        h1 { color: #667eea; margin-bottom: 15px; }
+        .emoji { font-size: 60px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="emoji">&#127881;</div>
+        <h1>Thank You!</h1>
+        <p>Your feedback has been recorded. We appreciate you taking the time to help us improve!</p>
+    </div>
+</body>
+</html>""")

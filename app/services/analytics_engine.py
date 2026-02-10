@@ -955,3 +955,174 @@ def get_trending_events(db: Session, days: int = 7, limit: int = 10) -> dict:
         })
 
     return {"period_days": days, "trending_events": results}
+
+
+# ============== Feature 7: Revenue Forecasting ==============
+
+
+def forecast_revenue(db: Session, time_horizon_days: int = 90) -> dict:
+    """Project total revenue across all upcoming events based on velocity and historical patterns."""
+    now = datetime.now(timezone.utc)
+    horizon_date = (now + timedelta(days=time_horizon_days)).strftime("%Y-%m-%d")
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Get all upcoming events within the horizon
+    upcoming = (
+        db.query(Event)
+        .options(joinedload(Event.venue), joinedload(Event.categories))
+        .filter(
+            Event.event_date >= today_str,
+            Event.event_date <= horizon_date,
+        )
+        .all()
+    )
+
+    if not upcoming:
+        return {
+            "time_horizon_days": time_horizon_days,
+            "total_events": 0,
+            "current_revenue_dollars": 0,
+            "projected_revenue_dollars": 0,
+            "events": [],
+            "message": f"No upcoming events in the next {time_horizon_days} days.",
+        }
+
+    # Historical average sell-through for confidence calibration
+    hist_stats = (
+        db.query(
+            sqlfunc.sum(TicketTier.quantity_sold).label("sold"),
+            sqlfunc.sum(TicketTier.quantity_available).label("avail"),
+        )
+        .join(Event, TicketTier.event_id == Event.id)
+        .filter(Event.event_date < today_str)
+        .first()
+    )
+    hist_sold = int(hist_stats.sold or 0) if hist_stats else 0
+    hist_avail = max(int(hist_stats.avail or 1), 1) if hist_stats else 1
+    hist_completion_rate = min(hist_sold / hist_avail, 1.0) if hist_avail > 0 else 0.5
+
+    total_current = 0
+    total_projected_low = 0
+    total_projected_mid = 0
+    total_projected_high = 0
+    event_forecasts = []
+
+    for event in upcoming:
+        tiers = db.query(TicketTier).filter(TicketTier.event_id == event.id).all()
+        if not tiers:
+            continue
+
+        # Current revenue from sold tickets
+        current_rev = (
+            db.query(
+                sqlfunc.sum(TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0))
+            )
+            .join(Ticket, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(
+                TicketTier.event_id == event.id,
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            )
+            .scalar()
+            or 0
+        )
+
+        total_available = sum(t.quantity_available for t in tiers)
+        total_sold = sum(t.quantity_sold for t in tiers)
+        total_remaining = max(total_available - total_sold, 0)
+
+        # Avg price of remaining tickets (weighted by tier capacity)
+        if total_remaining > 0:
+            weighted_price = sum(
+                t.price * max(t.quantity_available - t.quantity_sold, 0) for t in tiers
+            ) / total_remaining
+        else:
+            weighted_price = sum(t.price for t in tiers) / max(len(tiers), 1)
+
+        # Current velocity
+        earliest_purchase = (
+            db.query(sqlfunc.min(Ticket.purchased_at))
+            .join(TicketTier)
+            .filter(
+                TicketTier.event_id == event.id,
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            )
+            .scalar()
+        )
+
+        velocity = 0.0
+        if earliest_purchase and total_sold > 0:
+            ep = earliest_purchase
+            if ep.tzinfo is None:
+                ep = ep.replace(tzinfo=timezone.utc)
+            days_on_sale = max((now - ep).days, 1)
+            velocity = total_sold / days_on_sale
+
+        # Days until event
+        try:
+            event_dt = datetime.strptime(f"{event.event_date} {event.event_time or '23:59'}", "%Y-%m-%d %H:%M")
+            event_dt = event_dt.replace(tzinfo=timezone.utc)
+            days_until = max((event_dt - now).days, 0)
+        except ValueError:
+            days_until = 30
+
+        # Project additional sales
+        if velocity > 0 and days_until > 0:
+            projected_additional_tickets = min(velocity * days_until, total_remaining)
+        else:
+            # Fallback: use historical completion rate
+            projected_additional_tickets = total_remaining * hist_completion_rate
+
+        projected_additional_rev = projected_additional_tickets * weighted_price
+
+        # Confidence intervals
+        # Data quality factor: more sales = more confidence
+        data_quality = min(total_sold / max(total_available * 0.1, 1), 1.0)  # 1.0 at 10%+ sold
+        confidence = 0.3 + (data_quality * 0.4) + (min(hist_completion_rate, 0.5) * 0.3)
+
+        mid_rev = current_rev + projected_additional_rev
+        spread = max(1.0 - confidence, 0.2)  # Higher confidence = tighter range
+        low_rev = current_rev + (projected_additional_rev * max(1.0 - spread, 0.1))
+        high_rev = current_rev + (projected_additional_rev * min(1.0 + spread, 2.0))
+
+        total_current += current_rev
+        total_projected_low += low_rev
+        total_projected_mid += mid_rev
+        total_projected_high += high_rev
+
+        event_forecasts.append({
+            "event_id": event.id,
+            "event_name": event.name,
+            "event_date": event.event_date,
+            "venue_name": event.venue.name if event.venue else None,
+            "current_revenue_dollars": round(current_rev / 100, 2),
+            "projected_revenue_dollars": {
+                "low": round(low_rev / 100, 2),
+                "mid": round(mid_rev / 100, 2),
+                "high": round(high_rev / 100, 2),
+            },
+            "tickets": {
+                "sold": total_sold,
+                "remaining": total_remaining,
+                "capacity": total_available,
+                "projected_additional": round(projected_additional_tickets),
+            },
+            "velocity_per_day": round(velocity, 2),
+            "days_until_event": days_until,
+            "confidence": round(confidence, 2),
+        })
+
+    # Sort by projected mid revenue descending
+    event_forecasts.sort(key=lambda x: x["projected_revenue_dollars"]["mid"], reverse=True)
+
+    return {
+        "time_horizon_days": time_horizon_days,
+        "total_events": len(event_forecasts),
+        "current_revenue_dollars": round(total_current / 100, 2),
+        "projected_revenue_dollars": {
+            "low": round(total_projected_low / 100, 2),
+            "mid": round(total_projected_mid / 100, 2),
+            "high": round(total_projected_high / 100, 2),
+        },
+        "historical_completion_rate_percent": round(hist_completion_rate * 100, 1),
+        "events": event_forecasts,
+    }

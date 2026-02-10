@@ -25,6 +25,8 @@ class NotificationType(str, enum.Enum):
     EVENT_CANCELLED = "event_cancelled"
     MARKETING = "marketing"
     SMS_TICKET = "sms_ticket"
+    CART_RECOVERY = "cart_recovery"
+    SURVEY_REQUEST = "survey_request"
 
 
 class NotificationChannel(str, enum.Enum):
@@ -211,6 +213,8 @@ class Ticket(Base):
     qr_code_token = Column(String(100), unique=True, nullable=True, index=True)
     status = Column(Enum(TicketStatus), default=TicketStatus.PENDING)
     purchased_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    recovery_sent_at = Column(DateTime(timezone=True), nullable=True)
 
     # Reminder tracking
     reminder_sent = Column(Boolean, default=False)
@@ -393,3 +397,41 @@ class WaitlistEntry(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
 
     event = relationship("Event", back_populates="waitlist_entries")
+
+
+class AutoTrigger(Base):
+    __tablename__ = "auto_triggers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    trigger_type = Column(String(50), nullable=False)  # low_sell_through, almost_sold_out, post_event_followup, new_event_alert
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # NULL = all events
+    threshold_value = Column(Integer, nullable=True)  # e.g. 30 for 30%
+    threshold_days = Column(Integer, nullable=True)  # e.g. 7 for "7 days left"
+    action = Column(String(50), nullable=False)  # send_promo, send_campaign, send_survey
+    action_config = Column(Text, nullable=True)  # JSON config
+    is_active = Column(Boolean, default=True)
+    last_fired_at = Column(DateTime(timezone=True), nullable=True)
+    fire_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")
+
+
+class SurveyResponse(Base):
+    __tablename__ = "survey_responses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True)
+    survey_token = Column(String(100), unique=True, nullable=False, index=True)
+    rating = Column(Integer, nullable=True)  # 1-10
+    comment = Column(Text, nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")
+    event_goer = relationship("EventGoer")
+    ticket = relationship("Ticket")

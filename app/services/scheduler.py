@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.database import SessionLocal
 from app.config import get_settings
@@ -226,3 +227,67 @@ def bootstrap_existing_reminders():
         logger.warning(f"Bootstrap reminders failed: {e}")
     finally:
         db.close()
+
+
+def bootstrap_automation_jobs():
+    """
+    Register recurring interval jobs for cart recovery, trigger evaluation, and surveys.
+    Called once after scheduler init. Uses replace_existing to be idempotent.
+    """
+    scheduler = get_scheduler()
+
+    # Cart recovery: every 30 minutes
+    scheduler.add_job(
+        _run_cart_recovery,
+        trigger=IntervalTrigger(minutes=30),
+        id="automation_cart_recovery",
+        replace_existing=True,
+        name="Cart Recovery (every 30min)",
+    )
+
+    # Trigger evaluation: every hour
+    scheduler.add_job(
+        _run_trigger_evaluation,
+        trigger=IntervalTrigger(hours=1),
+        id="automation_trigger_evaluation",
+        replace_existing=True,
+        name="Auto Trigger Evaluation (hourly)",
+    )
+
+    # Post-event survey: every hour
+    scheduler.add_job(
+        _run_survey_check,
+        trigger=IntervalTrigger(hours=1),
+        id="automation_survey_check",
+        replace_existing=True,
+        name="Post-Event Survey Check (hourly)",
+    )
+
+    logger.info("Bootstrapped 3 automation interval jobs")
+
+
+def _run_cart_recovery():
+    """Wrapper for cart recovery scheduled job."""
+    try:
+        from app.services.cart_recovery import run_cart_recovery_job
+        run_cart_recovery_job()
+    except Exception as e:
+        logger.error(f"Cart recovery job error: {e}")
+
+
+def _run_trigger_evaluation():
+    """Wrapper for trigger evaluation scheduled job."""
+    try:
+        from app.services.auto_triggers import run_trigger_evaluation_job
+        run_trigger_evaluation_job()
+    except Exception as e:
+        logger.error(f"Trigger evaluation job error: {e}")
+
+
+def _run_survey_check():
+    """Wrapper for survey check scheduled job."""
+    try:
+        from app.services.surveys import run_survey_job
+        run_survey_job()
+    except Exception as e:
+        logger.error(f"Survey job error: {e}")

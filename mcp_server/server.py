@@ -1494,6 +1494,100 @@ async def list_tools():
                 "required": [],
             },
         ),
+        # ============== Automation Tools ==============
+        Tool(
+            name="get_abandoned_carts",
+            description="View all currently abandoned carts — pending tickets older than 30 minutes that haven't been paid. Shows per-customer breakdown with event names, tiers, and prices.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="send_cart_recovery",
+            description="Manually send an abandoned cart recovery email/SMS to a specific customer. Reminds them to complete their purchase before tickets expire.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "email": {"type": "string", "description": "Customer email to send recovery to"},
+                },
+                "required": ["email"],
+            },
+        ),
+        Tool(
+            name="list_auto_triggers",
+            description="List all automated marketing triggers with their status, fire count, and last fired time. Triggers run automatically on a schedule when conditions are met.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="create_auto_trigger",
+            description="Create an automated marketing trigger. Types: low_sell_through (send promo when sales are slow), almost_sold_out (send urgency campaign), post_event_followup (thank-you after event), new_event_alert (notify fans of new events).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Human-readable trigger name"},
+                    "trigger_type": {"type": "string", "description": "One of: low_sell_through, almost_sold_out, post_event_followup, new_event_alert"},
+                    "action": {"type": "string", "description": "One of: send_promo, send_campaign, send_survey"},
+                    "event_id": {"type": "integer", "description": "Optional: target a specific event (null = all events)"},
+                    "threshold_value": {"type": "integer", "description": "Percentage threshold (e.g. 30 for low_sell_through, 90 for almost_sold_out)"},
+                    "threshold_days": {"type": "integer", "description": "Days-before-event threshold (e.g. 7 = trigger when 7 days left)"},
+                    "action_config": {"type": "object", "description": "Optional config: {discount_percent, subject, content, code, max_uses}"},
+                },
+                "required": ["name", "trigger_type", "action"],
+            },
+        ),
+        Tool(
+            name="delete_auto_trigger",
+            description="Delete an automated marketing trigger by its ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "trigger_id": {"type": "integer", "description": "The trigger ID to delete"},
+                },
+                "required": ["trigger_id"],
+            },
+        ),
+        Tool(
+            name="get_trigger_history",
+            description="View details and fire history for a specific auto trigger.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "trigger_id": {"type": "integer", "description": "The trigger ID to inspect"},
+                },
+                "required": ["trigger_id"],
+            },
+        ),
+        Tool(
+            name="get_revenue_forecast",
+            description="Project total revenue across all upcoming events for the next 30/60/90 days. Uses current ticket velocity, historical completion rates, and per-event confidence intervals. Returns per-event breakdown with low/mid/high projections.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "time_horizon_days": {"type": "integer", "description": "Forecast horizon in days (default: 90)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_survey_results",
+            description="View aggregated post-event survey results including NPS score, average rating, response rate, and recent comments. Optionally filter by event.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Optional: filter results to a specific event"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="send_event_survey",
+            description="Send post-event surveys to all attendees of an event. Creates unique survey tokens and sends email/SMS with survey links. Typically auto-sent 24h after event, but can be triggered manually.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID to send surveys for"},
+                },
+                "required": ["event_id"],
+            },
+        ),
     ]
 
 
@@ -5884,6 +5978,73 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             days=arguments.get("days", 7),
             limit=arguments.get("limit", 10),
         )
+        return result
+
+    # ============== Automation Tools ==============
+    elif name == "get_abandoned_carts":
+        from app.services.cart_recovery import check_abandoned_carts
+
+        result = check_abandoned_carts(db)
+        return result
+
+    elif name == "send_cart_recovery":
+        from app.services.cart_recovery import send_cart_recovery
+
+        result = send_cart_recovery(db, email=arguments.get("email"))
+        return result
+
+    elif name == "list_auto_triggers":
+        from app.services.auto_triggers import list_triggers
+
+        result = list_triggers(db)
+        return result
+
+    elif name == "create_auto_trigger":
+        from app.services.auto_triggers import create_trigger
+
+        result = create_trigger(
+            db,
+            name=arguments["name"],
+            trigger_type=arguments["trigger_type"],
+            action=arguments["action"],
+            event_id=arguments.get("event_id"),
+            threshold_value=arguments.get("threshold_value"),
+            threshold_days=arguments.get("threshold_days"),
+            action_config=arguments.get("action_config"),
+        )
+        return result
+
+    elif name == "delete_auto_trigger":
+        from app.services.auto_triggers import delete_trigger
+
+        result = delete_trigger(db, arguments["trigger_id"])
+        return result
+
+    elif name == "get_trigger_history":
+        from app.services.auto_triggers import get_trigger_history
+
+        result = get_trigger_history(db, arguments["trigger_id"])
+        return result
+
+    elif name == "get_revenue_forecast":
+        from app.services.analytics_engine import forecast_revenue
+
+        result = forecast_revenue(
+            db,
+            time_horizon_days=arguments.get("time_horizon_days", 90),
+        )
+        return result
+
+    elif name == "get_survey_results":
+        from app.services.surveys import get_survey_results
+
+        result = get_survey_results(db, event_id=arguments.get("event_id"))
+        return result
+
+    elif name == "send_event_survey":
+        from app.services.surveys import send_event_survey
+
+        result = send_event_survey(db, arguments["event_id"])
         return result
 
     return {"error": f"Unknown tool: {name}"}
