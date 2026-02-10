@@ -148,7 +148,7 @@
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(7, 1fr);
+            grid-template-columns: repeat(9, 1fr);
             gap: 15px;
             padding: 20px 30px;
         }
@@ -157,12 +157,14 @@
             .stats-grid {
                 grid-template-columns: repeat(4, 1fr);
             }
+            .capacity-gauge { grid-column: span 2; }
         }
 
         @media (max-width: 900px) {
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
+            .capacity-gauge { grid-column: span 2; }
         }
 
         .stat-card {
@@ -668,6 +670,142 @@
             100% { transform: scale(1); }
         }
 
+        /* Capacity Gauge */
+        .capacity-gauge {
+            grid-column: span 2;
+            background: linear-gradient(145deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05));
+            border-radius: 15px;
+            padding: 20px 15px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .gauge-label {
+            font-size: 0.85em;
+            color: #aaa;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .gauge-bar {
+            height: 30px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .gauge-fill {
+            height: 100%;
+            border-radius: 15px;
+            transition: width 0.8s ease-out, background 0.8s ease-out;
+            background: linear-gradient(90deg, #00ff00, #00ff00);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.9em;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+            min-width: 50px;
+        }
+
+        .gauge-fill.medium { background: linear-gradient(90deg, #ffd700, #ff8c00); }
+        .gauge-fill.high { background: linear-gradient(90deg, #ff4444, #cc0000); }
+        .gauge-fill.sold-out { background: linear-gradient(90deg, #cc0000, #880000); }
+
+        .gauge-text {
+            font-size: 0.85em;
+            color: #888;
+            text-align: center;
+            margin-top: 8px;
+        }
+
+        /* Sale Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .sale-toast {
+            background: linear-gradient(145deg, rgba(0, 200, 0, 0.95), rgba(0, 150, 0, 0.9));
+            border: 1px solid rgba(0, 255, 0, 0.3);
+            border-radius: 15px;
+            padding: 15px 20px;
+            color: white;
+            min-width: 320px;
+            max-width: 420px;
+            animation: toastSlideIn 0.5s ease-out;
+            box-shadow: 0 10px 40px rgba(0, 200, 0, 0.3);
+        }
+
+        .sale-toast.refund {
+            background: linear-gradient(145deg, rgba(200, 0, 0, 0.95), rgba(150, 0, 0, 0.9));
+            border-color: rgba(255, 0, 0, 0.3);
+            box-shadow: 0 10px 40px rgba(200, 0, 0, 0.3);
+        }
+
+        .sale-toast.exiting {
+            animation: toastSlideOut 0.4s ease-in forwards;
+        }
+
+        @keyframes toastSlideIn {
+            from { opacity: 0; transform: translateX(100px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes toastSlideOut {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(100px); }
+        }
+
+        .toast-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+
+        .toast-body {
+            font-size: 0.95em;
+            opacity: 0.9;
+        }
+
+        .toast-amount {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #ffd700;
+            margin-top: 5px;
+        }
+
+        /* Revenue flash animation */
+        .revenue-flash {
+            animation: revenueFlash 0.6s ease-out;
+        }
+
+        @keyframes revenueFlash {
+            0% { color: #ffd700; }
+            25% { color: #00ff00; text-shadow: 0 0 20px rgba(0,255,0,0.8); }
+            100% { color: #ffd700; }
+        }
+
+        .revenue-flash-refund {
+            animation: refundFlash 0.6s ease-out;
+        }
+
+        @keyframes refundFlash {
+            0% { color: #ffd700; }
+            25% { color: #ff4444; text-shadow: 0 0 20px rgba(255,0,0,0.8); }
+            100% { color: #ffd700; }
+        }
+
         /* Clickable stat cards */
         .stat-card.clickable {
             cursor: pointer;
@@ -1171,7 +1309,17 @@
             <div class="stat-value" id="agent-calls">0</div>
             <div class="stat-label">Agent Calls</div>
         </div>
+        <div class="capacity-gauge" id="capacity-gauge">
+            <div class="gauge-label">Event Capacity</div>
+            <div class="gauge-bar">
+                <div class="gauge-fill" id="gauge-fill" style="width: 0%">0%</div>
+            </div>
+            <div class="gauge-text" id="gauge-text">0 / 0 tickets</div>
+        </div>
     </div>
+
+    <!-- Sale Toast Notifications -->
+    <div class="toast-container" id="toast-container"></div>
 
     <div class="main-content">
         <div class="activity-feed">
@@ -1286,83 +1434,241 @@
         const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
             ? `http://${window.location.hostname}:3001`
             : window.location.origin;
-        const SSE_URL = `${API_URL}/sse`;
+        const WS_URL = API_URL.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
 
         // State
         let stats = {
             ticketsSold: 0,
             revenue: 0,
             checkIns: 0,
-            agentCalls: 0
+            agentCalls: 0,
+            totalCapacity: 0
         };
 
         let activities = [];
         let recentCheckIns = [];
-        let isInitialLoad = true; // Flag to ignore initial data loading
-        let isRefreshing = false; // Flag to prevent refresh loops
+        let isInitialLoad = true;
+        let isRefreshing = false;
+        let ws = null;
 
-        // Connect to SSE
-        function connectSSE() {
+        // Connect to WebSocket
+        function connectWebSocket() {
             const statusEl = document.getElementById('connection-status');
 
-            const eventSource = new EventSource(SSE_URL);
+            ws = new WebSocket(WS_URL);
 
-            eventSource.onopen = () => {
+            ws.onopen = () => {
                 statusEl.className = 'connection-status connected';
                 statusEl.innerHTML = '<div class="live-dot"></div><span>Connected</span>';
-                addActivity('system', 'Connected to Live Feed', 'Real-time updates active');
+                addActivity('system', 'Connected to Live Feed', 'Real-time WebSocket active');
             };
 
-            eventSource.addEventListener('connected', (e) => {
-                const data = JSON.parse(e.data);
-                console.log('SSE Connected:', data);
-            });
+            ws.onmessage = (e) => {
+                const msg = JSON.parse(e.data);
+                handleRealtimeEvent(msg.type, msg.data);
+            };
 
-            eventSource.addEventListener('tool_called', (e) => {
-                const data = JSON.parse(e.data);
-                handleToolCall(data);
-            });
-
-            eventSource.addEventListener('keepalive', (e) => {
-                console.log('Keepalive received');
-            });
-
-            eventSource.addEventListener('refresh', (e) => {
-                console.log('Refresh command received');
-                const data = JSON.parse(e.data);
-                if (data.type === 'full') {
-                    // Full page reload
-                    window.location.reload();
-                } else {
-                    // Soft refresh - reload data without page reload
-                    addActivity('system', 'Dashboard Refreshed', data.message || 'Data reloaded', '🔄');
-                    loadInitialData();
-                    refreshTicker();
-                }
-            });
-
-            eventSource.addEventListener('event_updated', (e) => {
-                const data = JSON.parse(e.data);
-                const actionLabels = {
-                    'details_updated': 'updated event details for',
-                    'image_uploaded': 'uploaded a new image for',
-                    'visibility_changed': 'changed visibility of',
-                };
-                const label = actionLabels[data.action] || 'updated';
-                addActivity('admin', 'Promoter Update', `Promoter ${label} ${data.event_name}`, '✏️');
-                loadInitialData();
-                refreshTicker();
-            });
-
-            eventSource.onerror = () => {
+            ws.onclose = () => {
                 statusEl.className = 'connection-status disconnected';
                 statusEl.innerHTML = '<div class="live-dot" style="background: #ff0000;"></div><span>Reconnecting...</span>';
-
-                setTimeout(() => {
-                    eventSource.close();
-                    connectSSE();
-                }, 5000);
+                setTimeout(connectWebSocket, 3000);
             };
+
+            ws.onerror = () => {
+                // onclose will fire after this
+            };
+        }
+
+        // Handle all real-time events
+        function handleRealtimeEvent(type, data) {
+            switch (type) {
+                case 'connected':
+                    console.log('WebSocket connected:', data);
+                    break;
+                case 'tool_called':
+                    handleToolCall(data);
+                    break;
+                case 'ticket_purchased':
+                    handleTicketPurchased(data);
+                    break;
+                case 'ticket_refunded':
+                    handleTicketRefunded(data);
+                    break;
+                case 'check_in':
+                    handleCheckInEvent(data);
+                    break;
+                case 'check_out':
+                    handleCheckOutEvent(data);
+                    break;
+                case 'refresh':
+                    if (data.type === 'full') {
+                        window.location.reload();
+                    } else {
+                        addActivity('system', 'Dashboard Refreshed', data.message || 'Data reloaded', '🔄');
+                        loadInitialData();
+                    }
+                    break;
+                case 'event_updated':
+                    const actionLabels = {
+                        'details_updated': 'updated event details for',
+                        'image_uploaded': 'uploaded a new image for',
+                        'visibility_changed': 'changed visibility of',
+                    };
+                    const label = actionLabels[data.action] || 'updated';
+                    addActivity('admin', 'Promoter Update', `Promoter ${label} ${data.event_name}`, '✏️');
+                    loadInitialData();
+                    break;
+            }
+        }
+
+        // Handle real-time ticket purchase (from Stripe webhook)
+        function handleTicketPurchased(data) {
+            const qty = data.quantity || 1;
+            const priceDollars = ((data.total_revenue_cents || data.price_cents || 0) / 100);
+
+            // Update stats
+            stats.ticketsSold += qty;
+            stats.revenue += priceDollars;
+            updateStat('tickets-sold', stats.ticketsSold);
+            animateRevenue(stats.revenue);
+            highlightCard('stat-tickets');
+            highlightCard('stat-revenue');
+
+            // Update capacity gauge
+            updateCapacityGauge(stats.ticketsSold, stats.totalCapacity);
+
+            // Show sale toast
+            showSaleToast(data.customer_name, data.tier_name, data.event_name, priceDollars, qty);
+
+            // Add to activity feed
+            addActivity('purchase', 'Ticket Purchased',
+                `${data.customer_name || 'Customer'} bought ${qty} ${data.tier_name || 'ticket'}(s) for ${data.event_name || 'event'}`,
+                '🎟️');
+        }
+
+        // Handle real-time refund
+        function handleTicketRefunded(data) {
+            const count = data.refunded_count || 1;
+            stats.ticketsSold = Math.max(0, stats.ticketsSold - count);
+            updateStat('tickets-sold', stats.ticketsSold);
+
+            // Flash revenue red
+            const revenueEl = document.getElementById('revenue');
+            revenueEl.classList.add('revenue-flash-refund');
+            setTimeout(() => revenueEl.classList.remove('revenue-flash-refund'), 600);
+
+            updateCapacityGauge(stats.ticketsSold, stats.totalCapacity);
+
+            showRefundToast(count);
+            addActivity('system', 'Refund Processed', `${count} ticket(s) refunded`, '💸');
+
+            // Refresh actual stats from server
+            refreshStatsFromServer();
+        }
+
+        // Handle check-in from WebSocket-specific event
+        function handleCheckInEvent(data) {
+            stats.checkIns++;
+            updateStat('checkins', stats.checkIns);
+            addCheckIn(data.guest_name || 'Guest', data.tier_name || 'General');
+        }
+
+        // Handle check-out from WebSocket-specific event
+        function handleCheckOutEvent(data) {
+            stats.checkIns = Math.max(0, stats.checkIns - 1);
+            updateStat('checkins', stats.checkIns);
+            removeCheckIn(data.guest_name || 'Guest');
+        }
+
+        // Show sale toast notification
+        function showSaleToast(name, tier, event, amount, qty) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'sale-toast';
+            toast.innerHTML = `
+                <div class="toast-header">🎟️ New Sale!</div>
+                <div class="toast-body">${name || 'Customer'} bought ${qty > 1 ? qty + 'x ' : ''}${tier || 'ticket'} for "${event || 'event'}"</div>
+                <div class="toast-amount">$${amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+            `;
+            container.appendChild(toast);
+
+            // Keep max 3 toasts
+            while (container.children.length > 3) {
+                container.removeChild(container.firstChild);
+            }
+
+            // Auto-dismiss after 5 seconds
+            setTimeout(() => {
+                toast.classList.add('exiting');
+                setTimeout(() => toast.remove(), 400);
+            }, 5000);
+        }
+
+        // Show refund toast
+        function showRefundToast(count) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'sale-toast refund';
+            toast.innerHTML = `
+                <div class="toast-header">💸 Refund Processed</div>
+                <div class="toast-body">${count} ticket(s) refunded</div>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.add('exiting');
+                setTimeout(() => toast.remove(), 400);
+            }, 5000);
+        }
+
+        // Animate revenue counter
+        function animateRevenue(targetValue) {
+            const el = document.getElementById('revenue');
+            el.classList.add('revenue-flash');
+            setTimeout(() => el.classList.remove('revenue-flash'), 600);
+            el.textContent = targetValue.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0});
+        }
+
+        // Update capacity gauge
+        function updateCapacityGauge(sold, total) {
+            const fill = document.getElementById('gauge-fill');
+            const text = document.getElementById('gauge-text');
+
+            if (total <= 0) {
+                fill.style.width = '0%';
+                fill.textContent = '0%';
+                text.textContent = 'No capacity data';
+                return;
+            }
+
+            const pct = Math.min(100, Math.round((sold / total) * 100));
+            fill.style.width = pct + '%';
+            fill.textContent = pct + '%';
+            text.textContent = `${sold.toLocaleString()} / ${total.toLocaleString()} tickets`;
+
+            // Color thresholds
+            fill.className = 'gauge-fill';
+            if (pct >= 100) fill.classList.add('sold-out');
+            else if (pct >= 80) fill.classList.add('high');
+            else if (pct >= 50) fill.classList.add('medium');
+        }
+
+        // Refresh stats from server (after refund or periodic)
+        async function refreshStatsFromServer() {
+            try {
+                const res = await fetch(`${API_URL}/api/dashboard/stats`);
+                const data = await res.json();
+                stats.ticketsSold = data.tickets_sold || 0;
+                stats.revenue = (data.revenue_cents || 0) / 100;
+                stats.checkIns = data.checked_in || 0;
+                stats.totalCapacity = data.total_capacity || 0;
+
+                document.getElementById('tickets-sold').textContent = stats.ticketsSold;
+                document.getElementById('revenue').textContent = stats.revenue.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                document.getElementById('checkins').textContent = stats.checkIns;
+                updateCapacityGauge(stats.ticketsSold, stats.totalCapacity);
+            } catch (e) {
+                console.error('Stats refresh failed:', e);
+            }
         }
 
         // Handle tool calls
@@ -1832,90 +2138,51 @@
             // Will be updated when event data loads
         }
 
-        // Load initial data
+        // Load initial data via dedicated stats endpoint (no MCP tool calls / no SSE feedback loops)
         async function loadInitialData() {
             try {
-                // Fetch events, venues, and contacts in parallel
-                const [eventsRes, venuesRes, contactsRes, brandingRes] = await Promise.all([
-                    fetch(`${API_URL}/tools/list_events`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ arguments: {} })
-                    }),
-                    fetch(`${API_URL}/tools/list_venues`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ arguments: {} })
-                    }),
-                    fetch(`${API_URL}/tools/list_customers`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ arguments: {} })
-                    }),
-                    fetch(`${API_URL}/tools/get_branding`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ arguments: {} })
-                    })
-                ]);
-
-                const events = await eventsRes.json();
-                const venues = await venuesRes.json();
-                const contacts = await contactsRes.json();
-                const branding = await brandingRes.json();
+                const res = await fetch(`${API_URL}/api/dashboard/stats`);
+                const data = await res.json();
 
                 // Apply branding
-                if (branding.result) {
-                    document.title = `${branding.result.org_name} - Live Operations`;
+                if (data.branding) {
+                    document.title = `${data.branding.org_name} - Live Operations`;
                     const logoImg = document.querySelector('.logo-img');
                     if (logoImg) {
-                        logoImg.src = branding.result.org_logo_url;
-                        logoImg.alt = branding.result.org_name;
+                        logoImg.src = data.branding.org_logo_url;
+                        logoImg.alt = data.branding.org_name;
                     }
                 }
 
-                // Update event count
-                if (events.result) {
-                    const eventList = Array.isArray(events.result) ? events.result : [];
-                    document.getElementById('total-events').textContent = eventList.length;
+                // Update counts
+                document.getElementById('total-events').textContent = data.events || 0;
+                document.getElementById('total-venues').textContent = data.venues || 0;
+                document.getElementById('total-contacts').textContent = data.contacts || 0;
 
-                    if (eventList.length > 0) {
-                        updateEventCard(eventList[0]);
-                        updateTicker(eventList);
+                // Update sales stats
+                stats.ticketsSold = data.tickets_sold || 0;
+                stats.revenue = (data.revenue_cents || 0) / 100;
+                stats.checkIns = data.checked_in || 0;
+                stats.totalCapacity = data.total_capacity || 0;
 
-                        // Get sales for first event
-                        const salesRes = await fetch(`${API_URL}/tools/get_event_sales`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ arguments: { event_id: eventList[0].id } })
-                        });
-                        const sales = await salesRes.json();
+                document.getElementById('tickets-sold').textContent = stats.ticketsSold;
+                document.getElementById('revenue').textContent = stats.revenue.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                document.getElementById('checkins').textContent = stats.checkIns;
 
-                        if (sales.result) {
-                            stats.ticketsSold = sales.result.total_tickets_sold || 0;
-                            stats.revenue = (sales.result.total_revenue_cents || 0) / 100;
-                            stats.checkIns = sales.result.tickets_checked_in || 0;
+                // Update capacity gauge
+                updateCapacityGauge(stats.ticketsSold, stats.totalCapacity);
 
-                            document.getElementById('tickets-sold').textContent = stats.ticketsSold;
-                            document.getElementById('revenue').textContent = stats.revenue.toLocaleString();
-                            document.getElementById('checkins').textContent = stats.checkIns;
-                        }
-                    }
+                // Update next event card
+                if (data.next_event) {
+                    updateEventCard(data.next_event);
                 }
 
-                // Update venue count
-                if (venues.result) {
-                    const venueList = Array.isArray(venues.result) ? venues.result : [];
-                    document.getElementById('total-venues').textContent = venueList.length;
+                // Update ticker with upcoming events
+                if (data.upcoming_events && data.upcoming_events.length > 0) {
+                    updateTicker(data.upcoming_events);
                 }
 
-                // Update contacts count
-                if (contacts.result) {
-                    const contactList = Array.isArray(contacts.result) ? contacts.result : [];
-                    document.getElementById('total-contacts').textContent = contactList.length;
-                }
-
-                // Clear any activities from initial load and show ready message
+                // Clear activities and show ready message
                 document.getElementById('activity-list').innerHTML = '';
                 addActivity('system', 'Dashboard Ready', 'Waiting for voice agent activity...', '🎙️');
 
@@ -2394,9 +2661,12 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
             loadInitialData();
-            connectSSE();
+            connectWebSocket();
             updateCountdown();
             setInterval(updateCountdown, 60000);
+
+            // Periodic stats refresh (catches any missed events)
+            setInterval(refreshStatsFromServer, 30000);
 
             // Make event card clickable
             document.querySelector('.current-event').addEventListener('click', openEventModal);

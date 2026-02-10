@@ -24,7 +24,7 @@ from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -231,6 +231,47 @@ class SSEManager:
 sse_manager = SSEManager()
 
 
+# ============== WebSocket Manager ==============
+
+
+class WebSocketManager:
+    """Manage WebSocket connections and broadcast events to dashboard clients."""
+
+    def __init__(self):
+        self.connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.connections:
+            self.connections.remove(websocket)
+
+    async def broadcast(self, event_type: str, data: dict):
+        """Broadcast event to all connected WebSocket clients."""
+        message = json.dumps(
+            {"type": event_type, "data": data, "timestamp": datetime.utcnow().isoformat()},
+            default=str,
+        )
+        dead = []
+        for ws in self.connections:
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            if ws in self.connections:
+                self.connections.remove(ws)
+
+    @property
+    def client_count(self) -> int:
+        return len(self.connections)
+
+
+ws_manager = WebSocketManager()
+
+
 # ============== FastAPI App ==============
 
 @asynccontextmanager
@@ -279,6 +320,8 @@ async def root():
         "transport": "http/sse",
         "endpoints": {
             "dashboard": "/dashboard",
+            "websocket": "/ws",
+            "dashboard_stats": "/api/dashboard/stats",
             "tools": "/tools",
             "call_tool": "/tools/{tool_name}",
             "sse_stream": "/sse",
@@ -320,6 +363,181 @@ async def dashboard():
             content="<h1>Dashboard not found</h1><p>Looking for: " + str(dashboard_path) + "</p>",
             status_code=404
         )
+
+
+# ============== WebSocket Endpoint ==============
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time dashboard updates."""
+    await ws_manager.connect(websocket)
+    try:
+        # Send initial connection confirmation
+        await websocket.send_text(json.dumps({
+            "type": "connected",
+            "data": {"clients": ws_manager.client_count},
+            "timestamp": datetime.utcnow().isoformat(),
+        }))
+        while True:
+            # Keep connection alive; ignore any client messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+
+
+@app.post("/internal/broadcast")
+async def internal_broadcast(request: Request):
+    """Internal endpoint for cross-process event broadcasting (e.g. Stripe webhooks)."""
+    body = await request.json()
+    event_type = body.get("event_type", "update")
+    data = body.get("data", {})
+    await ws_manager.broadcast(event_type, data)
+    await sse_manager.broadcast(event_type, data)
+    return {"ok": True}
+
+
+@app.get("/api/dashboard/stats")
+async def dashboard_stats():
+    """Single endpoint returning all dashboard data. Avoids MCP tool calls and SSE feedback loops."""
+    from app.models import Event, TicketTier, Ticket, TicketStatus, EventGoer, Venue
+    from sqlalchemy import func as sqlfunc
+    from sqlalchemy.orm import joinedload
+
+    db = SessionLocal()
+    try:
+        # Counts
+        event_count = db.query(sqlfunc.count(Event.id)).scalar() or 0
+        venue_count = db.query(sqlfunc.count(Venue.id)).scalar() or 0
+        contact_count = db.query(sqlfunc.count(EventGoer.id)).scalar() or 0
+
+        # Sales totals
+        sales = (
+            db.query(
+                sqlfunc.count(Ticket.id).label("sold"),
+                sqlfunc.sum(
+                    TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                ).label("revenue"),
+            )
+            .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .first()
+        )
+        total_sold = sales.sold if sales and sales.sold else 0
+        total_revenue = int(sales.revenue) if sales and sales.revenue else 0
+
+        checked_in = (
+            db.query(sqlfunc.count(Ticket.id))
+            .filter(Ticket.status == TicketStatus.CHECKED_IN)
+            .scalar() or 0
+        )
+
+        # Capacity
+        capacity = (
+            db.query(sqlfunc.sum(TicketTier.quantity_available).label("available"))
+            .scalar() or 0
+        )
+
+        # Next upcoming event
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        next_event = (
+            db.query(Event)
+            .options(joinedload(Event.venue))
+            .filter(Event.event_date >= today)
+            .order_by(Event.event_date.asc(), Event.event_time.asc())
+            .first()
+        )
+
+        next_event_data = None
+        next_event_sold = 0
+        next_event_available = 0
+        next_event_checked_in = 0
+        next_event_revenue = 0
+        if next_event:
+            ne_stats = (
+                db.query(
+                    sqlfunc.count(Ticket.id).label("sold"),
+                    sqlfunc.sum(
+                        TicketTier.price - sqlfunc.coalesce(Ticket.discount_amount_cents, 0)
+                    ).label("revenue"),
+                )
+                .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+                .filter(
+                    TicketTier.event_id == next_event.id,
+                    Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+                )
+                .first()
+            )
+            next_event_sold = ne_stats.sold if ne_stats and ne_stats.sold else 0
+            next_event_revenue = int(ne_stats.revenue) if ne_stats and ne_stats.revenue else 0
+            next_event_checked_in = (
+                db.query(sqlfunc.count(Ticket.id))
+                .join(TicketTier)
+                .filter(
+                    TicketTier.event_id == next_event.id,
+                    Ticket.status == TicketStatus.CHECKED_IN,
+                )
+                .scalar() or 0
+            )
+            next_event_available = (
+                db.query(sqlfunc.sum(TicketTier.quantity_available))
+                .filter(TicketTier.event_id == next_event.id)
+                .scalar() or 0
+            )
+            next_event_data = {
+                "id": next_event.id,
+                "name": next_event.name,
+                "event_date": next_event.event_date,
+                "event_time": next_event.event_time,
+                "venue_name": next_event.venue.name if next_event.venue else None,
+                "venue_address": next_event.venue.address if next_event.venue else None,
+                "image_url": next_event.image_url,
+                "promo_video_url": next_event.promo_video_url,
+                "tickets_sold": next_event_sold,
+                "tickets_available": next_event_available,
+                "tickets_checked_in": next_event_checked_in,
+                "revenue_cents": next_event_revenue,
+            }
+
+        # All events for ticker
+        events_list = (
+            db.query(Event)
+            .options(joinedload(Event.venue))
+            .filter(Event.event_date >= today)
+            .order_by(Event.event_date.asc())
+            .all()
+        )
+        events_data = [
+            {
+                "id": e.id,
+                "name": e.name,
+                "event_date": e.event_date,
+                "event_time": e.event_time,
+                "venue_name": e.venue.name if e.venue else None,
+            }
+            for e in events_list
+        ]
+
+        # Branding
+        from app.config import get_settings
+        settings = get_settings()
+
+        return {
+            "events": event_count,
+            "venues": venue_count,
+            "contacts": contact_count,
+            "tickets_sold": total_sold,
+            "revenue_cents": total_revenue,
+            "checked_in": checked_in,
+            "total_capacity": capacity,
+            "next_event": next_event_data,
+            "upcoming_events": events_data,
+            "branding": {
+                "org_name": settings.org_name,
+                "org_logo_url": getattr(settings, "org_logo_url", ""),
+            },
+        }
+    finally:
+        db.close()
 
 
 @app.get("/tools")
@@ -381,21 +599,37 @@ async def call_tool(tool_name: str, request: ToolCallRequest, session_id: Option
             if "ticket_id" in request.arguments:
                 session.last_ticket_id = request.arguments["ticket_id"]
 
-        # Broadcast event via SSE with full result
-        await sse_manager.broadcast("tool_called", {
+        # Broadcast event via SSE and WebSocket
+        broadcast_data = {
             "tool": tool_name,
             "arguments": request.arguments,
             "success": "error" not in result,
             "result": result,
-        })
+        }
+        await sse_manager.broadcast("tool_called", broadcast_data)
+        await ws_manager.broadcast("tool_called", broadcast_data)
+
+        # Specific check-in/check-out broadcasts for dashboard
+        if tool_name in ("check_in_ticket", "check_in_by_name") and isinstance(result, dict) and result.get("success"):
+            await ws_manager.broadcast("check_in", {
+                "guest_name": result.get("guest_name") or result.get("guest", {}).get("name", "Guest"),
+                "tier_name": result.get("tier_name") or result.get("ticket", {}).get("tier", "General"),
+                "event_name": result.get("event_name", ""),
+            })
+        elif tool_name == "check_out_by_name" and isinstance(result, dict) and result.get("success"):
+            await ws_manager.broadcast("check_out", {
+                "guest_name": result.get("guest", {}).get("name") or request.arguments.get("name", "Guest"),
+            })
 
         # Special handling for refresh_dashboard tool
         if tool_name == "refresh_dashboard" and result.get("success"):
-            await sse_manager.broadcast("refresh", {
+            refresh_data = {
                 "type": result.get("type", "soft"),
                 "message": result.get("message", "Dashboard refreshed"),
                 "timestamp": datetime.utcnow().isoformat(),
-            })
+            }
+            await sse_manager.broadcast("refresh", refresh_data)
+            await ws_manager.broadcast("refresh", refresh_data)
 
         return {
             "success": "error" not in result,
@@ -480,6 +714,51 @@ async def sse_stream(request: Request, session_id: Optional[str] = None):
             sse_manager.disconnect(session_id)
 
     return EventSourceResponse(event_generator())
+
+
+# ============== WebSocket for Dashboard ==============
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time dashboard updates.
+
+    Events pushed to clients:
+    - ticket_purchased: When a ticket is purchased (from Stripe webhook)
+    - ticket_refunded: When a ticket is refunded
+    - check_in: When a guest checks in
+    - check_out: When a guest checks out
+    - tool_called: When any MCP tool is executed
+    - refresh: Dashboard refresh command
+    - stats_update: Periodic stats snapshot
+    """
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive; ignore client messages
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
+
+
+@app.post("/internal/broadcast")
+async def internal_broadcast(request: Request):
+    """
+    Internal endpoint for cross-process event broadcasting.
+
+    Called by the main app (Stripe webhooks, REST API) to push events
+    to WebSocket dashboard clients on this server.
+    """
+    body = await request.json()
+    event_type = body.get("event_type", "update")
+    data = body.get("data", {})
+    await ws_manager.broadcast(event_type, data)
+    # Also push to SSE for any SSE clients
+    await sse_manager.broadcast(event_type, data)
+    return {"ok": True, "clients": ws_manager.client_count}
 
 
 # ============== MCP Protocol SSE Transport ==============
@@ -850,6 +1129,14 @@ async def voice_action(request: Request, use_llm: bool = True):
                 try:
                     result = await _execute_tool(tool_name, arguments, db)
 
+                    # Broadcast to dashboard via WebSocket
+                    await ws_manager.broadcast("tool_called", {
+                        "tool": tool_name,
+                        "arguments": arguments,
+                        "success": "error" not in result,
+                        "result": result,
+                    })
+
                     # Generate speech response
                     if "error" in result:
                         speech = f"Sorry, there was an error: {result['error']}"
@@ -906,6 +1193,14 @@ async def voice_action(request: Request, use_llm: bool = True):
     db = SessionLocal()
     try:
         result = await _execute_tool(tool_name, arguments, db)
+
+        # Broadcast to dashboard via WebSocket
+        await ws_manager.broadcast("tool_called", {
+            "tool": tool_name,
+            "arguments": arguments,
+            "success": "error" not in result,
+            "result": result,
+        })
 
         # Format response for voice
         if "error" in result:

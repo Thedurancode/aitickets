@@ -102,6 +102,26 @@ async def handle_checkout_completed(session_data: dict, db: Session):
 
     db.commit()
 
+    # Broadcast to real-time dashboard (best-effort, non-blocking)
+    if tickets:
+        try:
+            import requests as http_requests
+            first = tickets[0]
+            http_requests.post("http://localhost:3001/internal/broadcast", json={
+                "event_type": "ticket_purchased",
+                "data": {
+                    "event_name": first.ticket_tier.event.name,
+                    "event_id": first.ticket_tier.event_id,
+                    "customer_name": first.event_goer.name,
+                    "tier_name": first.ticket_tier.name,
+                    "price_cents": first.ticket_tier.price,
+                    "quantity": len(tickets),
+                    "total_revenue_cents": sum(t.ticket_tier.price for t in tickets),
+                },
+            }, timeout=2)
+        except Exception:
+            pass
+
     # Send confirmation emails
     for ticket in tickets:
         event = ticket.ticket_tier.event
@@ -147,6 +167,20 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
                 event_id = ticket.ticket_tier.event_id
 
     db.commit()
+
+    # Broadcast refund to real-time dashboard
+    if refunded_count > 0:
+        try:
+            import requests as http_requests
+            http_requests.post("http://localhost:3001/internal/broadcast", json={
+                "event_type": "ticket_refunded",
+                "data": {
+                    "event_id": event_id,
+                    "refunded_count": refunded_count,
+                },
+            }, timeout=2)
+        except Exception:
+            pass
 
     # Auto-notify waitlisted people when tickets freed up
     if refunded_count > 0 and event_id:
