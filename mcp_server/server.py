@@ -1425,6 +1425,75 @@ async def list_tools():
                 "required": ["post_id"],
             },
         ),
+        # ============== Predictive Analytics Tools ==============
+        Tool(
+            name="predict_demand",
+            description="Predict demand and sell-out probability for an event. Uses ticket velocity, waitlist pressure, page views, historical patterns, and time scarcity to forecast whether the event will sell out and when. Returns a demand score (0-100), sell-out probability, projected sell-out date, and per-tier breakdown.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID to predict demand for"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_pricing_suggestions",
+            description="Get dynamic pricing suggestions for an event's ticket tiers. Analyzes demand signals, sell-through rate, time until event, and price elasticity to recommend price adjustments. Returns per-tier suggestions with recommended prices, confidence levels, and reasoning.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID to get pricing suggestions for"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="predict_churn",
+            description="Identify customers at risk of churning using RFM (Recency, Frequency, Monetary) analysis. Returns a ranked list of at-risk customers with their RFM scores, churn risk level, days since last activity, and personalized re-engagement suggestions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "min_days_inactive": {"type": "integer", "description": "Minimum days since last activity to consider (default: 30)"},
+                    "limit": {"type": "integer", "description": "Maximum number of at-risk customers to return (default: 50)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_customer_segments",
+            description="Segment all customers into groups using RFM analysis. Returns segments like Champions, Loyal, Potential Loyalists, At Risk, Hibernating, and Lost with counts, average spend, and representative customers per segment.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="recommend_events",
+            description="Get personalized event recommendations for a customer. Uses a hybrid algorithm combining content-based filtering (past category/venue preferences), collaborative filtering (similar customers' behavior), and popularity signals. Provide either customer_id or customer_email.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "customer_id": {"type": "integer", "description": "EventGoer ID"},
+                    "customer_email": {"type": "string", "description": "Customer email (alternative to customer_id)"},
+                    "limit": {"type": "integer", "description": "Max recommendations to return (default: 5)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_trending_events",
+            description="Get currently trending events ranked by a composite score of recent page views, ticket sales velocity, waitlist signups, and social buzz. Useful for identifying hot events to promote or analyze.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Look-back window in days (default: 7)"},
+                    "limit": {"type": "integer", "description": "Max events to return (default: 10)"},
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -5766,6 +5835,56 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "errors": errors,
             "reason": reason,
         }
+
+    # ============== Predictive Analytics Tools ==============
+    elif name == "predict_demand":
+        from app.services.analytics_engine import predict_demand
+
+        result = predict_demand(db, arguments["event_id"])
+        return result
+
+    elif name == "get_pricing_suggestions":
+        from app.services.analytics_engine import get_pricing_suggestions
+
+        result = get_pricing_suggestions(db, arguments["event_id"])
+        return result
+
+    elif name == "predict_churn":
+        from app.services.analytics_engine import predict_churn
+
+        result = predict_churn(
+            db,
+            min_days_inactive=arguments.get("min_days_inactive", 30),
+            limit=arguments.get("limit", 50),
+        )
+        return result
+
+    elif name == "get_customer_segments":
+        from app.services.analytics_engine import get_customer_segments
+
+        result = get_customer_segments(db)
+        return result
+
+    elif name == "recommend_events":
+        from app.services.analytics_engine import recommend_events
+
+        result = recommend_events(
+            db,
+            customer_id=arguments.get("customer_id"),
+            customer_email=arguments.get("customer_email"),
+            limit=arguments.get("limit", 5),
+        )
+        return result
+
+    elif name == "get_trending_events":
+        from app.services.analytics_engine import get_trending_events
+
+        result = get_trending_events(
+            db,
+            days=arguments.get("days", 7),
+            limit=arguments.get("limit", 10),
+        )
+        return result
 
     return {"error": f"Unknown tool: {name}"}
 

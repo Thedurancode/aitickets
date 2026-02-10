@@ -158,6 +158,29 @@ ACTION_MAP = {
     "create list": "create_marketing_list",
     "marketing lists": "list_marketing_lists",
     "send to list": "send_to_marketing_list",
+    # Predictive analytics
+    "predict demand": "predict_demand",
+    "demand forecast": "predict_demand",
+    "will it sell out": "predict_demand",
+    "sell out prediction": "predict_demand",
+    "pricing suggestions": "get_pricing_suggestions",
+    "dynamic pricing": "get_pricing_suggestions",
+    "price recommendation": "get_pricing_suggestions",
+    "suggest prices": "get_pricing_suggestions",
+    "churn prediction": "predict_churn",
+    "at risk customers": "predict_churn",
+    "who's churning": "predict_churn",
+    "predict churn": "predict_churn",
+    "customer segments": "get_customer_segments",
+    "segment customers": "get_customer_segments",
+    "rfm analysis": "get_customer_segments",
+    "recommend events": "recommend_events",
+    "event recommendations": "recommend_events",
+    "what should they see": "recommend_events",
+    "trending events": "get_trending_events",
+    "what's trending": "get_trending_events",
+    "hot events": "get_trending_events",
+    "trending": "get_trending_events",
 }
 
 
@@ -1946,6 +1969,73 @@ def _generate_speech_response(tool_name: str, result: dict | list) -> str:
     elif tool_name == "send_to_marketing_list":
         if isinstance(result, dict):
             return result.get("message", "Sent to list.")
+
+    # ============== Predictive Analytics ==============
+    elif tool_name == "predict_demand":
+        if isinstance(result, dict) and "error" not in result:
+            prob = result.get("sellout_probability_pct", 0)
+            score = result.get("demand_score", 0)
+            event_name = result.get("event_name", "this event")
+            if prob >= 80:
+                return f"{event_name} has very high demand — {prob}% chance of selling out."
+            elif prob >= 50:
+                return f"{event_name} is trending well with a {prob}% sell-out probability and a demand score of {score}."
+            else:
+                return f"{event_name} has moderate demand — {prob}% sell-out chance. Demand score is {score} out of 100."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't predict demand.")
+
+    elif tool_name == "get_pricing_suggestions":
+        if isinstance(result, dict) and "error" not in result:
+            tiers = result.get("tiers", [])
+            changes = [t for t in tiers if t.get("action") != "hold"]
+            if changes:
+                summaries = []
+                for t in changes[:3]:
+                    summaries.append(f"{t['tier_name']}: {t['action']} to ${t['suggested_price_dollars']}")
+                return f"Pricing suggestions: {'; '.join(summaries)}."
+            return "Current pricing looks good — no changes recommended."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't generate pricing suggestions.")
+
+    elif tool_name == "predict_churn":
+        if isinstance(result, dict) and "error" not in result:
+            total = result.get("total_at_risk", 0)
+            high = result.get("high_risk_count", 0)
+            if total == 0:
+                return "No customers flagged as at risk of churning. Looking good!"
+            return f"Found {total} at-risk customers, {high} are high risk. Check the dashboard for details and re-engagement suggestions."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't run churn prediction.")
+
+    elif tool_name == "get_customer_segments":
+        if isinstance(result, dict) and "error" not in result:
+            segments = result.get("segments", [])
+            total = result.get("total_customers", 0)
+            summary = ", ".join(f"{s['count']} {s['segment_name']}" for s in segments[:4])
+            return f"Segmented {total} customers: {summary}."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't segment customers.")
+
+    elif tool_name == "recommend_events":
+        if isinstance(result, dict) and "error" not in result:
+            recs = result.get("recommendations", [])
+            if not recs:
+                return "No upcoming events to recommend for this customer."
+            names = [r["event_name"] for r in recs[:3]]
+            return f"Top recommendations: {', '.join(names)}."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't generate recommendations.")
+
+    elif tool_name == "get_trending_events":
+        if isinstance(result, dict) and "error" not in result:
+            events = result.get("trending", [])
+            if not events:
+                return "No events are trending right now."
+            top = events[0]
+            return f"Top trending: {top['event_name']} with a trend score of {top['trend_score']}. {len(events)} events trending total."
+        elif isinstance(result, dict):
+            return result.get("error", "Couldn't get trending events.")
 
     # Default response
     return "Done."
