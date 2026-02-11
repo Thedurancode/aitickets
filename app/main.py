@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
 from app.database import init_db
@@ -38,6 +39,52 @@ settings = get_settings()
 uploads_dir = Path(settings.uploads_dir)
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
+
+# ============== API Key Auth Middleware ==============
+# Protects /api/* write endpoints when MCP_API_KEY is set.
+# Public pages (/events, /purchase-success, etc.) remain open.
+
+REST_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc",
+                     "/events", "/purchase-success", "/purchase-cancelled",
+                     "/unsubscribe", "/webhooks/stripe"}
+REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view")
+
+
+class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        settings = get_settings()
+        # REST API uses admin_api_key if set, otherwise falls back to mcp_api_key
+        api_key = settings.admin_api_key or settings.mcp_api_key
+
+        if not api_key:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Allow public paths and prefixes
+        if path in REST_PUBLIC_PATHS:
+            return await call_next(request)
+        if any(path.startswith(p) for p in REST_PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        # Check for API key — accept either x-mcp-key or x-admin-key header
+        provided_key = (
+            request.headers.get("x-admin-key")
+            or request.headers.get("x-mcp-key")
+            or request.query_params.get("api_key")
+        )
+
+        if not provided_key or provided_key != api_key:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized", "detail": "Invalid or missing API key."},
+            )
+
+        return await call_next(request)
+
+
+app.add_middleware(ApiKeyAuthMiddleware)
 
 
 @app.on_event("startup")

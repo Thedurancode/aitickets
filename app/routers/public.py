@@ -172,9 +172,23 @@ def event_detail(
 
 # ============== Magic Link Admin ==============
 
-def _validate_token(token: str, event_id: int):
-    """Validate a magic link token. Returns True or raises 403."""
-    # Import the shared token store from MCP server
+def _validate_token(token: str, event_id: int, db: Session = None):
+    """Validate a magic link token. Checks DB first, falls back to in-memory. Returns True or raises 403."""
+    from app.models import AdminMagicLink
+
+    # Try database first (persistent, survives restarts)
+    if db:
+        link = db.query(AdminMagicLink).filter(
+            AdminMagicLink.token == token,
+            AdminMagicLink.event_id == event_id,
+        ).first()
+
+        if link:
+            if datetime.utcnow() > link.expires_at.replace(tzinfo=None) if link.expires_at.tzinfo else link.expires_at:
+                raise HTTPException(status_code=403, detail="This link has expired. Request a new one.")
+            return True
+
+    # Fall back to in-memory store (backward compat for tokens created before migration)
     import sys
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
     from mcp_server.server import magic_link_tokens
@@ -197,7 +211,7 @@ def event_admin_page(
     db: Session = Depends(get_db),
 ):
     """Magic-link protected event admin page."""
-    _validate_token(token, event_id)
+    _validate_token(token, event_id, db)
 
     event = db.query(Event).options(
         joinedload(Event.venue),
@@ -267,7 +281,7 @@ async def admin_update_event(
     token = body.get("token")
     if not token:
         raise HTTPException(status_code=403, detail="Token required")
-    _validate_token(token, event_id)
+    _validate_token(token, event_id, db)
 
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
@@ -323,7 +337,7 @@ async def admin_upload_image(
     db: Session = Depends(get_db),
 ):
     """Token-protected image upload from admin page."""
-    _validate_token(token, event_id)
+    _validate_token(token, event_id, db)
 
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:

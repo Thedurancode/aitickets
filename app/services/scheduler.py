@@ -231,7 +231,8 @@ def bootstrap_existing_reminders():
 
 def bootstrap_automation_jobs():
     """
-    Register recurring interval jobs for cart recovery, trigger evaluation, and surveys.
+    Register recurring interval jobs for cart recovery, trigger evaluation, surveys,
+    and conversation session cleanup.
     Called once after scheduler init. Uses replace_existing to be idempotent.
     """
     scheduler = get_scheduler()
@@ -263,7 +264,16 @@ def bootstrap_automation_jobs():
         name="Post-Event Survey Check (hourly)",
     )
 
-    logger.info("Bootstrapped 3 automation interval jobs")
+    # Conversation session cleanup: every 5 minutes
+    scheduler.add_job(
+        _run_session_cleanup,
+        trigger=IntervalTrigger(minutes=5),
+        id="automation_session_cleanup",
+        replace_existing=True,
+        name="Conversation Session Cleanup (every 5min)",
+    )
+
+    logger.info("Bootstrapped 4 automation interval jobs")
 
 
 def _run_cart_recovery():
@@ -291,3 +301,15 @@ def _run_survey_check():
         run_survey_job()
     except Exception as e:
         logger.error(f"Survey job error: {e}")
+
+
+def _run_session_cleanup():
+    """Wrapper for conversation session cleanup scheduled job."""
+    db = SessionLocal()
+    try:
+        from app.services.conversation_memory import cleanup_expired_sessions
+        cleanup_expired_sessions(db)
+    except Exception as e:
+        logger.error(f"Session cleanup job error: {e}")
+    finally:
+        db.close()

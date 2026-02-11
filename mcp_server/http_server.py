@@ -24,6 +24,7 @@ from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 import uuid
 
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
@@ -37,6 +38,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from app.config import get_settings
 from app.database import SessionLocal, init_db
 from mcp_server.server import list_tools, _execute_tool
 
@@ -354,6 +356,61 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ============== API Key Auth Middleware ==============
+# Protects MCP/voice endpoints when MCP_API_KEY is set.
+# If MCP_API_KEY is empty, auth is disabled (backward compatible).
+# Voice agents send the key via X-MCP-Key header or ?api_key= query param.
+
+# Paths that are always public (no auth required)
+PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/favicon.ico",
+                "/dashboard", "/events", "/purchase-success", "/purchase-cancelled",
+                "/unsubscribe", "/webhooks/stripe"}
+
+# Prefixes that are always public
+PUBLIC_PREFIXES = ("/events/", "/uploads/", "/static/", "/api/events/", "/api/page-view")
+
+
+class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        settings = get_settings()
+        api_key = settings.mcp_api_key
+
+        # Skip auth if no key is configured
+        if not api_key:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Allow public paths through
+        if path in PUBLIC_PATHS:
+            return await call_next(request)
+
+        # Allow public prefixes through
+        if any(path.startswith(p) for p in PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        # Allow WebSocket upgrades (handled separately)
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+
+        # Check for API key in header or query param
+        provided_key = (
+            request.headers.get("x-mcp-key")
+            or request.query_params.get("api_key")
+        )
+
+        if not provided_key or provided_key != api_key:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized", "detail": "Invalid or missing API key. Send via X-MCP-Key header or ?api_key= query param."},
+            )
+
+        return await call_next(request)
+
+
+app.add_middleware(ApiKeyAuthMiddleware)
 
 
 # ============== Endpoints ==============
@@ -1129,52 +1186,195 @@ async def chat_completions(request: ChatRequest):
 @app.post("/voice/action")
 async def voice_action(request: Request, use_llm: bool = True):
     """
-    Simplified endpoint for voice agents.
+    Simplified endpoint for voice agents with conversation memory.
 
     Accepts natural language commands and uses LLM to route to the appropriate tool.
+    Supports multi-turn conversations via session management.
 
     Args:
         use_llm: If True (default), use LLM-based routing. If False, use keyword matching.
 
+    Headers:
+        X-Session-ID: Optional session ID for multi-turn conversations
+
     Example requests:
     {"action": "list_events"}
     {"action": "check in John Smith for tonight's event"}
-    {"action": "how much revenue did we make last week?"}
-    {"action": "send a reminder to everyone coming to the Raptors game"}
+    {"action": "also his wife"}  (uses session context)
+    {"action": "the usual for mike@example.com"}  (uses purchase history)
     """
     body = await request.json()
     action = body.get("action", "")
 
-    # Try LLM-based routing first (if enabled and configured)
-    if use_llm and action:
-        try:
-            from app.services.llm_router import route_with_fallback
-            tools = await list_tools()
+    # Get or create conversation session
+    session_id = (
+        request.headers.get("X-Session-ID") or
+        body.get("session_id")
+    )
 
-            # Build context from session or body
-            context = {
-                "last_event_id": body.get("event_id") or body.get("last_event_id"),
-                "last_customer_id": body.get("customer_id") or body.get("last_customer_id"),
-            }
+    db = SessionLocal()
+    session = None
+    conversation_history = []
+    entity_hints = {}
 
-            # Route using LLM
-            route_result = await route_with_fallback(
-                user_input=action,
-                tools=tools,
-                keyword_map=ACTION_MAP,  # Fallback to keyword matching
-                context=context,
-                org_name=os.getenv("ORG_NAME", "Event Tickets"),
-            )
+    try:
+        # Initialize conversation memory if session requested
+        if session_id or action:
+            try:
+                from app.services.conversation_memory import (
+                    get_or_create_session, add_turn, get_history_for_llm,
+                    resolve_references, extract_entities_from_result,
+                    update_entity_context
+                )
 
-            if route_result.get("tool"):
-                tool_name = route_result["tool"]
-                # Merge LLM-extracted arguments with any explicit arguments from body
-                arguments = {k: v for k, v in body.items() if k != "action"}
-                arguments.update(route_result.get("arguments", {}))
+                session, is_new = get_or_create_session(db, session_id)
+                session_id = session.session_id
 
-                db = SessionLocal()
-                try:
+                # Get conversation history for LLM context
+                if not is_new:
+                    conversation_history = get_history_for_llm(session)
+
+                # Resolve references in user input
+                if action:
+                    entity_hints = resolve_references(action, session, db)
+
+                # Add user turn to history
+                if action:
+                    add_turn(db, session, "user", action)
+
+            except ImportError:
+                # Conversation memory not available, continue without it
+                pass
+            except Exception as e:
+                print(f"Conversation memory error: {e}")
+
+        # Check for confirmation resolution first (before LLM routing)
+        if session and entity_hints.get("confirmation"):
+            conf = entity_hints["confirmation"]
+            if conf.get("execute") and conf.get("action"):
+                # User confirmed - execute the pending action directly
+                tool_name = conf["action"]
+                arguments = conf.get("args", {})
+                context_info = conf.get("context", {})
+
+                # Handle disambiguation selection
+                if tool_name == "disambiguate_customer" and conf.get("selected"):
+                    selected = conf["selected"]
+                    # Get the original intent from context or default to check_in
+                    tool_name = context_info.get("original_action", "check_in_by_name")
+                    arguments = {"name": selected.get("name")} if selected.get("name") else {}
+
+                if tool_name and tool_name != "disambiguate_customer":
                     result = await _execute_tool(tool_name, arguments, db)
+
+                    # Track last action
+                    try:
+                        from app.services.conversation_memory import set_last_action
+                        if "error" not in result:
+                            set_last_action(db, session, tool_name, arguments, result)
+                    except Exception:
+                        pass
+
+                    # Generate response
+                    if "error" in result:
+                        speech = f"Sorry, there was an error: {result['error']}"
+                        success = False
+                    else:
+                        speech = _generate_speech_response(tool_name, result)
+                        success = True
+
+                    # Add assistant turn
+                    try:
+                        from app.services.conversation_memory import add_turn
+                        add_turn(db, session, "assistant", speech, tool_calls=[{
+                            "tool": tool_name,
+                            "arguments": arguments
+                        }])
+                    except Exception:
+                        pass
+
+                    response = {
+                        "success": success,
+                        "speech": speech,
+                        "data": result,
+                        "routing": {"method": "confirmation", "tool": tool_name}
+                    }
+                    if session_id:
+                        response["session_id"] = session_id
+                    return response
+
+            elif conf.get("cancelled"):
+                # User rejected - acknowledge and continue
+                speech = "Cancelled. What would you like to do instead?"
+
+                try:
+                    from app.services.conversation_memory import add_turn
+                    add_turn(db, session, "assistant", speech)
+                except Exception:
+                    pass
+
+                response = {
+                    "success": True,
+                    "speech": speech,
+                    "data": {},
+                    "routing": {"method": "confirmation_cancelled", "tool": None}
+                }
+                if session_id:
+                    response["session_id"] = session_id
+                return response
+
+        # Try LLM-based routing first (if enabled and configured)
+        if use_llm and action:
+            try:
+                from app.services.llm_router import route_with_fallback
+                tools = await list_tools()
+
+                # Build context from session or body
+                context = {
+                    "last_event_id": body.get("event_id") or body.get("last_event_id"),
+                    "last_customer_id": body.get("customer_id") or body.get("last_customer_id"),
+                }
+
+                # Add session context
+                if session:
+                    if session.current_event_id:
+                        context["last_event_id"] = session.current_event_id
+                    if session.current_customer_id:
+                        context["last_customer_id"] = session.current_customer_id
+
+                # Route using LLM with conversation history and entity hints
+                route_result = await route_with_fallback(
+                    user_input=action,
+                    tools=tools,
+                    keyword_map=ACTION_MAP,
+                    context=context,
+                    org_name=os.getenv("ORG_NAME", "Event Tickets"),
+                    conversation_history=conversation_history,
+                    entity_hints=entity_hints,
+                )
+
+                if route_result.get("tool"):
+                    tool_name = route_result["tool"]
+                    # Merge LLM-extracted arguments with any explicit arguments from body
+                    arguments = {k: v for k, v in body.items() if k not in ("action", "session_id")}
+                    arguments.update(route_result.get("arguments", {}))
+
+                    result = await _execute_tool(tool_name, arguments, db)
+
+                    # Extract entities from result and update session
+                    if session:
+                        try:
+                            from app.services.conversation_memory import (
+                                extract_entities_from_result, update_entity_context,
+                                set_last_action
+                            )
+                            entities = extract_entities_from_result(tool_name, result)
+                            update_entity_context(db, session, entities)
+                            # Track last action for undo support
+                            if "error" not in result:
+                                set_last_action(db, session, tool_name, arguments, result)
+                        except Exception as e:
+                            print(f"Entity extraction error: {e}")
 
                     # Broadcast to dashboard via WebSocket
                     await ws_manager.broadcast("tool_called", {
@@ -1192,6 +1392,17 @@ async def voice_action(request: Request, use_llm: bool = True):
                         speech = _generate_speech_response(tool_name, result)
                         success = True
 
+                    # Add assistant turn to history
+                    if session:
+                        try:
+                            from app.services.conversation_memory import add_turn
+                            add_turn(db, session, "assistant", speech, tool_calls=[{
+                                "tool": tool_name,
+                                "arguments": arguments
+                            }])
+                        except Exception:
+                            pass
+
                     # Prepend any pending announcements
                     from app.routers.announcement_queue import (
                         get_pending_announcements, format_announcement_speech, clear_announcements,
@@ -1202,7 +1413,7 @@ async def voice_action(request: Request, use_llm: bool = True):
                         speech = f"{announcement} {speech}"
                         clear_announcements()
 
-                    return {
+                    response = {
                         "success": success,
                         "speech": speech,
                         "data": result,
@@ -1212,34 +1423,128 @@ async def voice_action(request: Request, use_llm: bool = True):
                             "extracted_args": route_result.get("arguments", {}),
                         }
                     }
-                finally:
-                    db.close()
 
-            # LLM chose not to call a tool - return its message
-            elif route_result.get("message"):
-                return {
-                    "success": True,
-                    "speech": route_result["message"],
-                    "data": {},
-                    "routing": {"method": "llm", "tool": None}
-                }
+                    # Include session_id for multi-turn conversations
+                    if session_id:
+                        response["session_id"] = session_id
 
-        except ImportError:
-            # LLM router not available, fall through to keyword matching
-            pass
-        except Exception as e:
-            # Log error but fall through to keyword matching
-            print(f"LLM routing error: {e}")
+                    return response
 
-    # Fall back to keyword matching
-    tool_name = ACTION_MAP.get(action.lower(), action)
+                # LLM chose not to call a tool - return its message
+                elif route_result.get("message"):
+                    speech = route_result["message"]
 
-    # Extract arguments
-    arguments = {k: v for k, v in body.items() if k != "action"}
+                    # Check if this is a disambiguation question - set pending confirmation
+                    if session and entity_hints.get("disambiguation_needed"):
+                        try:
+                            from app.services.conversation_memory import set_pending_confirmation
+                            ambiguous = entity_hints.get("ambiguous_customers", [])
+                            if ambiguous:
+                                # Store disambiguation as pending confirmation
+                                options = [
+                                    {"customer_id": c["id"], "name": c["name"], "email": c.get("email")}
+                                    for c in ambiguous
+                                ]
+                                set_pending_confirmation(
+                                    db, session,
+                                    action="disambiguate_customer",
+                                    args={},
+                                    context={"action_type": "disambiguation"},
+                                    options=options,
+                                    question=speech
+                                )
+                        except Exception as e:
+                            print(f"Set pending confirmation error: {e}")
 
-    db = SessionLocal()
-    try:
+                    # Check if speech looks like a confirmation question
+                    elif session and "?" in speech:
+                        try:
+                            from app.services.conversation_memory import set_pending_confirmation
+                            # Detect if LLM is asking to confirm an action
+                            speech_lower = speech.lower()
+                            if any(phrase in speech_lower for phrase in [
+                                "check in", "would you like", "do you want", "should i",
+                                "confirm", "proceed", "purchase", "refund"
+                            ]):
+                                # Extract likely action from context
+                                likely_action = None
+                                likely_args = {}
+                                context_info = {}
+
+                                # Infer action from entity hints
+                                if entity_hints.get("likely_customer"):
+                                    lc = entity_hints["likely_customer"]
+                                    likely_args["name"] = lc.get("name")
+                                    context_info["customer"] = lc
+
+                                if entity_hints.get("time_context", {}).get("event_name"):
+                                    context_info["event"] = entity_hints["time_context"]
+
+                                if "check in" in speech_lower:
+                                    likely_action = "check_in_by_name"
+                                elif "purchase" in speech_lower or "ticket" in speech_lower:
+                                    likely_action = "purchase_ticket"
+                                elif "refund" in speech_lower:
+                                    likely_action = "refund_ticket"
+
+                                if likely_action:
+                                    set_pending_confirmation(
+                                        db, session,
+                                        action=likely_action,
+                                        args=likely_args,
+                                        context=context_info,
+                                        question=speech
+                                    )
+                        except Exception as e:
+                            print(f"Set pending confirmation error: {e}")
+
+                    # Add assistant turn
+                    if session:
+                        try:
+                            from app.services.conversation_memory import add_turn
+                            add_turn(db, session, "assistant", speech)
+                        except Exception:
+                            pass
+
+                    response = {
+                        "success": True,
+                        "speech": speech,
+                        "data": {},
+                        "routing": {"method": "llm", "tool": None}
+                    }
+                    if session_id:
+                        response["session_id"] = session_id
+                    return response
+
+            except ImportError:
+                # LLM router not available, fall through to keyword matching
+                pass
+            except Exception as e:
+                # Log error but fall through to keyword matching
+                print(f"LLM routing error: {e}")
+
+        # Fall back to keyword matching
+        tool_name = ACTION_MAP.get(action.lower(), action)
+
+        # Extract arguments
+        arguments = {k: v for k, v in body.items() if k not in ("action", "session_id")}
+
         result = await _execute_tool(tool_name, arguments, db)
+
+        # Extract entities from result and update session
+        if session:
+            try:
+                from app.services.conversation_memory import (
+                    extract_entities_from_result, update_entity_context,
+                    set_last_action
+                )
+                entities = extract_entities_from_result(tool_name, result)
+                update_entity_context(db, session, entities)
+                # Track last action for undo support
+                if "error" not in result:
+                    set_last_action(db, session, tool_name, arguments, result)
+            except Exception:
+                pass
 
         # Broadcast to dashboard via WebSocket
         await ws_manager.broadcast("tool_called", {
@@ -1251,15 +1556,29 @@ async def voice_action(request: Request, use_llm: bool = True):
 
         # Format response for voice
         if "error" in result:
-            return {
+            response = {
                 "success": False,
                 "speech": f"Sorry, there was an error: {result['error']}",
                 "data": result,
                 "routing": {"method": "keyword", "tool": tool_name}
             }
+            if session_id:
+                response["session_id"] = session_id
+            return response
 
         # Generate speech-friendly response
         speech = _generate_speech_response(tool_name, result)
+
+        # Add assistant turn to history
+        if session:
+            try:
+                from app.services.conversation_memory import add_turn
+                add_turn(db, session, "assistant", speech, tool_calls=[{
+                    "tool": tool_name,
+                    "arguments": arguments
+                }])
+            except Exception:
+                pass
 
         # Prepend any pending announcements from admin page changes
         from app.routers.announcement_queue import (
@@ -1271,12 +1590,15 @@ async def voice_action(request: Request, use_llm: bool = True):
             speech = f"{announcement} {speech}"
             clear_announcements()
 
-        return {
+        response = {
             "success": True,
             "speech": speech,
             "data": result,
             "routing": {"method": "keyword", "tool": tool_name}
         }
+        if session_id:
+            response["session_id"] = session_id
+        return response
     except Exception as e:
         return {
             "success": False,

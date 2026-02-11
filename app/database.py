@@ -129,3 +129,15 @@ def init_db():
         run_automation_migration()
     except Exception as e:
         print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_magic_links import run_migration as run_magic_links_migration
+        run_magic_links_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")
+
+    try:
+        from app.migrations.add_conversation_sessions import run_migration as run_conversation_sessions_migration
+        run_conversation_sessions_migration()
+    except Exception as e:
+        print(f"Migration note: {e}")

@@ -5335,6 +5335,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "send_admin_link":
         import secrets
+        from app.models import AdminMagicLink
 
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
         if not event:
@@ -5343,8 +5344,18 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if not event.promoter_phone:
             return {"error": f"No promoter phone number on file for '{event.name}'. Set it first with update_event."}
 
-        # Generate magic link token
+        # Generate magic link token and persist to database
         token = secrets.token_urlsafe(32)
+        magic_link = AdminMagicLink(
+            event_id=event.id,
+            token=token,
+            phone=event.promoter_phone,
+            expires_at=datetime.utcnow() + timedelta(hours=1),
+        )
+        db.add(magic_link)
+        db.commit()
+
+        # Also store in memory for backward compat during transition
         magic_link_tokens[token] = {
             "event_id": event.id,
             "phone": event.promoter_phone,

@@ -419,6 +419,21 @@ class AutoTrigger(Base):
     event = relationship("Event")
 
 
+class AdminMagicLink(Base):
+    """Database-persisted magic link tokens for event admin access."""
+    __tablename__ = "admin_magic_links"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    phone = Column(String(50), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")
+
+
 class SurveyResponse(Base):
     __tablename__ = "survey_responses"
 
@@ -436,3 +451,28 @@ class SurveyResponse(Base):
     event = relationship("Event")
     event_goer = relationship("EventGoer")
     ticket = relationship("Ticket")
+
+
+class ConversationSession(Base):
+    """Voice conversation session for multi-turn context."""
+    __tablename__ = "conversation_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String(36), unique=True, nullable=False, index=True)  # UUID
+
+    # Current entity focus
+    current_customer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=True)
+    current_event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
+
+    # JSON: [{"role": "user/assistant", "content": "...", "tool_calls": [...]}]
+    conversation_history = Column(Text, nullable=True)
+
+    # JSON: {"customers": [{id, name, relation}], "events": [...]}
+    entity_context = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    last_activity = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+
+    current_customer = relationship("EventGoer")
+    current_event = relationship("Event")
