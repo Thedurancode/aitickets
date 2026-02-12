@@ -6588,7 +6588,6 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "generate_event_flyer":
         from sqlalchemy.orm import joinedload as _joinedload
-        from app.models import Event
         from app.services.flyer_generator import build_flyer_prompt, generate_flyer
 
         event = (
@@ -6718,7 +6717,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "send_style_picker_sms":
         import secrets
         from datetime import timedelta
-        from app.models import Event, StylePickerSession, StylePickerStatus
+        from app.models import StylePickerSession, StylePickerStatus
         from app.services.sms import send_style_picker_sms as _send_picker_sms
 
         event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
