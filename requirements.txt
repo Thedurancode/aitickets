@@ -19,6 +19,7 @@ fpdf2
 cryptography
 requests
 openai
+pypdf
 slowapi
 pytest
 httpx

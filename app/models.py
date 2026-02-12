@@ -476,3 +476,33 @@ class ConversationSession(Base):
 
     current_customer = relationship("EventGoer")
     current_event = relationship("Event")
+
+
+class KnowledgeDocument(Base):
+    """Metadata for an uploaded knowledge base document (PDF, text, FAQ paste)."""
+    __tablename__ = "knowledge_documents"
+
+    id = Column(Integer, primary_key=True, index=True)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)
+    title = Column(String(500), nullable=False)
+    source_filename = Column(String(500), nullable=True)
+    content_type = Column(String(20), nullable=False)  # pdf, txt, md, paste
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    chunks = relationship("KnowledgeChunk", back_populates="document", cascade="all, delete-orphan")
+    venue = relationship("Venue")
+    event = relationship("Event")
+
+
+class KnowledgeChunk(Base):
+    """Chunked and embedded content from a knowledge document."""
+    __tablename__ = "knowledge_chunks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("knowledge_documents.id"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    embedding = Column(Text, nullable=True)  # JSON-serialized float array
+    chunk_index = Column(Integer, nullable=False)
+
+    document = relationship("KnowledgeDocument", back_populates="chunks")

@@ -1588,6 +1588,34 @@ async def list_tools():
                 "required": ["event_id"],
             },
         ),
+        # Knowledge base (RAG) tools
+        Tool(
+            name="search_knowledge_base",
+            description="Semantic search across the knowledge base (uploaded PDFs, text files, FAQs). Use when the user asks a question you can't answer from structured data (e.g. parking info, venue policies, accessibility details).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query (natural language question)"},
+                    "venue_id": {"type": "integer", "description": "Optional: filter results to a specific venue"},
+                    "event_id": {"type": "integer", "description": "Optional: filter results to a specific event"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="upload_knowledge",
+            description="Add a text entry (FAQ, policy, info) to the knowledge base. Use for pasting FAQ content or quick notes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Title for this knowledge entry"},
+                    "content": {"type": "string", "description": "The text content to add"},
+                    "venue_id": {"type": "integer", "description": "Optional: associate with a venue"},
+                    "event_id": {"type": "integer", "description": "Optional: associate with an event"},
+                },
+                "required": ["title", "content"],
+            },
+        ),
     ]
 
 
@@ -6057,6 +6085,44 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         result = send_event_survey(db, arguments["event_id"])
         return result
+
+    # ============== Knowledge Base (RAG) Tools ==============
+
+    elif name == "search_knowledge_base":
+        from app.services.rag import search as rag_search
+
+        results = rag_search(
+            query=arguments["query"],
+            db=db,
+            venue_id=arguments.get("venue_id"),
+            event_id=arguments.get("event_id"),
+            limit=5,
+        )
+        if not results:
+            return {"results": [], "message": "No matching knowledge base entries found."}
+        return {"results": results}
+
+    elif name == "upload_knowledge":
+        from app.services.rag import ingest_text
+        from app.models import KnowledgeDocument
+
+        doc = KnowledgeDocument(
+            title=arguments["title"],
+            venue_id=arguments.get("venue_id"),
+            event_id=arguments.get("event_id"),
+            content_type="paste",
+        )
+        db.add(doc)
+        db.commit()
+        db.refresh(doc)
+
+        chunk_count = ingest_text(arguments["content"], doc.id, db)
+        return {
+            "success": True,
+            "document_id": doc.id,
+            "title": doc.title,
+            "chunks_created": chunk_count,
+        }
 
     return {"error": f"Unknown tool: {name}"}
 

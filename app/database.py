@@ -51,6 +51,7 @@ MIGRATIONS = [
     "add_automation_tables",
     "add_magic_links",
     "add_conversation_sessions",
+    "add_knowledge_base",
 ]
 
 
