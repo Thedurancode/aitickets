@@ -1,6 +1,11 @@
-from sqlalchemy import create_engine
+import logging
+from importlib import import_module
+
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -19,6 +24,28 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+# Ordered list of migration modules to run
+MIGRATIONS = [
+    "add_stripe_columns",
+    "add_categories",
+    "add_segments",
+    "add_promo_codes",
+    "add_page_views",
+    "add_promoter_fields",
+    "add_visibility_and_tier_status",
+    "add_ticket_utm",
+    "add_series_id",
+    "add_post_event_media",
+    "add_category_image",
+    "add_waitlist",
+    "add_marketing_lists",
+    "add_auto_reminders",
+    "add_missing_indexes",
+    "add_automation_tables",
+    "add_magic_links",
+    "add_conversation_sessions",
+]
+
 
 def get_db():
     """Dependency for getting database sessions."""
@@ -29,115 +56,50 @@ def get_db():
         db.close()
 
 
+def _ensure_migrations_table(conn):
+    """Create the migrations_applied tracking table if it doesn't exist."""
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS migrations_applied ("
+        "  name VARCHAR(255) PRIMARY KEY,"
+        "  applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+        ")"
+    ))
+    conn.commit()
+
+
+def _get_applied_migrations(conn):
+    """Return the set of migration names already applied."""
+    result = conn.execute(text("SELECT name FROM migrations_applied"))
+    return {row[0] for row in result}
+
+
+def _record_migration(conn, name):
+    """Record a migration as applied."""
+    conn.execute(
+        text("INSERT INTO migrations_applied (name) VALUES (:name)"),
+        {"name": name},
+    )
+    conn.commit()
+
+
 def init_db():
     """Initialize the database, creating all tables and running migrations."""
     Base.metadata.create_all(bind=engine)
 
-    # Run migrations for existing databases
-    try:
-        from app.migrations.add_stripe_columns import run_migration
-        run_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
+    with engine.connect() as conn:
+        _ensure_migrations_table(conn)
+        applied = _get_applied_migrations(conn)
 
-    try:
-        from app.migrations.add_categories import run_migration as run_categories_migration
-        run_categories_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
+        for name in MIGRATIONS:
+            if name in applied:
+                continue
 
-    try:
-        from app.migrations.add_segments import run_migration as run_segments_migration
-        run_segments_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_promo_codes import run_migration as run_promo_codes_migration
-        run_promo_codes_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_page_views import run_migration as run_page_views_migration
-        run_page_views_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_promoter_fields import run_migration as run_promoter_migration
-        run_promoter_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_visibility_and_tier_status import run_migration as run_visibility_migration
-        run_visibility_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_ticket_utm import run_migration as run_ticket_utm_migration
-        run_ticket_utm_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_series_id import run_migration as run_series_id_migration
-        run_series_id_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_post_event_media import run_migration as run_post_event_media_migration
-        run_post_event_media_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_category_image import run_migration as run_category_image_migration
-        run_category_image_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_waitlist import run_migration as run_waitlist_migration
-        run_waitlist_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_marketing_lists import run_migration as run_marketing_lists_migration
-        run_marketing_lists_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_auto_reminders import run_migration as run_auto_reminders_migration
-        run_auto_reminders_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_missing_indexes import run_migration as run_missing_indexes_migration
-        run_missing_indexes_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_automation_tables import run_migration as run_automation_migration
-        run_automation_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_magic_links import run_migration as run_magic_links_migration
-        run_magic_links_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
-
-    try:
-        from app.migrations.add_conversation_sessions import run_migration as run_conversation_sessions_migration
-        run_conversation_sessions_migration()
-    except Exception as e:
-        print(f"Migration note: {e}")
+            logger.info("Running migration: %s", name)
+            try:
+                module = import_module(f"app.migrations.{name}")
+                module.run_migration()
+                _record_migration(conn, name)
+                logger.info("Migration applied: %s", name)
+            except Exception:
+                logger.exception("Migration failed: %s", name)
+                raise
