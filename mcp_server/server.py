@@ -1779,6 +1779,39 @@ async def list_tools():
                 "required": [],
             },
         ),
+        # ============== SMS Style Picker Tools ==============
+        Tool(
+            name="send_style_picker_sms",
+            description="Send an SMS with a link to a visual flyer style picker page. "
+                        "The recipient opens the link on their phone, sees all saved flyer styles as cards, "
+                        "and taps one to select it. Use check_style_selection to poll for their choice, "
+                        "then generate_event_flyer with the selected style_id.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to generate a flyer for"},
+                    "phone": {
+                        "type": "string",
+                        "description": "Phone number to send SMS to. Defaults to OWNER_PHONE from config if not provided.",
+                    },
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="check_style_selection",
+            description="Check if the user has selected a flyer style from the SMS picker. "
+                        "Returns 'pending' if still waiting, or the selected style details if chosen. "
+                        "Provide event_id to check the latest session for that event, or session_id for a specific session.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to check the latest style picker session for"},
+                    "session_id": {"type": "integer", "description": "Specific style picker session ID to check"},
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -6629,6 +6662,101 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         db.delete(style)
         db.commit()
         return {"success": True, "message": f"Deleted flyer style '{name_str}'."}
+
+    # ============== SMS Style Picker ==============
+
+    elif name == "send_style_picker_sms":
+        import secrets
+        from datetime import timedelta
+        from app.models import Event, StylePickerSession, StylePickerStatus
+        from app.services.sms import send_style_picker_sms as _send_picker_sms
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        phone = arguments.get("phone") or settings.owner_phone
+        if not phone:
+            return {"error": "No phone number provided and OWNER_PHONE is not configured."}
+
+        token = secrets.token_urlsafe(32)
+        now = datetime.utcnow()
+        session = StylePickerSession(
+            token=token,
+            event_id=event.id,
+            phone=phone,
+            status=StylePickerStatus.PENDING,
+            expires_at=now + timedelta(hours=24),
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+
+        picker_url = f"{settings.base_url}/pick-style/{token}"
+        sms_result = _send_picker_sms(phone, event.name, picker_url)
+
+        # Mask phone for response
+        masked = phone[:3] + "****" + phone[-4:] if len(phone) > 7 else "****"
+
+        return {
+            "success": sms_result.get("success", False),
+            "session_id": session.id,
+            "picker_url": picker_url,
+            "phone": masked,
+            "expires_in": "24 hours",
+            "sms_error": sms_result.get("error"),
+            "message": f"Style picker SMS sent to {masked}. Use check_style_selection(event_id={event.id}) to poll for the user's choice.",
+        }
+
+    elif name == "check_style_selection":
+        from app.models import StylePickerSession, StylePickerStatus, FlyerStyle
+
+        session = None
+        if arguments.get("session_id"):
+            session = db.query(StylePickerSession).filter(
+                StylePickerSession.id == arguments["session_id"]
+            ).first()
+        elif arguments.get("event_id"):
+            session = db.query(StylePickerSession).filter(
+                StylePickerSession.event_id == arguments["event_id"]
+            ).order_by(StylePickerSession.created_at.desc()).first()
+        else:
+            return {"error": "Provide either event_id or session_id."}
+
+        if not session:
+            return {"error": "No style picker session found."}
+
+        # Check expiry
+        now = datetime.utcnow()
+        expires = session.expires_at.replace(tzinfo=None) if session.expires_at.tzinfo else session.expires_at
+        if now > expires and session.status == StylePickerStatus.PENDING:
+            session.status = StylePickerStatus.EXPIRED
+            db.commit()
+
+        result = {
+            "session_id": session.id,
+            "event_id": session.event_id,
+            "status": session.status.value if hasattr(session.status, 'value') else session.status,
+            "created_at": str(session.created_at),
+        }
+
+        if session.status == StylePickerStatus.SELECTED and session.selected_style_id:
+            style = db.query(FlyerStyle).filter(FlyerStyle.id == session.selected_style_id).first()
+            if style:
+                result["selected_style"] = {
+                    "id": style.id,
+                    "name": style.name,
+                    "description": style.description,
+                    "has_reference_image": bool(style.image_url),
+                }
+                result["message"] = f"User selected '{style.name}' (style_id={style.id}). Call generate_event_flyer(event_id={session.event_id}, style_id={style.id}) to generate the flyer."
+            result["selected_at"] = str(session.selected_at)
+        elif session.status == StylePickerStatus.PENDING:
+            result["message"] = "Still waiting for the user to pick a style. Try again in a moment."
+        elif session.status == StylePickerStatus.EXPIRED:
+            result["message"] = "This style picker session has expired. Send a new one with send_style_picker_sms."
+
+        return result
 
     return {"error": f"Unknown tool: {name}"}
 

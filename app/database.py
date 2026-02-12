@@ -55,6 +55,7 @@ MIGRATIONS = [
     "add_webhooks",
     "add_about_sections",
     "add_flyer_styles",
+    "add_style_picker_sessions",
 ]
 
 

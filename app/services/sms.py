@@ -163,6 +163,20 @@ def send_event_postponed_sms(
     return send_sms(to_phone, message)
 
 
+def send_style_picker_sms(
+    to_phone: str,
+    event_name: str,
+    picker_url: str,
+) -> dict:
+    """Send SMS with a link to the flyer style picker page."""
+    message = (
+        f"Pick a flyer style for {event_name}!\n\n"
+        f"Tap to choose: {picker_url}\n\n"
+        f"This link expires in 24 hours."
+    )
+    return send_sms(to_phone, message)
+
+
 def send_marketing_sms(
     to_phone: str,
     recipient_name: str,

@@ -560,6 +560,30 @@ class FlyerStyle(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
 
+class StylePickerStatus(str, enum.Enum):
+    PENDING = "pending"
+    SELECTED = "selected"
+    EXPIRED = "expired"
+
+
+class StylePickerSession(Base):
+    """Tracks SMS-based flyer style picker sessions."""
+    __tablename__ = "style_picker_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String(100), unique=True, nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    phone = Column(String(50), nullable=False)
+    selected_style_id = Column(Integer, ForeignKey("flyer_styles.id"), nullable=True)
+    status = Column(Enum(StylePickerStatus), default=StylePickerStatus.PENDING)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    selected_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")
+    selected_style = relationship("FlyerStyle")
+
+
 class AboutSection(Base):
     """Key-value store for About Us page content, editable via voice/MCP."""
     __tablename__ = "about_sections"

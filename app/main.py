@@ -100,7 +100,7 @@ app.add_middleware(
 REST_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc",
                      "/events", "/about", "/purchase-success", "/purchase-cancelled",
                      "/unsubscribe", "/webhooks/stripe"}
-REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view", "/api/about")
+REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view", "/api/about", "/pick-style/")
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):

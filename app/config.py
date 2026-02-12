@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = ""  # Comma-separated allowed origins (empty = allow all)
 
+    # Owner phone (default SMS recipient for style picker etc.)
+    owner_phone: str = ""
+
     # Gemini (Image Generation)
     gemini_api_key: str = ""
 

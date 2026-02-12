@@ -11,7 +11,11 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import AboutSection, Event, EventCategory, EventPhoto, EventStatus, PageView, WaitlistEntry, WaitlistStatus
+from app.models import (
+    AboutSection, Event, EventCategory, EventPhoto, EventStatus,
+    FlyerStyle, PageView, StylePickerSession, StylePickerStatus,
+    WaitlistEntry, WaitlistStatus,
+)
 from app.config import get_settings
 from app.routers.announcement_queue import queue_announcement
 
@@ -658,3 +662,92 @@ async def submit_survey(token: str, request: Request, db: Session = Depends(get_
     </div>
 </body>
 </html>""")
+
+
+# ============== Style Picker (SMS-based) ==============
+
+
+@router.get("/pick-style/{token}", response_class=HTMLResponse)
+def style_picker_page(token: str, db: Session = Depends(get_db)):
+    """Public page to pick a flyer style, sent via SMS."""
+    session = db.query(StylePickerSession).filter(
+        StylePickerSession.token == token
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Style picker session not found")
+
+    # Check expiry
+    now = datetime.utcnow()
+    expires = session.expires_at.replace(tzinfo=None) if session.expires_at.tzinfo else session.expires_at
+    if now > expires and session.status == StylePickerStatus.PENDING:
+        session.status = StylePickerStatus.EXPIRED
+        db.commit()
+
+    event = db.query(Event).filter(Event.id == session.event_id).first()
+    styles = db.query(FlyerStyle).order_by(FlyerStyle.name).all()
+
+    already_selected = session.status == StylePickerStatus.SELECTED
+    is_expired = session.status == StylePickerStatus.EXPIRED
+
+    # Load selected style name for display
+    selected_style_name = None
+    if already_selected and session.selected_style:
+        selected_style_name = session.selected_style.name
+
+    template = jinja_env.get_template("style_picker.html")
+    html = template.render(
+        session=session,
+        event=event,
+        styles=styles,
+        already_selected=already_selected,
+        is_expired=is_expired,
+        selected_style_name=selected_style_name,
+        page_type="style_picker",
+        event_id=session.event_id,
+        **_get_branding(),
+    )
+    return HTMLResponse(content=html)
+
+
+@router.post("/pick-style/{token}/select")
+async def select_style(token: str, request: Request, db: Session = Depends(get_db)):
+    """Record the user's flyer style selection."""
+    body = await request.json()
+    style_id = body.get("style_id")
+
+    if not style_id:
+        raise HTTPException(status_code=400, detail="style_id is required")
+
+    session = db.query(StylePickerSession).filter(
+        StylePickerSession.token == token
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.status == StylePickerStatus.SELECTED:
+        return {"success": False, "error": "A style has already been selected"}
+
+    now = datetime.utcnow()
+    expires = session.expires_at.replace(tzinfo=None) if session.expires_at.tzinfo else session.expires_at
+    if now > expires:
+        session.status = StylePickerStatus.EXPIRED
+        db.commit()
+        return {"success": False, "error": "This link has expired"}
+
+    style = db.query(FlyerStyle).filter(FlyerStyle.id == style_id).first()
+    if not style:
+        raise HTTPException(status_code=404, detail="Style not found")
+
+    session.selected_style_id = style_id
+    session.status = StylePickerStatus.SELECTED
+    session.selected_at = datetime.utcnow()
+    db.commit()
+
+    return {
+        "success": True,
+        "style_id": style_id,
+        "style_name": style.name,
+        "message": f"Style '{style.name}' selected!",
+    }
