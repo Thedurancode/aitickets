@@ -1,4 +1,7 @@
+import logging
+
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -12,6 +15,8 @@ from app.config import get_settings
 from app.rate_limit import limiter
 from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics
 
+logger = logging.getLogger(__name__)
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Event Ticket System",
@@ -20,6 +25,31 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ============== Global Error Handlers ==============
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return a consistent JSON format for validation errors."""
+    errors = []
+    for err in exc.errors():
+        field = " -> ".join(str(loc) for loc in err["loc"] if loc != "body")
+        errors.append(f"{field}: {err['msg']}" if field else err["msg"])
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Validation error", "detail": "; ".join(errors)},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all for unhandled exceptions — log full traceback, return safe message."""
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": "An unexpected error occurred."},
+    )
 
 # API routers (JSON endpoints, prefixed with /api)
 api_prefix = "/api"

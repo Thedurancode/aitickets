@@ -20,3 +20,5 @@ cryptography
 requests
 openai
 slowapi
+pytest
+httpx
