@@ -121,18 +121,62 @@ def create_checkout_session(
             tickets=[{"id": t.id, "qr_token": t.qr_code_token} for t in tickets],
         )
 
-    # Paid ticket flow — create pending tickets and redirect to Stripe
+    # Paid ticket flow — create Stripe session first, then DB rows.
+    # This avoids orphaned PENDING tickets if the app crashes mid-request.
     if not settings.stripe_secret_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
     stripe.api_key = settings.stripe_secret_key
 
+    # Build line item
+    if promo and discount_amount > 0:
+        line_item = {
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": discounted_price,
+                "product_data": {
+                    "name": f"{event.name} - {tier.name}",
+                    "description": f"{tier.description or 'Ticket'} (Code: {promo.code})",
+                },
+            },
+            "quantity": purchase.quantity,
+        }
+    else:
+        line_item = get_stripe_checkout_line_item(tier, purchase.quantity)
+
+    # Create Stripe checkout session before touching the DB
+    try:
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[line_item],
+            mode="payment",
+            success_url=f"{settings.base_url}/purchase-success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{settings.base_url}/purchase-cancelled",
+            metadata={
+                "event_id": str(event_id),
+                "tier_id": str(tier.id),
+                "event_goer_id": str(event_goer.id),
+                "quantity": str(purchase.quantity),
+                "stripe_product_id": tier.stripe_product_id or "",
+                "promo_code": promo.code if promo else "",
+                "utm_source": purchase.utm_source or "",
+                "utm_medium": purchase.utm_medium or "",
+                "utm_campaign": purchase.utm_campaign or "",
+            },
+            customer_email=purchase.email,
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Stripe succeeded — now create DB rows (safe: if this fails, the
+    # checkout session just expires unused after 24h)
     tickets = []
     for _ in range(purchase.quantity):
         ticket = Ticket(
             ticket_tier_id=tier.id,
             event_goer_id=event_goer.id,
             status=TicketStatus.PENDING,
+            stripe_checkout_session_id=checkout_session.id,
             promo_code_id=promo.id if promo else None,
             discount_amount_cents=discount_amount if promo else None,
             utm_source=purchase.utm_source,
@@ -142,65 +186,14 @@ def create_checkout_session(
         db.add(ticket)
         tickets.append(ticket)
 
+    if promo:
+        promo.uses_count += purchase.quantity
     db.commit()
 
-    ticket_ids = [t.id for t in tickets]
-    for t in tickets:
-        db.refresh(t)
-
-    try:
-        # When promo applied, use inline price_data with adjusted amount
-        if promo and discount_amount > 0:
-            line_item = {
-                "price_data": {
-                    "currency": "usd",
-                    "unit_amount": discounted_price,
-                    "product_data": {
-                        "name": f"{event.name} - {tier.name}",
-                        "description": f"{tier.description or 'Ticket'} (Code: {promo.code})",
-                    },
-                },
-                "quantity": purchase.quantity,
-            }
-        else:
-            line_item = get_stripe_checkout_line_item(tier, purchase.quantity)
-
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[line_item],
-            mode="payment",
-            success_url=f"{settings.base_url}/purchase-success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{settings.base_url}/purchase-cancelled",
-            metadata={
-                "ticket_ids": ",".join(str(tid) for tid in ticket_ids),
-                "event_id": str(event_id),
-                "tier_id": str(tier.id),
-                "stripe_product_id": tier.stripe_product_id or "",
-                "promo_code": promo.code if promo else "",
-                "utm_source": purchase.utm_source or "",
-                "utm_medium": purchase.utm_medium or "",
-                "utm_campaign": purchase.utm_campaign or "",
-            },
-            customer_email=purchase.email,
-        )
-
-        for ticket in tickets:
-            ticket.stripe_checkout_session_id = checkout_session.id
-
-        if promo:
-            promo.uses_count += purchase.quantity
-        db.commit()
-
-        return CheckoutSessionResponse(
-            checkout_url=checkout_session.url,
-            session_id=checkout_session.id,
-        )
-
-    except stripe.error.StripeError as e:
-        for ticket in tickets:
-            db.delete(ticket)
-        db.commit()
-        raise HTTPException(status_code=400, detail=str(e))
+    return CheckoutSessionResponse(
+        checkout_url=checkout_session.url,
+        session_id=checkout_session.id,
+    )
 
 
 @router.get("/{ticket_id}", response_model=TicketFullResponse)

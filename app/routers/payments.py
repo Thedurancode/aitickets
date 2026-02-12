@@ -61,22 +61,35 @@ async def handle_checkout_completed(session_data: dict, db: Session):
     payment_intent_id = session_data.get("payment_intent")
     metadata = session_data.get("metadata", {})
 
-    ticket_ids_str = metadata.get("ticket_ids", "")
-    if not ticket_ids_str:
-        return
-
-    ticket_ids = [int(tid) for tid in ticket_ids_str.split(",")]
-
-    # Get tickets with related data
+    # Find tickets by checkout session ID (primary) or legacy ticket_ids metadata
     tickets = (
         db.query(Ticket)
         .options(
             joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
             joinedload(Ticket.event_goer),
         )
-        .filter(Ticket.id.in_(ticket_ids))
+        .filter(Ticket.stripe_checkout_session_id == session_id)
         .all()
     )
+
+    # Fallback for tickets created before the Stripe-first flow
+    if not tickets:
+        ticket_ids_str = metadata.get("ticket_ids", "")
+        if not ticket_ids_str:
+            return
+        ticket_ids = [int(tid) for tid in ticket_ids_str.split(",")]
+        tickets = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
+                joinedload(Ticket.event_goer),
+            )
+            .filter(Ticket.id.in_(ticket_ids))
+            .all()
+        )
+
+    if not tickets:
+        return
 
     for ticket in tickets:
         # Update ticket status
