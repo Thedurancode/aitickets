@@ -6861,7 +6861,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "get_session_context":
         import json as json_module
-        from app.models import ConversationSession, EventGoer, Event
+        from app.models import ConversationSession
 
         session_id = arguments.get("session_id")
         if not session_id:
@@ -6948,7 +6948,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "list_active_sessions":
-        from app.models import ConversationSession, EventGoer, Event
+        from app.models import ConversationSession
         from datetime import timezone
 
         limit = min(arguments.get("limit", 20), 100)
