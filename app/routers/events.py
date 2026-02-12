@@ -168,14 +168,20 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
         "venue_id": db_event.venue_id,
     }
 
+    # Helper: run SQL in a savepoint so a missing table doesn't abort the txn
+    def _safe_exec(stmt, params=None):
+        try:
+            nested = db.begin_nested()
+            db.execute(text(stmt), params or {"eid": event_id})
+            nested.commit()
+        except Exception:
+            nested.rollback()
+
     # Delete tickets that belong to this event's tiers
-    try:
-        db.execute(text(
-            "DELETE FROM tickets WHERE ticket_tier_id IN "
-            "(SELECT id FROM ticket_tiers WHERE event_id = :eid)"
-        ), {"eid": event_id})
-    except Exception:
-        pass
+    _safe_exec(
+        "DELETE FROM tickets WHERE ticket_tier_id IN "
+        "(SELECT id FROM ticket_tiers WHERE event_id = :eid)"
+    )
 
     # Clean up all FK references that don't cascade automatically
     for table in [
@@ -183,28 +189,22 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
         "page_views", "auto_triggers", "admin_magic_links",
         "knowledge_documents", "waitlist_entries", "event_photos",
     ]:
-        try:
-            db.execute(text(f"DELETE FROM {table} WHERE event_id = :eid"), {"eid": event_id})
-        except Exception:
-            pass
+        _safe_exec(f"DELETE FROM {table} WHERE event_id = :eid")
     # Nullify optional FK references
-    for table in ["marketing_campaigns", "promo_codes", "conversation_sessions"]:
-        col = "target_event_id" if table == "marketing_campaigns" else "current_event_id" if table == "conversation_sessions" else "event_id"
-        try:
-            db.execute(text(f"UPDATE {table} SET {col} = NULL WHERE {col} = :eid"), {"eid": event_id})
-        except Exception:
-            pass
+    for table, col in [
+        ("marketing_campaigns", "target_event_id"),
+        ("promo_codes", "event_id"),
+        ("conversation_sessions", "current_event_id"),
+    ]:
+        _safe_exec(f"UPDATE {table} SET {col} = NULL WHERE {col} = :eid")
     # Remove event-category associations
-    try:
-        db.execute(text("DELETE FROM event_category_association WHERE event_id = :eid"), {"eid": event_id})
-    except Exception:
-        pass
+    _safe_exec("DELETE FROM event_category_association WHERE event_id = :eid")
 
     # Delete the event itself via raw SQL to avoid ORM cascade issues
     db.execute(text("DELETE FROM events WHERE id = :eid"), {"eid": event_id})
-    db.commit()
     # Expunge the ORM object so SQLAlchemy doesn't try to flush it
     db.expunge(db_event)
+    db.commit()
 
     # Fire webhook: event.deleted
     try:
