@@ -361,7 +361,7 @@ app.add_middleware(
 # ============== API Key Auth Middleware ==============
 # Protects MCP/voice endpoints when MCP_API_KEY is set.
 # If MCP_API_KEY is empty, auth is disabled (backward compatible).
-# Voice agents send the key via X-MCP-Key header or ?api_key= query param.
+# Voice agents send the key via X-MCP-Key header.
 
 # Paths that are always public (no auth required)
 PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc", "/favicon.ico",
@@ -395,16 +395,13 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         if request.headers.get("upgrade", "").lower() == "websocket":
             return await call_next(request)
 
-        # Check for API key in header or query param
-        provided_key = (
-            request.headers.get("x-mcp-key")
-            or request.query_params.get("api_key")
-        )
+        # Check for API key in header only — never accept keys in query params
+        provided_key = request.headers.get("x-mcp-key")
 
         if not provided_key or provided_key != api_key:
             return JSONResponse(
                 status_code=401,
-                content={"error": "Unauthorized", "detail": "Invalid or missing API key. Send via X-MCP-Key header or ?api_key= query param."},
+                content={"error": "Unauthorized", "detail": "Invalid or missing API key. Send via X-MCP-Key header."},
             )
 
         return await call_next(request)

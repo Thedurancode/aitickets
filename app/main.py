@@ -120,7 +120,6 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         provided_key = (
             request.headers.get("x-admin-key")
             or request.headers.get("x-mcp-key")
-            or request.query_params.get("api_key")
         )
 
         if not provided_key or provided_key != api_key:
