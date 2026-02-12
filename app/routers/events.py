@@ -155,7 +155,9 @@ def update_event(event_id: int, event: EventUpdate, db: Session = Depends(get_db
 
 @router.delete("/{event_id}", status_code=204)
 def delete_event(event_id: int, db: Session = Depends(get_db)):
-    """Delete an event."""
+    """Delete an event and all related data."""
+    from sqlalchemy import text
+
     db_event = db.query(Event).filter(Event.id == event_id).first()
     if not db_event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -165,6 +167,35 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
         "name": db_event.name,
         "venue_id": db_event.venue_id,
     }
+
+    # Clean up all FK references that don't cascade automatically
+    for table in [
+        "survey_responses", "notifications", "event_updates",
+        "page_views", "auto_triggers", "admin_magic_links",
+        "knowledge_documents",
+    ]:
+        try:
+            db.execute(text(f"DELETE FROM {table} WHERE event_id = :eid"), {"eid": event_id})
+        except Exception:
+            pass
+    # Nullify optional FK references
+    for table in ["marketing_campaigns", "promo_codes", "conversation_sessions"]:
+        col = "target_event_id" if table == "marketing_campaigns" else "current_event_id" if table == "conversation_sessions" else "event_id"
+        try:
+            db.execute(text(f"UPDATE {table} SET {col} = NULL WHERE {col} = :eid"), {"eid": event_id})
+        except Exception:
+            pass
+    # Remove event-category associations
+    try:
+        db.execute(text("DELETE FROM event_category_association WHERE event_id = :eid"), {"eid": event_id})
+    except Exception:
+        pass
+    # Remove event photos
+    try:
+        db.execute(text("DELETE FROM event_photos WHERE event_id = :eid"), {"eid": event_id})
+    except Exception:
+        pass
+
     db.delete(db_event)
     db.commit()
 
