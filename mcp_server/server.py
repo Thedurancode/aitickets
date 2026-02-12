@@ -1812,6 +1812,56 @@ async def list_tools():
                 "required": [],
             },
         ),
+        # ============== Conversation History Tools ==============
+        Tool(
+            name="get_conversation_history",
+            description="Get the conversation history for a session. Returns recent turns including user messages, "
+                        "assistant responses, and tool calls. Useful for understanding context or debugging.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "The conversation session UUID. If not provided, returns info about active sessions."},
+                    "limit": {"type": "integer", "description": "Max number of turns to return (default 10, max 50)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_session_context",
+            description="Get the current context for a conversation session. Returns the current customer and event "
+                        "in focus, recent entities mentioned, pending operations, and smart suggestions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "The conversation session UUID"},
+                },
+                "required": ["session_id"],
+            },
+        ),
+        Tool(
+            name="clear_session",
+            description="Clear/reset a conversation session. Removes conversation history and entity context. "
+                        "Use when starting a fresh conversation or when context has become stale/confusing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "The conversation session UUID to clear"},
+                },
+                "required": ["session_id"],
+            },
+        ),
+        Tool(
+            name="list_active_sessions",
+            description="List all active (non-expired) conversation sessions. Shows session IDs, current focus, "
+                        "and last activity time. Useful for debugging or switching between conversations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max sessions to return (default 20)"},
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -6757,6 +6807,187 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             result["message"] = "This style picker session has expired. Send a new one with send_style_picker_sms."
 
         return result
+
+    # ============== Conversation History Tools ==============
+
+    elif name == "get_conversation_history":
+        import json as json_module
+        from app.models import ConversationSession
+        from datetime import timezone
+
+        session_id = arguments.get("session_id")
+        limit = min(arguments.get("limit", 10), 50)
+
+        if not session_id:
+            # Return summary of active sessions
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            active = db.query(ConversationSession).filter(
+                ConversationSession.expires_at > now
+            ).order_by(ConversationSession.last_activity.desc()).limit(10).all()
+
+            return {
+                "message": "No session_id provided. Here are active sessions:",
+                "active_sessions": [
+                    {
+                        "session_id": s.session_id,
+                        "last_activity": str(s.last_activity),
+                        "current_customer_id": s.current_customer_id,
+                        "current_event_id": s.current_event_id,
+                    }
+                    for s in active
+                ],
+                "hint": "Provide a session_id to get conversation history",
+            }
+
+        session = db.query(ConversationSession).filter(
+            ConversationSession.session_id == session_id
+        ).first()
+
+        if not session:
+            return {"error": f"Session not found: {session_id}"}
+
+        history = json_module.loads(session.conversation_history or "[]")
+
+        return {
+            "session_id": session.session_id,
+            "turns": history[-limit:] if limit else history,
+            "total_turns": len(history),
+            "current_customer_id": session.current_customer_id,
+            "current_event_id": session.current_event_id,
+            "created_at": str(session.created_at),
+            "last_activity": str(session.last_activity),
+            "expires_at": str(session.expires_at),
+        }
+
+    elif name == "get_session_context":
+        import json as json_module
+        from app.models import ConversationSession, EventGoer, Event
+
+        session_id = arguments.get("session_id")
+        if not session_id:
+            return {"error": "session_id is required"}
+
+        session = db.query(ConversationSession).filter(
+            ConversationSession.session_id == session_id
+        ).first()
+
+        if not session:
+            return {"error": f"Session not found: {session_id}"}
+
+        entity_context = json_module.loads(session.entity_context or '{"customers": [], "events": []}')
+
+        result = {
+            "session_id": session.session_id,
+            "entity_context": entity_context,
+            "last_activity": str(session.last_activity),
+        }
+
+        # Enrich with current customer details
+        if session.current_customer_id:
+            customer = db.query(EventGoer).filter(EventGoer.id == session.current_customer_id).first()
+            if customer:
+                result["current_customer"] = {
+                    "id": customer.id,
+                    "name": customer.name,
+                    "email": customer.email,
+                    "phone": customer.phone,
+                }
+
+        # Enrich with current event details
+        if session.current_event_id:
+            event = db.query(Event).filter(Event.id == session.current_event_id).first()
+            if event:
+                result["current_event"] = {
+                    "id": event.id,
+                    "name": event.name,
+                    "event_date": event.event_date,
+                    "event_time": event.event_time,
+                }
+
+        # Include pending operation if any
+        if entity_context.get("pending_operation"):
+            result["pending_operation"] = entity_context["pending_operation"]
+
+        # Include last action if any
+        if entity_context.get("last_action"):
+            result["last_action"] = {
+                "tool": entity_context["last_action"].get("tool"),
+                "timestamp": entity_context["last_action"].get("timestamp"),
+                "reversible": entity_context["last_action"].get("reversible"),
+            }
+
+        return result
+
+    elif name == "clear_session":
+        import json as json_module
+        from app.models import ConversationSession
+
+        session_id = arguments.get("session_id")
+        if not session_id:
+            return {"error": "session_id is required"}
+
+        session = db.query(ConversationSession).filter(
+            ConversationSession.session_id == session_id
+        ).first()
+
+        if not session:
+            return {"error": f"Session not found: {session_id}"}
+
+        # Clear the session data
+        session.conversation_history = json_module.dumps([])
+        session.entity_context = json_module.dumps({"customers": [], "events": []})
+        session.current_customer_id = None
+        session.current_event_id = None
+        session.last_activity = datetime.utcnow()
+        db.commit()
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "message": "Session cleared. Conversation history and context have been reset.",
+        }
+
+    elif name == "list_active_sessions":
+        from app.models import ConversationSession, EventGoer, Event
+        from datetime import timezone
+
+        limit = min(arguments.get("limit", 20), 100)
+        now = datetime.utcnow().replace(tzinfo=timezone.utc)
+
+        sessions = db.query(ConversationSession).filter(
+            ConversationSession.expires_at > now
+        ).order_by(ConversationSession.last_activity.desc()).limit(limit).all()
+
+        results = []
+        for s in sessions:
+            session_info = {
+                "session_id": s.session_id,
+                "created_at": str(s.created_at),
+                "last_activity": str(s.last_activity),
+                "expires_at": str(s.expires_at),
+                "current_customer_id": s.current_customer_id,
+                "current_event_id": s.current_event_id,
+            }
+
+            # Get customer name if set
+            if s.current_customer_id:
+                customer = db.query(EventGoer).filter(EventGoer.id == s.current_customer_id).first()
+                if customer:
+                    session_info["current_customer_name"] = customer.name
+
+            # Get event name if set
+            if s.current_event_id:
+                event = db.query(Event).filter(Event.id == s.current_event_id).first()
+                if event:
+                    session_info["current_event_name"] = event.name
+
+            results.append(session_info)
+
+        return {
+            "active_sessions": results,
+            "count": len(results),
+            "message": f"Found {len(results)} active session(s).",
+        }
 
     return {"error": f"Unknown tool: {name}"}
 
