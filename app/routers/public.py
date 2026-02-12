@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.database import get_db
-from app.models import Event, EventCategory, EventPhoto, EventStatus, PageView, WaitlistEntry, WaitlistStatus
+from app.models import AboutSection, Event, EventCategory, EventPhoto, EventStatus, PageView, WaitlistEntry, WaitlistStatus
 from app.config import get_settings
 from app.routers.announcement_queue import queue_announcement
 
@@ -57,6 +57,39 @@ def _get_branding():
         "org_logo_url": settings.org_logo_url,
         "base_url": settings.base_url,
     }
+
+
+@router.get("/about", response_class=HTMLResponse)
+def about_page(db: Session = Depends(get_db)):
+    """Public About Us page."""
+    import json as _json
+
+    rows = db.query(AboutSection).all()
+    sections = {row.section_key: row.content for row in rows}
+
+    # Parse JSON fields for template
+    team_members = []
+    try:
+        team_members = _json.loads(sections.get("team_members", "[]"))
+    except (ValueError, TypeError):
+        pass
+
+    social_links = {}
+    try:
+        social_links = _json.loads(sections.get("social_links", "{}"))
+    except (ValueError, TypeError):
+        pass
+
+    template = jinja_env.get_template("about.html")
+    html = template.render(
+        sections=sections,
+        team_members=team_members,
+        social_links=social_links,
+        page_type="about",
+        event_id=None,
+        **_get_branding(),
+    )
+    return HTMLResponse(content=html)
 
 
 @router.get("/events", response_class=HTMLResponse)

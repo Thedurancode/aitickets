@@ -13,7 +13,7 @@ from pathlib import Path
 from app.database import init_db
 from app.config import get_settings
 from app.rate_limit import limiter
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ app.include_router(promo_codes.router, prefix=api_prefix)
 app.include_router(analytics.router, prefix=api_prefix)
 app.include_router(knowledge.router, prefix=api_prefix)
 app.include_router(webhooks.router, prefix=api_prefix)
+app.include_router(about.router, prefix=api_prefix)
 
 # Non-API routers (keep at root)
 app.include_router(payments.router)   # /webhooks/stripe
@@ -96,9 +97,9 @@ app.add_middleware(
 # Public pages (/events, /purchase-success, etc.) remain open.
 
 REST_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc",
-                     "/events", "/purchase-success", "/purchase-cancelled",
+                     "/events", "/about", "/purchase-success", "/purchase-cancelled",
                      "/unsubscribe", "/webhooks/stripe"}
-REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view")
+REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view", "/api/about")
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):

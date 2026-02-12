@@ -1663,6 +1663,50 @@ async def list_tools():
                 "required": ["webhook_id"],
             },
         ),
+
+        # ============== About Us Page Tools ==============
+        Tool(
+            name="get_about_page",
+            description="Get all About Us page content (hero, mission, story, team, contact, social links). Returns all sections as key-value pairs.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="update_about_section",
+            description="Update a section of the About Us page. Valid keys: hero_title, hero_subtitle, hero_image_url, mission_title, mission_content, story_title, story_content, contact_email, contact_phone, contact_address. For team members use add_team_member/remove_team_member instead.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "section_key": {"type": "string", "description": "The section key to update (e.g. 'mission_content', 'hero_title')"},
+                    "content": {"type": "string", "description": "The new content for this section"},
+                },
+                "required": ["section_key", "content"],
+            },
+        ),
+        Tool(
+            name="add_team_member",
+            description="Add a team member to the About Us page",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Team member's name"},
+                    "role": {"type": "string", "description": "Their role/title (e.g. CEO, Head of Events)"},
+                    "bio": {"type": "string", "description": "Short bio (optional)"},
+                    "photo_url": {"type": "string", "description": "URL to their photo (optional)"},
+                },
+                "required": ["name", "role"],
+            },
+        ),
+        Tool(
+            name="remove_team_member",
+            description="Remove a team member from the About Us page by name",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Name of the team member to remove"},
+                },
+                "required": ["name"],
+            },
+        ),
     ]
 
 
@@ -6262,6 +6306,101 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 }
                 for d in deliveries
             ],
+        }
+
+    # ============== About Us Page Tools ==============
+
+    elif name == "get_about_page":
+        from app.models import AboutSection
+
+        rows = db.query(AboutSection).all()
+        sections = {row.section_key: row.content for row in rows}
+
+        # Parse team_members for readability
+        team_members = []
+        try:
+            import json as _json
+            team_members = _json.loads(sections.get("team_members", "[]"))
+        except (ValueError, TypeError):
+            pass
+
+        return {
+            "sections": sections,
+            "team_members": team_members,
+            "message": "About Us page content retrieved. Use update_about_section to edit any section.",
+        }
+
+    elif name == "update_about_section":
+        from app.models import AboutSection
+
+        valid_keys = {
+            "hero_title", "hero_subtitle", "hero_image_url",
+            "mission_title", "mission_content",
+            "story_title", "story_content",
+            "contact_email", "contact_phone", "contact_address",
+            "social_links",
+        }
+        key = arguments["section_key"]
+        if key not in valid_keys:
+            return {"error": f"Invalid section key '{key}'. Valid keys: {', '.join(sorted(valid_keys))}"}
+
+        row = db.query(AboutSection).filter(AboutSection.section_key == key).first()
+        if not row:
+            row = AboutSection(section_key=key, content=arguments["content"])
+            db.add(row)
+        else:
+            row.content = arguments["content"]
+        db.commit()
+        return {
+            "section_key": key,
+            "content": arguments["content"],
+            "message": f"Updated '{key}' on the About Us page.",
+        }
+
+    elif name == "add_team_member":
+        import json as _json
+        from app.models import AboutSection
+
+        row = db.query(AboutSection).filter(AboutSection.section_key == "team_members").first()
+        if not row:
+            row = AboutSection(section_key="team_members", content="[]")
+            db.add(row)
+            db.flush()
+
+        members = _json.loads(row.content) if row.content else []
+        member = {"name": arguments["name"], "role": arguments["role"]}
+        if arguments.get("bio"):
+            member["bio"] = arguments["bio"]
+        if arguments.get("photo_url"):
+            member["photo_url"] = arguments["photo_url"]
+        members.append(member)
+        row.content = _json.dumps(members)
+        db.commit()
+        return {
+            "message": f"Added {arguments['name']} ({arguments['role']}) to the About Us team section.",
+            "team_members": members,
+        }
+
+    elif name == "remove_team_member":
+        import json as _json
+        from app.models import AboutSection
+
+        row = db.query(AboutSection).filter(AboutSection.section_key == "team_members").first()
+        if not row or not row.content:
+            return {"error": "No team members found on the About Us page."}
+
+        members = _json.loads(row.content)
+        target = arguments["name"].lower()
+        new_members = [m for m in members if m.get("name", "").lower() != target]
+
+        if len(new_members) == len(members):
+            return {"error": f"Team member '{arguments['name']}' not found."}
+
+        row.content = _json.dumps(new_members)
+        db.commit()
+        return {
+            "message": f"Removed {arguments['name']} from the About Us team section.",
+            "team_members": new_members,
         }
 
     return {"error": f"Unknown tool: {name}"}

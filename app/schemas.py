@@ -467,3 +467,16 @@ class WebhookTestResponse(BaseModel):
     response_status: Optional[int] = None
     response_body: Optional[str] = None
     error: Optional[str] = None
+
+
+# ============== About Page Schemas ==============
+
+class AboutSectionUpdate(BaseModel):
+    content: str
+
+
+class TeamMemberAdd(BaseModel):
+    name: str
+    role: str
+    bio: Optional[str] = None
+    photo_url: Optional[str] = None

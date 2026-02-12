@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}{{ sections.get('hero_title', 'About Us') }}{% endblock %}
+
+{% block og_meta %}
+<meta property="og:title" content="{{ sections.get('hero_title', 'About Us') }} | {{ org_name }}">
+<meta property="og:type" content="website">
+{% endblock %}
+
+{% block content %}
+
+<!-- Hero Section -->
+<section class="relative -mx-4 sm:-mx-6 -mt-8 mb-12 overflow-hidden rounded-b-2xl">
+    <div class="min-h-[40vh] flex items-center justify-center gradient-fallback relative">
+        {% if sections.get('hero_image_url') %}
+        <img src="{{ sections.hero_image_url }}" alt="" class="absolute inset-0 w-full h-full object-cover opacity-20">
+        {% endif %}
+        <div class="text-center relative z-10 px-6 py-16" data-animate>
+            <h1 class="text-4xl sm:text-5xl font-extrabold mb-4">{{ sections.get('hero_title', 'About Us') }}</h1>
+            {% if sections.get('hero_subtitle') %}
+            <p class="text-lg sm:text-xl text-gray-300 max-w-2xl mx-auto">{{ sections.hero_subtitle }}</p>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+<!-- Mission Section -->
+{% if sections.get('mission_content') %}
+<section class="mb-16" data-animate>
+    <h2 class="text-2xl sm:text-3xl font-bold mb-6 text-brand">{{ sections.get('mission_title', 'Our Mission') }}</h2>
+    <div class="text-gray-300 text-lg leading-relaxed max-w-3xl">
+        {{ sections.mission_content }}
+    </div>
+</section>
+{% endif %}
+
+<!-- Story Section -->
+{% if sections.get('story_content') %}
+<section class="mb-16" data-animate>
+    <h2 class="text-2xl sm:text-3xl font-bold mb-6 text-brand">{{ sections.get('story_title', 'Our Story') }}</h2>
+    <div class="text-gray-300 text-lg leading-relaxed max-w-3xl">
+        {{ sections.story_content }}
+    </div>
+</section>
+{% endif %}
+
+<!-- Team Section -->
+{% if team_members %}
+<section class="mb-16" data-animate>
+    <h2 class="text-2xl sm:text-3xl font-bold mb-8 text-brand">Our Team</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+        {% for member in team_members %}
+        <div class="bg-gray-900 rounded-xl p-6 text-center border border-gray-800 hover:border-brand/40 transition-colors" data-animate="scale-in">
+            {% if member.photo_url %}
+            <img src="{{ member.photo_url }}" alt="{{ member.name }}" class="w-24 h-24 rounded-full mx-auto mb-4 object-cover border-2 border-brand/30">
+            {% else %}
+            <div class="w-24 h-24 rounded-full mx-auto mb-4 bg-brand/20 flex items-center justify-center text-3xl font-bold text-brand">
+                {{ member.name[0] | upper }}
+            </div>
+            {% endif %}
+            <h3 class="text-lg font-bold text-white">{{ member.name }}</h3>
+            <p class="text-brand text-sm font-medium mb-2">{{ member.role }}</p>
+            {% if member.bio %}
+            <p class="text-gray-400 text-sm">{{ member.bio }}</p>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Contact Section -->
+{% if sections.get('contact_email') or sections.get('contact_phone') or sections.get('contact_address') %}
+<section class="mb-16" data-animate>
+    <h2 class="text-2xl sm:text-3xl font-bold mb-6 text-brand">Contact Us</h2>
+    <div class="bg-gray-900 rounded-xl p-8 border border-gray-800 max-w-lg">
+        {% if sections.get('contact_email') %}
+        <div class="flex items-center gap-3 mb-4">
+            <svg class="w-5 h-5 text-brand flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <a href="mailto:{{ sections.contact_email }}" class="text-gray-300 hover:text-white transition-colors">{{ sections.contact_email }}</a>
+        </div>
+        {% endif %}
+        {% if sections.get('contact_phone') %}
+        <div class="flex items-center gap-3 mb-4">
+            <svg class="w-5 h-5 text-brand flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/>
+            </svg>
+            <a href="tel:{{ sections.contact_phone }}" class="text-gray-300 hover:text-white transition-colors">{{ sections.contact_phone }}</a>
+        </div>
+        {% endif %}
+        {% if sections.get('contact_address') %}
+        <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-brand flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+            </svg>
+            <span class="text-gray-300">{{ sections.contact_address }}</span>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Social Links -->
+{% if social_links %}
+<section class="mb-16 text-center" data-animate>
+    <h2 class="text-2xl font-bold mb-6 text-brand">Follow Us</h2>
+    <div class="flex items-center justify-center gap-6">
+        {% for platform, url in social_links.items() %}
+        {% if url %}
+        <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="text-gray-400 hover:text-brand transition-colors text-lg font-medium capitalize">
+            {{ platform }}
+        </a>
+        {% endif %}
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% endblock %}

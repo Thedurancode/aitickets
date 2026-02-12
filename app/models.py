@@ -547,3 +547,13 @@ class WebhookDelivery(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     endpoint = relationship("WebhookEndpoint", back_populates="deliveries")
+
+
+class AboutSection(Base):
+    """Key-value store for About Us page content, editable via voice/MCP."""
+    __tablename__ = "about_sections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    section_key = Column(String(50), unique=True, nullable=False, index=True)
+    content = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

@@ -53,6 +53,7 @@ MIGRATIONS = [
     "add_conversation_sessions",
     "add_knowledge_base",
     "add_webhooks",
+    "add_about_sections",
 ]
 
 
