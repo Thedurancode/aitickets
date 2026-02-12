@@ -2245,7 +2245,6 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         stripe_synced = 0
         stripe_errors = []
         if tier_price > 0:
-            from app.services.stripe_sync import create_stripe_product_for_tier
             for tier in created_tiers:
                 evt = db.query(Event).filter(Event.id == tier.event_id).first()
                 sync_result = create_stripe_product_for_tier(db, tier, evt)
@@ -2761,7 +2760,6 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             # Sync to Stripe if paid tier
             if price_cents > 0:
                 try:
-                    from app.services.stripe_sync import create_stripe_product_for_tier
                     create_stripe_product_for_tier(db, new_tier, event)
                 except Exception as e:
                     print(f"Stripe sync warning: {e}")
