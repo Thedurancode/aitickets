@@ -5,7 +5,9 @@ class TestHealthCheck:
     def test_healthy(self, client):
         r = client.get("/health")
         assert r.status_code == 200
-        assert r.json() == {"status": "healthy"}
+        data = r.json()
+        assert data["status"] == "healthy"
+        assert data["checks"]["db"] == "ok"
 
 
 class TestGlobalErrorHandler:

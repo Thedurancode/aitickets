@@ -165,8 +165,23 @@ def root():
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy"}
+    """Health check endpoint — verifies DB connectivity."""
+    from sqlalchemy import text
+    from app.database import SessionLocal
+
+    checks = {"db": "ok"}
+    status = "healthy"
+
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+    except Exception as e:
+        checks["db"] = str(e)
+        status = "unhealthy"
+
+    code = 200 if status == "healthy" else 503
+    return JSONResponse(status_code=code, content={"status": status, "checks": checks})
 
 
 @app.get("/purchase-success", response_class=HTMLResponse)
