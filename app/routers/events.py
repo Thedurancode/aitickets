@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 import uuid
 from pathlib import Path
@@ -19,12 +19,17 @@ router = APIRouter(prefix="/events", tags=["events"])
 
 
 @router.get("", response_model=list[EventWithVenueResponse])
-def list_events(category: str | None = None, db: Session = Depends(get_db)):
-    """List all events with venue information. Optionally filter by category name."""
+def list_events(
+    category: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """List events with venue information. Optionally filter by category name."""
     query = db.query(Event).options(joinedload(Event.venue), joinedload(Event.categories))
     if category:
         query = query.join(Event.categories).filter(EventCategory.name.ilike(f"%{category}%"))
-    events = query.all()
+    events = query.order_by(Event.event_date.desc()).offset(offset).limit(limit).all()
     return events
 
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session
 import uuid
 from pathlib import Path
@@ -18,9 +18,13 @@ router = APIRouter(prefix="/venues", tags=["venues"])
 
 
 @router.get("", response_model=list[VenueResponse])
-def list_venues(db: Session = Depends(get_db)):
-    """List all venues."""
-    venues = db.query(Venue).all()
+def list_venues(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """List venues."""
+    venues = db.query(Venue).order_by(Venue.id).offset(offset).limit(limit).all()
     return venues
 
 
@@ -109,11 +113,16 @@ async def upload_venue_logo(
 
 
 @router.get("/{venue_id}/events", response_model=list[EventResponse])
-def list_venue_events(venue_id: int, db: Session = Depends(get_db)):
+def list_venue_events(
+    venue_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
     """List events at a specific venue."""
     venue = db.query(Venue).filter(Venue.id == venue_id).first()
     if not venue:
         raise HTTPException(status_code=404, detail="Venue not found")
 
-    events = db.query(Event).filter(Event.venue_id == venue_id).all()
+    events = db.query(Event).filter(Event.venue_id == venue_id).order_by(Event.event_date.desc()).offset(offset).limit(limit).all()
     return events

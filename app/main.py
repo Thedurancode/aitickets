@@ -1,11 +1,15 @@
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
 from app.database import init_db
 from app.config import get_settings
+from app.rate_limit import limiter
 from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics
 
 # Initialize FastAPI app
@@ -14,6 +18,8 @@ app = FastAPI(
     description="REST API for managing venues, events, ticket tiers, and sales with Stripe payment processing",
     version="1.0.0",
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # API routers (JSON endpoints, prefixed with /api)
 api_prefix = "/api"
@@ -39,6 +45,18 @@ settings = get_settings()
 uploads_dir = Path(settings.uploads_dir)
 uploads_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
+
+
+# ============== CORS Middleware ==============
+_settings = get_settings()
+_origins = [o.strip() for o in _settings.cors_origins.split(",") if o.strip()] if _settings.cors_origins else ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ============== API Key Auth Middleware ==============

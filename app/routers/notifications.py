@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 
 from app.database import get_db
+from app.rate_limit import limiter
 from app.models import (
     Event, EventGoer, Notification, MarketingCampaign,
     NotificationType, NotificationChannel, EventStatus, EventUpdate as EventUpdateModel,
@@ -27,7 +28,9 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 # ============== Event Reminders ==============
 
 @router.post("/reminders", response_model=SendReminderResponse)
+@limiter.limit("10/minute")
 def send_reminders(
+    http_request: Request,
     request: SendReminderRequest,
     db: Session = Depends(get_db),
 ):
@@ -48,7 +51,9 @@ def send_reminders(
 # ============== Event Updates ==============
 
 @router.post("/events/{event_id}/update", response_model=EventUpdateResponse)
+@limiter.limit("10/minute")
 def send_event_update(
+    http_request: Request,
     event_id: int,
     request: EventUpdateRequest,
     db: Session = Depends(get_db),
@@ -93,7 +98,9 @@ def send_event_update(
 # ============== Event Cancellation ==============
 
 @router.post("/events/{event_id}/cancel", response_model=EventUpdateResponse)
+@limiter.limit("5/minute")
 def cancel_event(
+    http_request: Request,
     event_id: int,
     request: EventCancelRequest,
     db: Session = Depends(get_db),
@@ -140,7 +147,9 @@ def cancel_event(
 # ============== SMS Tickets ==============
 
 @router.post("/sms-ticket", response_model=SendSMSTicketResponse)
+@limiter.limit("10/minute")
 def send_ticket_via_sms(
+    http_request: Request,
     request: SendSMSTicketRequest,
     db: Session = Depends(get_db),
 ):
@@ -156,9 +165,13 @@ def send_ticket_via_sms(
 # ============== Marketing Campaigns ==============
 
 @router.get("/campaigns", response_model=list[MarketingCampaignResponse])
-def list_campaigns(db: Session = Depends(get_db)):
-    """List all marketing campaigns."""
-    campaigns = db.query(MarketingCampaign).order_by(MarketingCampaign.created_at.desc()).all()
+def list_campaigns(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """List marketing campaigns."""
+    campaigns = db.query(MarketingCampaign).order_by(MarketingCampaign.created_at.desc()).offset(offset).limit(limit).all()
     return campaigns
 
 
@@ -176,7 +189,9 @@ def create_campaign(
 
 
 @router.post("/campaigns/{campaign_id}/send", response_model=SendMarketingResponse)
+@limiter.limit("5/minute")
 def send_campaign(
+    http_request: Request,
     campaign_id: int,
     request: SendMarketingRequest,
     db: Session = Depends(get_db),
@@ -201,7 +216,8 @@ def get_notification_history(
     event_goer_id: Optional[int] = None,
     event_id: Optional[int] = None,
     notification_type: Optional[NotificationType] = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     """Get notification history with optional filters."""
@@ -214,7 +230,7 @@ def get_notification_history(
     if notification_type:
         query = query.filter(Notification.notification_type == notification_type)
 
-    notifications = query.order_by(Notification.created_at.desc()).limit(limit).all()
+    notifications = query.order_by(Notification.created_at.desc()).offset(offset).limit(limit).all()
     return notifications
 
 

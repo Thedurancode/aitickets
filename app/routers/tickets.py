@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 import stripe
@@ -7,6 +7,7 @@ import secrets
 from datetime import datetime
 
 from app.database import get_db
+from app.rate_limit import limiter
 from app.models import Event, TicketTier, Ticket, EventGoer, TicketStatus, PromoCode, DiscountType
 from app.schemas import (
     PurchaseRequest,
@@ -27,7 +28,9 @@ router = APIRouter(prefix="/tickets", tags=["tickets"])
 
 
 @router.post("/events/{event_id}/purchase", response_model=CheckoutSessionResponse)
+@limiter.limit("20/minute")
 def create_checkout_session(
+    request: Request,
     event_id: int,
     purchase: PurchaseRequest,
     db: Session = Depends(get_db),

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
@@ -14,9 +14,13 @@ router = APIRouter(prefix="/event-goers", tags=["event_goers"])
 
 
 @router.get("", response_model=list[EventGoerResponse])
-def list_event_goers(db: Session = Depends(get_db)):
-    """List all event goers."""
-    event_goers = db.query(EventGoer).all()
+def list_event_goers(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """List event goers."""
+    event_goers = db.query(EventGoer).order_by(EventGoer.id).offset(offset).limit(limit).all()
     return event_goers
 
 

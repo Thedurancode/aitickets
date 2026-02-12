@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     mcp_api_key: str = ""  # API key for MCP/voice endpoints (empty = auth disabled)
     admin_api_key: str = ""  # Separate API key for REST /api/* endpoints (empty = falls back to mcp_api_key)
 
+    # CORS
+    cors_origins: str = ""  # Comma-separated allowed origins (empty = allow all)
+
     # LLM Routing (supports OpenRouter, Zhipu, OpenAI)
     openrouter_api_key: str = ""
     openai_api_key: str = ""
