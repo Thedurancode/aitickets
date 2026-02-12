@@ -168,11 +168,20 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
         "venue_id": db_event.venue_id,
     }
 
+    # Delete tickets that belong to this event's tiers
+    try:
+        db.execute(text(
+            "DELETE FROM tickets WHERE ticket_tier_id IN "
+            "(SELECT id FROM ticket_tiers WHERE event_id = :eid)"
+        ), {"eid": event_id})
+    except Exception:
+        pass
+
     # Clean up all FK references that don't cascade automatically
     for table in [
-        "survey_responses", "notifications", "event_updates",
+        "ticket_tiers", "survey_responses", "notifications", "event_updates",
         "page_views", "auto_triggers", "admin_magic_links",
-        "knowledge_documents",
+        "knowledge_documents", "waitlist_entries", "event_photos",
     ]:
         try:
             db.execute(text(f"DELETE FROM {table} WHERE event_id = :eid"), {"eid": event_id})
@@ -190,14 +199,12 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
         db.execute(text("DELETE FROM event_category_association WHERE event_id = :eid"), {"eid": event_id})
     except Exception:
         pass
-    # Remove event photos
-    try:
-        db.execute(text("DELETE FROM event_photos WHERE event_id = :eid"), {"eid": event_id})
-    except Exception:
-        pass
 
-    db.delete(db_event)
+    # Delete the event itself via raw SQL to avoid ORM cascade issues
+    db.execute(text("DELETE FROM events WHERE id = :eid"), {"eid": event_id})
     db.commit()
+    # Expunge the ORM object so SQLAlchemy doesn't try to flush it
+    db.expunge(db_event)
 
     # Fire webhook: event.deleted
     try:
