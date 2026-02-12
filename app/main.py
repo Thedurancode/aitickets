@@ -13,7 +13,7 @@ from pathlib import Path
 from app.database import init_db
 from app.config import get_settings
 from app.rate_limit import limiter
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ app.include_router(analytics.router, prefix=api_prefix)
 app.include_router(knowledge.router, prefix=api_prefix)
 app.include_router(webhooks.router, prefix=api_prefix)
 app.include_router(about.router, prefix=api_prefix)
+app.include_router(flyer_styles.router, prefix=api_prefix)
 
 # Non-API routers (keep at root)
 app.include_router(payments.router)   # /webhooks/stripe

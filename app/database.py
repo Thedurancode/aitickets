@@ -54,6 +54,7 @@ MIGRATIONS = [
     "add_knowledge_base",
     "add_webhooks",
     "add_about_sections",
+    "add_flyer_styles",
 ]
 
 

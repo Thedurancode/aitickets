@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: str = ""  # Comma-separated allowed origins (empty = allow all)
 
+    # Gemini (Image Generation)
+    gemini_api_key: str = ""
+
     # LLM Routing (supports OpenRouter, Zhipu, OpenAI)
     openrouter_api_key: str = ""
     openai_api_key: str = ""

@@ -12,6 +12,7 @@ from app.schemas import (
     EventDetailResponse,
     EventWithVenueResponse,
     TicketTierWithAvailability,
+    GenerateFlyerRequest,
 )
 from app.config import get_settings
 
@@ -251,3 +252,65 @@ async def upload_event_image(
     db.refresh(db_event)
 
     return db_event
+
+
+@router.post("/{event_id}/generate-flyer", response_model=EventResponse)
+def generate_event_flyer(
+    event_id: int,
+    body: GenerateFlyerRequest = None,
+    db: Session = Depends(get_db),
+):
+    """Generate an AI flyer for an event using Gemini and save it as the event image."""
+    from app.services.flyer_generator import build_flyer_prompt, generate_flyer
+
+    event = (
+        db.query(Event)
+        .options(joinedload(Event.venue), joinedload(Event.ticket_tiers))
+        .filter(Event.id == event_id)
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    tiers_data = [
+        {"name": tier.name, "price": tier.price}
+        for tier in (event.ticket_tiers or [])
+    ]
+
+    settings = get_settings()
+
+    prompt = build_flyer_prompt(
+        event_name=event.name,
+        event_date=str(event.event_date),
+        event_time=event.event_time or "",
+        venue_name=event.venue.name if event.venue else None,
+        venue_address=event.venue.address if event.venue else None,
+        description=event.description,
+        tiers=tiers_data,
+        org_name=settings.org_name,
+        style_instructions=body.style_instructions if body else None,
+    )
+
+    # Look up style from the library if provided
+    reference_image_path = None
+    if body and body.style_id:
+        from app.models import FlyerStyle
+        style = db.query(FlyerStyle).filter(FlyerStyle.id == body.style_id).first()
+        if not style:
+            raise HTTPException(status_code=404, detail="Flyer style not found")
+        prompt += f"\n\nUse this reference image as a style guide: {style.description}"
+        if style.image_url:
+            img_file = Path(style.image_url.lstrip("/"))
+            if img_file.exists():
+                reference_image_path = str(img_file)
+
+    result = generate_flyer(prompt, reference_image_path=reference_image_path)
+
+    if not result["success"]:
+        raise HTTPException(status_code=502, detail=result["error"])
+
+    event.image_url = result["image_url"]
+    db.commit()
+    db.refresh(event)
+
+    return event

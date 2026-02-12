@@ -23,3 +23,4 @@ pypdf
 slowapi
 pytest
 httpx
+google-genai

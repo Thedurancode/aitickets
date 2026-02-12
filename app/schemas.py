@@ -480,3 +480,31 @@ class TeamMemberAdd(BaseModel):
     role: str
     bio: Optional[str] = None
     photo_url: Optional[str] = None
+
+
+# ============== Flyer Style Library Schemas ==============
+
+class FlyerStyleCreate(BaseModel):
+    name: str
+    description: str
+
+class FlyerStyleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+class FlyerStyleResponse(BaseModel):
+    id: int
+    name: str
+    description: str
+    image_url: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ============== Flyer Generation Schemas ==============
+
+class GenerateFlyerRequest(BaseModel):
+    style_instructions: Optional[str] = None
+    style_id: Optional[int] = None

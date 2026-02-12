@@ -549,6 +549,17 @@ class WebhookDelivery(Base):
     endpoint = relationship("WebhookEndpoint", back_populates="deliveries")
 
 
+class FlyerStyle(Base):
+    """Reusable flyer design styles with optional reference images."""
+    __tablename__ = "flyer_styles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=False)
+    image_url = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
 class AboutSection(Base):
     """Key-value store for About Us page content, editable via voice/MCP."""
     __tablename__ = "about_sections"

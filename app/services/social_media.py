@@ -155,3 +155,56 @@ def delete_social_post(post_id: str) -> dict:
         return {"success": True, "data": data}
     except requests.RequestException as e:
         return {"success": False, "error": str(e)}
+
+
+def upload_media_from_url(url: str) -> dict:
+    """
+    Upload a media file to Postiz from a public URL.
+    Returns the Postiz media path that can be used when creating posts.
+
+    Args:
+        url: Public URL of the image/video to upload.
+    """
+    headers = _get_headers()
+    if not headers:
+        return {"success": False, "error": "Postiz not configured (missing API key)"}
+
+    try:
+        r = requests.post(
+            f"{_get_base_url()}/uploads/from-url",
+            json={"url": url},
+            headers=headers,
+            timeout=60,
+        )
+        data = r.json()
+        if r.status_code >= 400:
+            return {"success": False, "error": data}
+        return {"success": True, "data": data}
+    except requests.RequestException as e:
+        return {"success": False, "error": str(e)}
+
+
+def find_available_slot(integration_id: str) -> dict:
+    """
+    Find the next available posting time slot for a specific channel.
+    Useful for smart scheduling — avoids posting conflicts and finds optimal times.
+
+    Args:
+        integration_id: Postiz integration/channel ID.
+    """
+    headers = _get_headers()
+    if not headers:
+        return {"success": False, "error": "Postiz not configured (missing API key)"}
+
+    try:
+        r = requests.get(
+            f"{_get_base_url()}/integrations/{integration_id}/available-slot",
+            headers=headers,
+            timeout=30,
+        )
+        data = r.json()
+        if r.status_code >= 400:
+            return {"success": False, "error": data}
+        return {"success": True, "data": data}
+    except requests.RequestException as e:
+        return {"success": False, "error": str(e)}

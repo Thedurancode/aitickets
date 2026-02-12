@@ -1425,6 +1425,28 @@ async def list_tools():
                 "required": ["post_id"],
             },
         ),
+        Tool(
+            name="upload_social_media_from_url",
+            description="Upload a media file (image/video) to Postiz from a public URL. Returns a Postiz media path you can use when creating posts. Great for uploading AI-generated flyers or event images to use in social posts.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Public URL of the image or video to upload to Postiz"},
+                },
+                "required": ["url"],
+            },
+        ),
+        Tool(
+            name="find_social_posting_slot",
+            description="Find the next available optimal posting time slot for a social media channel. Helps with smart scheduling — avoids conflicts and finds the best time to post. Call list_social_integrations first to get the integration ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "integration_id": {"type": "string", "description": "Postiz integration/channel ID (from list_social_integrations)"},
+                },
+                "required": ["integration_id"],
+            },
+        ),
         # ============== Predictive Analytics Tools ==============
         Tool(
             name="predict_demand",
@@ -1705,6 +1727,56 @@ async def list_tools():
                     "name": {"type": "string", "description": "Name of the team member to remove"},
                 },
                 "required": ["name"],
+            },
+        ),
+        # ============== AI Flyer Generation Tools ==============
+        Tool(
+            name="generate_event_flyer",
+            description="Generate an AI-designed event flyer image using Gemini (NanoBanana). Automatically builds a prompt from the event's name, date, venue, and ticket tiers. Optionally provide style_instructions for ad-hoc styling, or style_id to use a saved style from the library (use list_flyer_styles to see available styles). The generated image is saved as the event's flyer/image.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to generate a flyer for"},
+                    "style_instructions": {
+                        "type": "string",
+                        "description": "Optional style/design instructions (e.g. 'Use dark theme with gold accents', 'Minimalist black and white')",
+                    },
+                    "style_id": {
+                        "type": "integer",
+                        "description": "Optional ID of a saved flyer style from the style library. Use list_flyer_styles to see available styles.",
+                    },
+                },
+                "required": ["event_id"],
+            },
+        ),
+        # ============== Flyer Style Library Tools ==============
+        Tool(
+            name="list_flyer_styles",
+            description="List all saved flyer styles in the style library. Returns id, name, description, and whether a reference image is attached. Use the style id with generate_event_flyer to apply a style.",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="create_flyer_style",
+            description="Create a new flyer style in the style library. Provide a name and a description of the visual style. You can upload a reference image later via the API.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Unique name for this style (e.g. 'Neon Night', 'Classic Elegant')"},
+                    "description": {"type": "string", "description": "Detailed description of the visual style"},
+                },
+                "required": ["name", "description"],
+            },
+        ),
+        Tool(
+            name="delete_flyer_style",
+            description="Delete a flyer style from the style library by ID or name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "style_id": {"type": "integer", "description": "Style ID to delete"},
+                    "name": {"type": "string", "description": "Style name to delete (alternative to style_id)"},
+                },
+                "required": [],
             },
         ),
     ]
@@ -5727,6 +5799,32 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             }
         return result
 
+    elif name == "upload_social_media_from_url":
+        from app.services.social_media import upload_media_from_url
+
+        result = upload_media_from_url(arguments["url"])
+        if result["success"]:
+            return {
+                "success": True,
+                "data": result["data"],
+                "source_url": arguments["url"],
+                "message": "Media uploaded to Postiz. Use the returned path when creating posts.",
+            }
+        return result
+
+    elif name == "find_social_posting_slot":
+        from app.services.social_media import find_available_slot
+
+        result = find_available_slot(arguments["integration_id"])
+        if result["success"]:
+            return {
+                "success": True,
+                "integration_id": arguments["integration_id"],
+                "data": result["data"],
+                "message": "Found next available posting slot. Use this time with schedule_social_post.",
+            }
+        return result
+
     # ============== Revenue Report Tool ==============
     elif name == "get_revenue_report":
         from sqlalchemy import func as sqlfunc
@@ -6402,6 +6500,135 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "message": f"Removed {arguments['name']} from the About Us team section.",
             "team_members": new_members,
         }
+
+    # ============== AI Flyer Generation ==============
+
+    elif name == "generate_event_flyer":
+        from sqlalchemy.orm import joinedload as _joinedload
+        from app.models import Event
+        from app.services.flyer_generator import build_flyer_prompt, generate_flyer
+
+        event = (
+            db.query(Event)
+            .options(_joinedload(Event.venue), _joinedload(Event.ticket_tiers))
+            .filter(Event.id == arguments["event_id"])
+            .first()
+        )
+        if not event:
+            return {"error": "Event not found"}
+
+        tiers_data = [
+            {"name": tier.name, "price": tier.price}
+            for tier in (event.ticket_tiers or [])
+        ]
+
+        prompt = build_flyer_prompt(
+            event_name=event.name,
+            event_date=str(event.event_date),
+            event_time=event.event_time or "",
+            venue_name=event.venue.name if event.venue else None,
+            venue_address=event.venue.address if event.venue else None,
+            description=event.description,
+            tiers=tiers_data,
+            org_name=settings.org_name,
+            style_instructions=arguments.get("style_instructions"),
+        )
+
+        # Look up style from library if provided
+        reference_image_path = None
+        if arguments.get("style_id"):
+            from app.models import FlyerStyle
+            style = db.query(FlyerStyle).filter(FlyerStyle.id == arguments["style_id"]).first()
+            if not style:
+                return {"error": f"Flyer style {arguments['style_id']} not found. Use list_flyer_styles to see available styles."}
+            prompt += f"\n\nUse this reference image as a style guide: {style.description}"
+            if style.image_url:
+                from pathlib import Path as _Path
+                img_file = _Path(style.image_url.lstrip("/"))
+                if img_file.exists():
+                    reference_image_path = str(img_file)
+
+        result = generate_flyer(prompt, reference_image_path=reference_image_path)
+
+        if not result["success"]:
+            return {"error": result["error"]}
+
+        event.image_url = result["image_url"]
+        db.commit()
+
+        return {
+            "success": True,
+            "event_id": event.id,
+            "event_name": event.name,
+            "image_url": result["image_url"],
+            "prompt_used": prompt,
+            "message": f"Generated AI flyer for '{event.name}' and saved as event image.",
+        }
+
+    # ============== Flyer Style Library ==============
+
+    elif name == "list_flyer_styles":
+        from app.models import FlyerStyle
+
+        styles = db.query(FlyerStyle).order_by(FlyerStyle.name).all()
+        return {
+            "success": True,
+            "styles": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "description": s.description,
+                    "has_reference_image": bool(s.image_url),
+                    "image_url": s.image_url,
+                }
+                for s in styles
+            ],
+            "count": len(styles),
+            "message": f"Found {len(styles)} flyer style(s). Use style_id with generate_event_flyer to apply one.",
+        }
+
+    elif name == "create_flyer_style":
+        from app.models import FlyerStyle
+
+        existing = db.query(FlyerStyle).filter(FlyerStyle.name == arguments["name"]).first()
+        if existing:
+            return {"error": f"A style named '{arguments['name']}' already exists (id={existing.id})."}
+
+        style = FlyerStyle(name=arguments["name"], description=arguments["description"])
+        db.add(style)
+        db.commit()
+        db.refresh(style)
+        return {
+            "success": True,
+            "style_id": style.id,
+            "name": style.name,
+            "description": style.description,
+            "message": f"Created flyer style '{style.name}' (id={style.id}). Upload a reference image via POST /api/flyer-styles/{style.id}/image.",
+        }
+
+    elif name == "delete_flyer_style":
+        from app.models import FlyerStyle
+
+        style = None
+        if arguments.get("style_id"):
+            style = db.query(FlyerStyle).filter(FlyerStyle.id == arguments["style_id"]).first()
+        elif arguments.get("name"):
+            style = db.query(FlyerStyle).filter(FlyerStyle.name == arguments["name"]).first()
+        else:
+            return {"error": "Provide either style_id or name to delete."}
+
+        if not style:
+            return {"error": "Flyer style not found."}
+
+        name_str = style.name
+        if style.image_url:
+            from pathlib import Path as _Path
+            img_file = _Path(style.image_url.lstrip("/"))
+            if img_file.exists():
+                img_file.unlink()
+        db.delete(style)
+        db.commit()
+        return {"success": True, "message": f"Deleted flyer style '{name_str}'."}
 
     return {"error": f"Unknown tool: {name}"}
 

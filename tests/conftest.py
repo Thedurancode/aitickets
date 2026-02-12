@@ -13,6 +13,7 @@ os.environ["RESEND_API_KEY"] = ""
 os.environ["TWILIO_ACCOUNT_SID"] = ""
 os.environ["MCP_API_KEY"] = ""
 os.environ["ADMIN_API_KEY"] = ""
+os.environ["GEMINI_API_KEY"] = ""
 
 import pytest
 from fastapi.testclient import TestClient
