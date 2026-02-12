@@ -506,3 +506,44 @@ class KnowledgeChunk(Base):
     chunk_index = Column(Integer, nullable=False)
 
     document = relationship("KnowledgeDocument", back_populates="chunks")
+
+
+class WebhookDeliveryStatus(str, enum.Enum):
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class WebhookEndpoint(Base):
+    """Registered outbound webhook endpoint."""
+    __tablename__ = "webhook_endpoints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String(500), nullable=False)
+    secret = Column(String(255), nullable=False)
+    description = Column(String(500), nullable=True)
+    event_types = Column(Text, nullable=False)  # JSON list
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    deliveries = relationship("WebhookDelivery", back_populates="endpoint", cascade="all, delete-orphan")
+
+
+class WebhookDelivery(Base):
+    """Log of each webhook delivery attempt."""
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    endpoint_id = Column(Integer, ForeignKey("webhook_endpoints.id"), nullable=False, index=True)
+    event_type = Column(String(50), nullable=False)
+    payload = Column(Text, nullable=False)
+    response_status = Column(Integer, nullable=True)
+    response_body = Column(Text, nullable=True)
+    status = Column(Enum(WebhookDeliveryStatus), default=WebhookDeliveryStatus.PENDING)
+    attempt = Column(Integer, default=1)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    endpoint = relationship("WebhookEndpoint", back_populates="deliveries")

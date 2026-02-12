@@ -45,6 +45,19 @@ def create_event_goer(event_goer: EventGoerCreate, db: Session = Depends(get_db)
     db.add(db_event_goer)
     db.commit()
     db.refresh(db_event_goer)
+
+    # Fire webhook: customer.registered
+    try:
+        from app.services.webhooks import fire_webhook_event
+        fire_webhook_event("customer.registered", {
+            "customer_id": db_event_goer.id,
+            "email": db_event_goer.email,
+            "name": db_event_goer.name,
+            "phone": db_event_goer.phone,
+        }, db=db)
+    except Exception:
+        pass
+
     return db_event_goer
 
 

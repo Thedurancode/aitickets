@@ -1616,6 +1616,53 @@ async def list_tools():
                 "required": ["title", "content"],
             },
         ),
+        # Webhook tools
+        Tool(
+            name="register_webhook",
+            description="Register a new outbound webhook endpoint. Receives HTTP POST notifications when events happen (ticket purchased, checked in, refunded, event created/updated/deleted, customer registered).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The URL to POST webhook events to"},
+                    "secret": {"type": "string", "description": "Shared secret for HMAC-SHA256 signature verification"},
+                    "event_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Event types to subscribe to: ticket.purchased, ticket.checked_in, ticket.refunded, event.created, event.updated, event.deleted, customer.registered, or * for all",
+                    },
+                    "description": {"type": "string", "description": "Human-readable description (optional)"},
+                },
+                "required": ["url", "secret", "event_types"],
+            },
+        ),
+        Tool(
+            name="list_webhooks",
+            description="List all registered outbound webhook endpoints",
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="delete_webhook",
+            description="Delete a webhook endpoint and all its delivery history",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "webhook_id": {"type": "integer", "description": "The webhook endpoint ID to delete"},
+                },
+                "required": ["webhook_id"],
+            },
+        ),
+        Tool(
+            name="get_webhook_deliveries",
+            description="Get delivery history for a webhook endpoint (shows status, attempts, errors)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "webhook_id": {"type": "integer", "description": "The webhook endpoint ID"},
+                    "limit": {"type": "integer", "description": "Max results (default 20)"},
+                },
+                "required": ["webhook_id"],
+            },
+        ),
     ]
 
 
@@ -6122,6 +6169,99 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "document_id": doc.id,
             "title": doc.title,
             "chunks_created": chunk_count,
+        }
+
+    # ============== Webhook Tools ==============
+
+    elif name == "register_webhook":
+        import json as _json
+        from app.models import WebhookEndpoint
+
+        endpoint = WebhookEndpoint(
+            url=arguments["url"],
+            secret=arguments["secret"],
+            description=arguments.get("description"),
+            event_types=_json.dumps(arguments["event_types"]),
+            is_active=True,
+        )
+        db.add(endpoint)
+        db.commit()
+        db.refresh(endpoint)
+        return {
+            "id": endpoint.id,
+            "url": endpoint.url,
+            "event_types": arguments["event_types"],
+            "description": endpoint.description,
+            "message": f"Webhook registered. Will POST to {endpoint.url} for events: {', '.join(arguments['event_types'])}",
+        }
+
+    elif name == "list_webhooks":
+        import json as _json
+        from app.models import WebhookEndpoint
+
+        endpoints = db.query(WebhookEndpoint).order_by(WebhookEndpoint.id.desc()).all()
+        return {
+            "count": len(endpoints),
+            "webhooks": [
+                {
+                    "id": ep.id,
+                    "url": ep.url,
+                    "event_types": _json.loads(ep.event_types) if ep.event_types else [],
+                    "is_active": ep.is_active,
+                    "description": ep.description,
+                    "created_at": ep.created_at,
+                }
+                for ep in endpoints
+            ],
+        }
+
+    elif name == "delete_webhook":
+        from app.models import WebhookEndpoint
+
+        endpoint = db.query(WebhookEndpoint).filter(
+            WebhookEndpoint.id == arguments["webhook_id"]
+        ).first()
+        if not endpoint:
+            return {"error": "Webhook endpoint not found"}
+        url = endpoint.url
+        db.delete(endpoint)
+        db.commit()
+        return {"deleted": True, "message": f"Webhook {arguments['webhook_id']} ({url}) deleted."}
+
+    elif name == "get_webhook_deliveries":
+        from app.models import WebhookEndpoint, WebhookDelivery
+
+        endpoint = db.query(WebhookEndpoint).filter(
+            WebhookEndpoint.id == arguments["webhook_id"]
+        ).first()
+        if not endpoint:
+            return {"error": "Webhook endpoint not found"}
+
+        limit = arguments.get("limit", 20)
+        deliveries = (
+            db.query(WebhookDelivery)
+            .filter(WebhookDelivery.endpoint_id == endpoint.id)
+            .order_by(WebhookDelivery.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return {
+            "endpoint_id": endpoint.id,
+            "url": endpoint.url,
+            "count": len(deliveries),
+            "deliveries": [
+                {
+                    "id": d.id,
+                    "event_type": d.event_type,
+                    "status": d.status.value if hasattr(d.status, "value") else d.status,
+                    "attempt": d.attempt,
+                    "response_status": d.response_status,
+                    "error": d.error,
+                    "created_at": d.created_at,
+                    "completed_at": d.completed_at,
+                }
+                for d in deliveries
+            ],
         }
 
     return {"error": f"Unknown tool: {name}"}

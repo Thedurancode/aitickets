@@ -415,3 +415,55 @@ class SendSMSTicketResponse(BaseModel):
     ticket_id: int
     success: bool
     message: str
+
+
+# ============== Webhook Schemas ==============
+
+class WebhookEndpointCreate(BaseModel):
+    url: str
+    secret: str
+    description: Optional[str] = None
+    event_types: list[str]
+
+
+class WebhookEndpointUpdate(BaseModel):
+    url: Optional[str] = None
+    secret: Optional[str] = None
+    description: Optional[str] = None
+    event_types: Optional[list[str]] = None
+    is_active: Optional[bool] = None
+
+
+class WebhookEndpointResponse(BaseModel):
+    id: int
+    url: str
+    description: Optional[str] = None
+    event_types: list[str]
+    is_active: bool
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class WebhookDeliveryResponse(BaseModel):
+    id: int
+    endpoint_id: int
+    event_type: str
+    status: str
+    attempt: int
+    response_status: Optional[int] = None
+    error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class WebhookTestResponse(BaseModel):
+    delivery_id: int
+    status: str
+    response_status: Optional[int] = None
+    response_body: Optional[str] = None
+    error: Optional[str] = None

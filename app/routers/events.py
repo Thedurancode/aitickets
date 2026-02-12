@@ -98,6 +98,20 @@ def create_event(event: EventCreate, db: Session = Depends(get_db)):
     db.add(db_event)
     db.commit()
     db.refresh(db_event)
+
+    # Fire webhook: event.created
+    try:
+        from app.services.webhooks import fire_webhook_event
+        fire_webhook_event("event.created", {
+            "event_id": db_event.id,
+            "name": db_event.name,
+            "venue_id": db_event.venue_id,
+            "event_date": db_event.event_date,
+            "event_time": db_event.event_time,
+        }, db=db)
+    except Exception:
+        pass
+
     return db_event
 
 
@@ -121,6 +135,21 @@ def update_event(event_id: int, event: EventUpdate, db: Session = Depends(get_db
 
     db.commit()
     db.refresh(db_event)
+
+    # Fire webhook: event.updated
+    try:
+        from app.services.webhooks import fire_webhook_event
+        fire_webhook_event("event.updated", {
+            "event_id": db_event.id,
+            "name": db_event.name,
+            "venue_id": db_event.venue_id,
+            "event_date": db_event.event_date,
+            "event_time": db_event.event_time,
+            "updated_fields": list(update_data.keys()),
+        }, db=db)
+    except Exception:
+        pass
+
     return db_event
 
 
@@ -131,8 +160,21 @@ def delete_event(event_id: int, db: Session = Depends(get_db)):
     if not db_event:
         raise HTTPException(status_code=404, detail="Event not found")
 
+    event_data = {
+        "event_id": db_event.id,
+        "name": db_event.name,
+        "venue_id": db_event.venue_id,
+    }
     db.delete(db_event)
     db.commit()
+
+    # Fire webhook: event.deleted
+    try:
+        from app.services.webhooks import fire_webhook_event
+        fire_webhook_event("event.deleted", event_data, db=db)
+    except Exception:
+        pass
+
     return None
 
 

@@ -52,6 +52,7 @@ MIGRATIONS = [
     "add_magic_links",
     "add_conversation_sessions",
     "add_knowledge_base",
+    "add_webhooks",
 ]
 
 

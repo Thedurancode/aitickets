@@ -113,6 +113,22 @@ def create_checkout_session(
         for t in tickets:
             db.refresh(t)
 
+        # Fire webhook: ticket.purchased (free tickets)
+        try:
+            from app.services.webhooks import fire_webhook_event
+            for t in tickets:
+                fire_webhook_event("ticket.purchased", {
+                    "ticket_id": t.id,
+                    "event_id": event_id,
+                    "event_name": event.name,
+                    "tier_name": tier.name,
+                    "price_cents": 0,
+                    "customer_email": purchase.email,
+                    "customer_name": purchase.name,
+                }, db=db)
+        except Exception:
+            pass
+
         msg = f"{purchase.quantity} free ticket(s) confirmed for {event.name}!"
         if promo:
             msg = f"{purchase.quantity} ticket(s) confirmed for {event.name} (code {promo.code} applied)!"
@@ -291,6 +307,19 @@ def validate_ticket(qr_token: str, db: Session = Depends(get_db)):
     # Mark as checked in
     ticket.status = TicketStatus.CHECKED_IN
     db.commit()
+
+    # Fire webhook: ticket.checked_in
+    try:
+        from app.services.webhooks import fire_webhook_event
+        fire_webhook_event("ticket.checked_in", {
+            "ticket_id": ticket.id,
+            "event_id": ticket.ticket_tier.event_id,
+            "event_name": ticket.ticket_tier.event.name,
+            "customer_email": ticket.event_goer.email,
+            "customer_name": ticket.event_goer.name,
+        }, db=db)
+    except Exception:
+        pass
 
     return TicketValidationResponse(
         valid=True,

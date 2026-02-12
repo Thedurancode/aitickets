@@ -135,6 +135,22 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         except Exception:
             pass
 
+    # Fire webhook: ticket.purchased (paid tickets)
+    try:
+        from app.services.webhooks import fire_webhook_event
+        for ticket in tickets:
+            fire_webhook_event("ticket.purchased", {
+                "ticket_id": ticket.id,
+                "event_id": ticket.ticket_tier.event_id,
+                "event_name": ticket.ticket_tier.event.name,
+                "tier_name": ticket.ticket_tier.name,
+                "price_cents": ticket.ticket_tier.price,
+                "customer_email": ticket.event_goer.email,
+                "customer_name": ticket.event_goer.name,
+            })
+    except Exception:
+        pass
+
     # Send confirmation emails
     for ticket in tickets:
         event = ticket.ticket_tier.event
@@ -192,6 +208,20 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
                     "refunded_count": refunded_count,
                 },
             }, timeout=2)
+        except Exception:
+            pass
+
+    # Fire webhook: ticket.refunded
+    if refunded_count > 0:
+        try:
+            from app.services.webhooks import fire_webhook_event
+            for ticket in tickets:
+                if ticket.status == TicketStatus.REFUNDED:
+                    fire_webhook_event("ticket.refunded", {
+                        "ticket_id": ticket.id,
+                        "event_id": event_id,
+                        "payment_intent_id": payment_intent_id,
+                    })
         except Exception:
             pass
 
