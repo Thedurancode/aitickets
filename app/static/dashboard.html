@@ -1434,7 +1434,7 @@
         const API_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
             ? `http://${window.location.hostname}:3001`
             : window.location.origin;
-        const WS_URL = API_URL.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws';
+        const SSE_URL = API_URL + '/mcp/sse';
 
         // State
         let stats = {
@@ -1449,33 +1449,39 @@
         let recentCheckIns = [];
         let isInitialLoad = true;
         let isRefreshing = false;
-        let ws = null;
+        let eventSource = null;
 
-        // Connect to WebSocket
+        // Connect to SSE stream
         function connectWebSocket() {
             const statusEl = document.getElementById('connection-status');
 
-            ws = new WebSocket(WS_URL);
+            eventSource = new EventSource(SSE_URL);
 
-            ws.onopen = () => {
+            eventSource.addEventListener('connected', (e) => {
                 statusEl.className = 'connection-status connected';
                 statusEl.innerHTML = '<div class="live-dot"></div><span>Connected</span>';
-                addActivity('system', 'Connected to Live Feed', 'Real-time WebSocket active');
-            };
+                addActivity('system', 'Connected to Live Feed', 'Real-time SSE active');
+            });
 
-            ws.onmessage = (e) => {
-                const msg = JSON.parse(e.data);
-                handleRealtimeEvent(msg.type, msg.data);
-            };
+            eventSource.addEventListener('tool_called', (e) => {
+                const data = JSON.parse(e.data);
+                handleRealtimeEvent('tool_called', data);
+            });
 
-            ws.onclose = () => {
+            eventSource.addEventListener('refresh', (e) => {
+                const data = JSON.parse(e.data);
+                handleRealtimeEvent('refresh', data);
+            });
+
+            eventSource.addEventListener('keepalive', (e) => {
+                // Keep connection alive
+            });
+
+            eventSource.onerror = () => {
                 statusEl.className = 'connection-status disconnected';
                 statusEl.innerHTML = '<div class="live-dot" style="background: #ff0000;"></div><span>Reconnecting...</span>';
+                eventSource.close();
                 setTimeout(connectWebSocket, 3000);
-            };
-
-            ws.onerror = () => {
-                // onclose will fire after this
             };
         }
 
