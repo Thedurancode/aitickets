@@ -2188,18 +2188,20 @@
                     updateTicker(data.upcoming_events);
                 }
 
-                // Clear activities and show ready message
-                document.getElementById('activity-list').innerHTML = '';
-                addActivity('system', 'Dashboard Ready', 'Waiting for voice agent activity...', '🎙️');
-
-                // Allow future tool calls to show
-                setTimeout(() => { isInitialLoad = false; }, 1000);
+                // Only clear activities on first load, not on refresh
+                if (isInitialLoad) {
+                    document.getElementById('activity-list').innerHTML = '';
+                    addActivity('system', 'Dashboard Ready', 'Waiting for voice agent activity...', '🎙️');
+                    setTimeout(() => { isInitialLoad = false; }, 500);
+                }
 
             } catch (error) {
                 console.error('Failed to load initial data:', error);
-                document.getElementById('activity-list').innerHTML = '';
-                addActivity('system', 'Dashboard Ready', 'Waiting for voice agent activity...', '🎙️');
-                setTimeout(() => { isInitialLoad = false; }, 1000);
+                if (isInitialLoad) {
+                    document.getElementById('activity-list').innerHTML = '';
+                    addActivity('system', 'Dashboard Ready', 'Waiting for voice agent activity...', '🎙️');
+                    setTimeout(() => { isInitialLoad = false; }, 500);
+                }
             }
         }
 
