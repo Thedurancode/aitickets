@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 import uuid
 from pathlib import Path
@@ -68,10 +68,12 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
         description=event.description,
         image_url=event.image_url,
         promo_video_url=event.promo_video_url,
+        post_event_video_url=event.post_event_video_url,
         event_date=event.event_date,
         event_time=event.event_time,
         status=event.status,
         is_visible=event.is_visible,
+        uploads_open=event.uploads_open if event.uploads_open is not None else True,
         doors_open_time=event.doors_open_time,
         created_at=event.created_at,
         venue=event.venue,
@@ -314,3 +316,62 @@ def generate_event_flyer(
     db.refresh(event)
 
     return event
+
+
+# ============== Highlight Video ==============
+
+
+@router.post("/{event_id}/highlight-video")
+def create_highlight_video(
+    event_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Generate a highlight recap video from attendee-uploaded photos and videos.
+
+    Runs in the background. The result is saved to event.post_event_video_url
+    and broadcast via SSE when complete.
+    """
+    from app.services.highlight_video import trigger_highlight_generation_async
+    from app.models import EventPhoto
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    media_count = db.query(EventPhoto).filter(EventPhoto.event_id == event_id).count()
+    if media_count == 0:
+        raise HTTPException(status_code=400, detail="No media uploaded for this event yet")
+
+    background_tasks.add_task(trigger_highlight_generation_async, event_id)
+
+    return {
+        "status": "generating",
+        "message": f"Highlight video is being generated from {media_count} uploads. This may take 30-60 seconds.",
+        "event_id": event_id,
+        "media_count": media_count,
+    }
+
+
+@router.post("/{event_id}/uploads/{action}")
+def toggle_event_uploads(
+    event_id: int,
+    action: str,
+    db: Session = Depends(get_db),
+):
+    """Open or close media uploads for an event. Action must be 'open' or 'close'."""
+    if action not in ("open", "close"):
+        raise HTTPException(status_code=400, detail="Action must be 'open' or 'close'")
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    event.uploads_open = (action == "open")
+    db.commit()
+
+    return {
+        "event_id": event_id,
+        "uploads_open": event.uploads_open,
+        "message": f"Uploads {'opened' if event.uploads_open else 'closed'} for {event.name}",
+    }

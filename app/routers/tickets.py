@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 import stripe
@@ -25,6 +25,126 @@ from app.services.qrcode import generate_qr_code
 from app.services.stripe_sync import get_stripe_checkout_line_item
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+DEFAULT_ALERT_THRESHOLDS = [90, 95, 100]
+
+import logging
+_alert_logger = logging.getLogger(__name__)
+
+
+def check_inventory_thresholds(tier: TicketTier, event: Event, db: Session):
+    """Check if tier crossed any inventory alert thresholds and fire alerts."""
+    if tier.quantity_available <= 0:
+        return
+
+    pct_sold = int((tier.quantity_sold / tier.quantity_available) * 100)
+
+    # Parse configured thresholds (or use defaults)
+    if tier.alert_thresholds:
+        thresholds = sorted(int(x.strip()) for x in tier.alert_thresholds.split(",") if x.strip())
+    else:
+        thresholds = DEFAULT_ALERT_THRESHOLDS
+
+    # Parse already-fired thresholds
+    fired = set()
+    if tier.fired_thresholds:
+        fired = {int(x.strip()) for x in tier.fired_thresholds.split(",") if x.strip()}
+
+    # On refund: un-fire thresholds we've dropped below
+    newly_unfired = {t for t in fired if pct_sold < t}
+    if newly_unfired:
+        fired -= newly_unfired
+        tier.fired_thresholds = ",".join(str(t) for t in sorted(fired)) if fired else None
+        db.commit()
+
+    # On purchase: fire thresholds we've crossed
+    newly_crossed = []
+    for t in thresholds:
+        if pct_sold >= t and t not in fired:
+            newly_crossed.append(t)
+            fired.add(t)
+
+    if not newly_crossed:
+        return
+
+    # Update fired_thresholds
+    tier.fired_thresholds = ",".join(str(t) for t in sorted(fired))
+    db.commit()
+
+    event_name = event.name if event else "Unknown"
+    event_id = event.id if event else tier.event_id
+
+    for threshold in newly_crossed:
+        remaining = tier.quantity_available - tier.quantity_sold
+        alert_data = {
+            "tier_id": tier.id,
+            "tier_name": tier.name,
+            "event_id": event_id,
+            "event_name": event_name,
+            "threshold_percent": threshold,
+            "current_percent": pct_sold,
+            "quantity_sold": tier.quantity_sold,
+            "quantity_available": tier.quantity_available,
+            "remaining": remaining,
+            "is_sold_out": pct_sold >= 100,
+        }
+
+        _alert_logger.info(
+            "Inventory alert: %s for '%s' hit %d%% (%d/%d sold, %d remaining)",
+            tier.name, event_name, threshold, tier.quantity_sold,
+            tier.quantity_available, remaining,
+        )
+
+        # Fire webhook
+        try:
+            from app.services.webhooks import fire_webhook_event
+            fire_webhook_event("tier.threshold_reached", alert_data, db=db)
+        except Exception:
+            pass
+
+        # Broadcast to SSE dashboard
+        try:
+            import requests as http_requests
+            http_requests.post("http://localhost:3001/internal/broadcast", json={
+                "event_type": "inventory_alert",
+                "data": alert_data,
+            }, timeout=2)
+        except Exception:
+            pass
+
+        # Notify organizer via SMS
+        if event and getattr(event, "promoter_phone", None):
+            try:
+                from app.services.sms import send_sms
+                if pct_sold >= 100:
+                    msg = f'SOLD OUT: "{event_name}" — {tier.name} is completely sold out! ({tier.quantity_sold}/{tier.quantity_available})'
+                else:
+                    msg = f'Inventory Alert: "{event_name}" — {tier.name} is {pct_sold}% sold ({remaining} remaining)'
+                send_sms(event.promoter_phone, msg)
+            except Exception:
+                pass
+
+        # Notify organizer via email
+        if event and getattr(event, "promoter_email", None):
+            try:
+                from app.services.email import _send_email
+                if pct_sold >= 100:
+                    subject = f"SOLD OUT: {tier.name} for {event_name}"
+                    html = (
+                        f"<h2>🚨 {tier.name} is Sold Out!</h2>"
+                        f"<p><strong>{event_name}</strong> — {tier.name} has sold all "
+                        f"{tier.quantity_available} tickets.</p>"
+                    )
+                else:
+                    subject = f"Inventory Alert: {tier.name} at {pct_sold}% for {event_name}"
+                    html = (
+                        f"<h2>⚠️ {tier.name} — {pct_sold}% Sold</h2>"
+                        f"<p><strong>{event_name}</strong> — {tier.quantity_sold} of "
+                        f"{tier.quantity_available} sold. <strong>{remaining} remaining.</strong></p>"
+                    )
+                _send_email(event.promoter_email, subject, html)
+            except Exception:
+                pass
 
 
 @router.post("/events/{event_id}/purchase", response_model=CheckoutSessionResponse)
@@ -112,6 +232,12 @@ def create_checkout_session(
         db.commit()
         for t in tickets:
             db.refresh(t)
+
+        # Check inventory thresholds
+        try:
+            check_inventory_thresholds(tier, event, db)
+        except Exception:
+            pass
 
         # Fire webhook: ticket.purchased (free tickets)
         try:
@@ -308,6 +434,23 @@ def validate_ticket(qr_token: str, db: Session = Depends(get_db)):
     ticket.status = TicketStatus.CHECKED_IN
     db.commit()
 
+    # Send media share link (photo/video upload)
+    try:
+        from app.services.media_sharing import generate_media_share_token, send_media_share_notification
+        media_token = generate_media_share_token(
+            db,
+            event_id=ticket.ticket_tier.event_id,
+            event_goer_id=ticket.event_goer_id,
+        )
+        send_media_share_notification(
+            db,
+            event_goer=ticket.event_goer,
+            event=ticket.ticket_tier.event,
+            token=media_token.token,
+        )
+    except Exception:
+        pass  # Never fail check-in due to media share
+
     # Fire webhook: ticket.checked_in
     try:
         from app.services.webhooks import fire_webhook_event
@@ -354,6 +497,37 @@ def _validate_promo(db: Session, code_str: str, tier: TicketTier, event_id: int)
     discounted = max(original - discount, 0)
 
     return promo, discounted, discount
+
+
+@router.get("/by-email", response_model=list[TicketFullResponse])
+@limiter.limit("10/minute")
+def get_tickets_by_email(
+    request: Request,
+    email: str = Query(..., description="Email address to look up tickets for"),
+    db: Session = Depends(get_db),
+):
+    """Get all tickets for a given email address."""
+    event_goer = db.query(EventGoer).filter(
+        EventGoer.email == email.lower().strip()
+    ).first()
+    if not event_goer:
+        return []
+
+    tickets = (
+        db.query(Ticket)
+        .options(
+            joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
+            joinedload(Ticket.event_goer),
+        )
+        .filter(
+            Ticket.event_goer_id == event_goer.id,
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+        )
+        .order_by(Ticket.purchased_at.desc())
+        .all()
+    )
+
+    return [_build_ticket_full_response(t) for t in tickets]
 
 
 def _build_ticket_full_response(ticket: Ticket) -> TicketFullResponse:

@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ event.name }} - Live</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; overflow: hidden; background: #000; width: 100vw; height: 100vh; }
+
+        /* Ken Burns: 4 variations */
+        @keyframes kb1 { from { transform: scale(1) translate(0,0); } to { transform: scale(1.15) translate(-2%,-1%); } }
+        @keyframes kb2 { from { transform: scale(1.05) translate(-1%,1%); } to { transform: scale(1.2) translate(1%,-2%); } }
+        @keyframes kb3 { from { transform: scale(1.1) translate(1%,0); } to { transform: scale(1) translate(-1%,1%); } }
+        @keyframes kb4 { from { transform: scale(1) translate(0,1%); } to { transform: scale(1.12) translate(2%,-1%); } }
+
+        /* Slide layers */
+        #slideshow { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #000; }
+        .layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            opacity: 0; transition: opacity 1.2s ease-in-out; overflow: hidden;
+        }
+        .layer.on { opacity: 1; z-index: 2; }
+        .layer.off { opacity: 0; z-index: 1; }
+        .layer img { display: block; width: 100%; height: 100%; object-fit: cover; }
+        .layer video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+        /* Overlays */
+        #overlays { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; pointer-events: none; }
+
+        /* Attribution */
+        @keyframes fadeInOut { 0% { opacity:0; transform:translateY(8px); } 15% { opacity:1; transform:translateY(0); } 80% { opacity:1; } 100% { opacity:0; transform:translateY(-4px); } }
+        .attr-anim { animation: fadeInOut 5s ease-in-out forwards; }
+
+        /* Live pulse */
+        @keyframes livePulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+        .live-pulse { animation: livePulse 2s ease-in-out infinite; }
+
+        /* Empty state */
+        @keyframes floatUp { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-12px); } }
+        .float { animation: floatUp 3s ease-in-out infinite; }
+        #empty { position: fixed; top:0; left:0; width:100vw; height:100vh; z-index:20; background:#000; display:flex; align-items:center; justify-content:center; }
+        #empty.gone { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="slideshow">
+    <div id="layer-a" class="layer off"></div>
+    <div id="layer-b" class="layer off"></div>
+</div>
+
+<div id="overlays">
+    <!-- Bottom-left: branding -->
+    <div style="position:absolute; bottom:24px; left:24px; display:flex; align-items:center; gap:12px;">
+        {% if org_logo_url %}
+        <img src="{{ org_logo_url }}" style="height:40px; width:40px; object-fit:contain; border-radius:8px;" alt="">
+        {% endif %}
+        <div>
+            <div style="color:#fff; font-size:18px; font-weight:700; text-shadow:0 2px 8px rgba(0,0,0,0.7);">{{ event.name }}</div>
+            <div style="color:rgba(255,255,255,0.6); font-size:13px; text-shadow:0 1px 4px rgba(0,0,0,0.5);">{{ event.event_date }}</div>
+        </div>
+    </div>
+
+    <!-- Top-right: LIVE badge + count -->
+    <div style="position:absolute; top:24px; right:24px; display:flex; align-items:center; gap:10px;">
+        <div id="media-count" style="display:none; background:rgba(0,0,0,0.5); backdrop-filter:blur(8px); padding:6px 14px; border-radius:20px; color:rgba(255,255,255,0.6); font-size:12px; font-weight:500;">
+            <span id="count-num">0</span> uploads
+        </div>
+        <div style="background:rgba(0,0,0,0.5); backdrop-filter:blur(8px); padding:6px 14px; border-radius:20px; display:flex; align-items:center; gap:8px;">
+            <span class="live-pulse" style="width:8px; height:8px; border-radius:50%; background:#ef4444; display:inline-block;"></span>
+            <span style="color:#fff; font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase;">Live</span>
+        </div>
+    </div>
+
+    <!-- Bottom-right: attribution -->
+    <div id="attribution" style="position:absolute; bottom:24px; right:24px;"></div>
+</div>
+
+<!-- Empty state -->
+<div id="empty" {% if all_media %}class="gone"{% endif %}>
+    <div class="float" style="text-align:center;">
+        <svg style="width:80px; height:80px; margin:0 auto 24px; color:rgba(255,255,255,0.15);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+        </svg>
+        <p style="color:rgba(255,255,255,0.35); font-size:28px; font-weight:300;">Waiting for uploads...</p>
+        <p style="color:rgba(255,255,255,0.15); font-size:14px; margin-top:8px;">Photos and videos will appear here automatically</p>
+    </div>
+</div>
+
+<script>
+(function() {
+    var EVENT_ID = {{ event.id }};
+    var PHOTO_DURATION = 7000;
+    var POLL_INTERVAL = 15000;
+    var KB_NAMES = ['kb1','kb2','kb3','kb4'];
+
+    var mediaQueue = [
+        {% for m in all_media %}
+        { id: {{ m.id }}, url: "{{ m.photo_url }}", type: "{{ m.media_type or 'photo' }}", by: "{{ m.uploaded_by_name or 'Anonymous' }}" }{% if not loop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    var currentIndex = -1;
+    var currentLayer = 'a';
+    var timer = null;
+    var firstSlide = true;
+    var lastSeenId = mediaQueue.length ? mediaQueue[mediaQueue.length - 1].id : 0;
+
+    var layerA = document.getElementById('layer-a');
+    var layerB = document.getElementById('layer-b');
+    var attrEl = document.getElementById('attribution');
+    var emptyEl = document.getElementById('empty');
+    var countWrap = document.getElementById('media-count');
+    var countNum = document.getElementById('count-num');
+
+    function getLayer(n) { return n === 'a' ? layerA : layerB; }
+    function randKB() { return KB_NAMES[Math.floor(Math.random() * KB_NAMES.length)]; }
+
+    function updateCount() {
+        countNum.textContent = mediaQueue.length;
+        if (mediaQueue.length > 0) countWrap.style.display = 'block';
+    }
+
+    function showAttr(name) {
+        attrEl.innerHTML = '<div class="attr-anim" style="background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);padding:8px 16px;border-radius:8px;">' +
+            '<span style="color:rgba(255,255,255,0.7);font-size:13px;">Photo by </span>' +
+            '<span style="color:#fff;font-weight:600;font-size:13px;">' + name + '</span></div>';
+    }
+
+    function advance() {
+        if (mediaQueue.length === 0) return;
+        clearTimeout(timer);
+
+        currentIndex = (currentIndex + 1) % mediaQueue.length;
+        var item = mediaQueue[currentIndex];
+
+        // Pick which layer to render into
+        var targetLayerName, targetLayer, otherLayer;
+        if (firstSlide) {
+            targetLayerName = 'a';
+            targetLayer = layerA;
+            otherLayer = layerB;
+        } else {
+            targetLayerName = (currentLayer === 'a') ? 'b' : 'a';
+            targetLayer = getLayer(targetLayerName);
+            otherLayer = getLayer(currentLayer);
+        }
+
+        if (item.type === 'video') {
+            var v = document.createElement('video');
+            v.src = item.url;
+            v.autoplay = true;
+            v.muted = true;
+            v.playsInline = true;
+            v.setAttribute('playsinline', '');
+            v.addEventListener('ended', function() { advance(); });
+            v.addEventListener('error', function() { advance(); });
+            v.addEventListener('loadedmetadata', function() {
+                timer = setTimeout(advance, Math.min(v.duration * 1000 + 2000, 60000));
+            });
+            targetLayer.innerHTML = '';
+            targetLayer.appendChild(v);
+            doShow(targetLayer, otherLayer, targetLayerName);
+            showAttr(item.by);
+        } else {
+            var img = new Image();
+            img.onload = function() {
+                img.style.animation = randKB() + ' 8s ease-in-out forwards';
+                targetLayer.innerHTML = '';
+                targetLayer.appendChild(img);
+                doShow(targetLayer, otherLayer, targetLayerName);
+                showAttr(item.by);
+            };
+            img.onerror = function() {
+                // Skip broken images
+                timer = setTimeout(advance, 500);
+            };
+            img.src = item.url;
+            timer = setTimeout(advance, PHOTO_DURATION);
+        }
+    }
+
+    function doShow(show, hide, layerName) {
+        if (firstSlide) {
+            // No transition on first slide - instant show
+            show.style.transition = 'none';
+            show.classList.add('on');
+            show.classList.remove('off');
+            // Re-enable transition after paint
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    show.style.transition = '';
+                });
+            });
+            firstSlide = false;
+        } else {
+            show.classList.add('on');
+            show.classList.remove('off');
+            hide.classList.add('off');
+            hide.classList.remove('on');
+        }
+        currentLayer = layerName;
+    }
+
+    function addMedia(item) {
+        for (var i = 0; i < mediaQueue.length; i++) {
+            if (mediaQueue[i].id === item.id) return;
+        }
+        mediaQueue.push(item);
+        if (item.id > lastSeenId) lastSeenId = item.id;
+        updateCount();
+
+        if (mediaQueue.length === 1) {
+            emptyEl.classList.add('gone');
+            advance();
+        }
+    }
+
+    // SSE
+    function connectSSE() {
+        try {
+            var es = new EventSource('/mcp/sse');
+            es.addEventListener('media_uploaded', function(e) {
+                try {
+                    var parsed = JSON.parse(e.data);
+                    var d = typeof parsed.data === 'string' ? JSON.parse(parsed.data) : parsed.data;
+                    if (d.event_id !== EVENT_ID) return;
+                    addMedia({ id: d.media_id, url: d.url, type: d.media_type, by: d.uploaded_by || 'Anonymous' });
+                } catch(err) { console.log('SSE parse error', err); }
+            });
+            es.onerror = function() { es.close(); setTimeout(connectSSE, 5000); };
+        } catch(err) { setTimeout(connectSSE, 5000); }
+    }
+
+    // Polling fallback
+    function poll() {
+        fetch('/events/' + EVENT_ID + '/live/feed?after=' + lastSeenId)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.items) data.items.forEach(function(m) { addMedia(m); });
+            })
+            .catch(function() {});
+    }
+    setInterval(poll, POLL_INTERVAL);
+
+    // Init
+    connectSSE();
+    updateCount();
+    if (mediaQueue.length > 0) {
+        emptyEl.classList.add('gone');
+        advance();
+    }
+})();
+</script>
+</body>
+</html>

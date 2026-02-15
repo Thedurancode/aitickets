@@ -56,6 +56,8 @@ MIGRATIONS = [
     "add_about_sections",
     "add_flyer_styles",
     "add_style_picker_sessions",
+    "add_media_sharing",
+    "add_inventory_alerts",
 ]
 
 

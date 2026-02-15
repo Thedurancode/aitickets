@@ -117,10 +117,12 @@ class Event(Base):
     is_visible = Column(Boolean, default=True)
     cancellation_reason = Column(Text, nullable=True)
     promoter_phone = Column(String(50), nullable=True)
+    promoter_email = Column(String(255), nullable=True)
     promoter_name = Column(String(255), nullable=True)
     series_id = Column(String(36), nullable=True, index=True)  # UUID linking recurring events
     auto_reminder_hours = Column(Integer, nullable=True, default=24)  # hours before event; NULL = disabled
     auto_reminder_use_sms = Column(Boolean, default=False)
+    uploads_open = Column(Boolean, default=True)  # Whether media uploads are accepted
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -139,9 +141,12 @@ class EventPhoto(Base):
     event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
     photo_url = Column(String(500), nullable=False)
     uploaded_by_name = Column(String(255), nullable=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=True, index=True)
+    media_type = Column(String(20), default="photo")  # "photo" or "video"
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     event = relationship("Event", back_populates="photos")
+    event_goer = relationship("EventGoer")
 
 
 class EventUpdate(Base):
@@ -175,6 +180,10 @@ class TicketTier(Base):
     # Stripe integration
     stripe_product_id = Column(String(255), nullable=True, index=True)
     stripe_price_id = Column(String(255), nullable=True, index=True)
+
+    # Inventory alert thresholds (comma-separated integers, e.g. "90,95,100")
+    alert_thresholds = Column(Text, nullable=True)
+    fired_thresholds = Column(Text, nullable=True)
 
     event = relationship("Event", back_populates="ticket_tiers")
     tickets = relationship("Ticket", back_populates="ticket_tier", cascade="all, delete-orphan")
@@ -592,3 +601,18 @@ class AboutSection(Base):
     section_key = Column(String(50), unique=True, nullable=False, index=True)
     content = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class MediaShareToken(Base):
+    """Token-based links for attendees to upload event photos/videos."""
+    __tablename__ = "media_share_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, index=True)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")
+    event_goer = relationship("EventGoer")

@@ -12,8 +12,9 @@ from sqlalchemy import func
 
 from app.database import get_db
 from app.models import (
-    AboutSection, Event, EventCategory, EventPhoto, EventStatus,
-    FlyerStyle, PageView, StylePickerSession, StylePickerStatus,
+    AboutSection, Event, EventCategory, EventGoer, EventPhoto, EventStatus,
+    FlyerStyle, MediaShareToken, PageView, StylePickerSession, StylePickerStatus,
+    Ticket, TicketStatus, TicketTier,
     WaitlistEntry, WaitlistStatus,
 )
 from app.config import get_settings
@@ -304,6 +305,117 @@ def event_admin_page(
         **_get_branding(),
     )
     return HTMLResponse(content=html)
+
+
+@router.get("/events/{event_id}/admin/data")
+def event_admin_data(
+    event_id: int,
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """JSON endpoint for React admin dashboard — returns event, tiers, analytics, activity."""
+    _validate_token(token, event_id, db)
+
+    event = db.query(Event).options(
+        joinedload(Event.venue),
+        joinedload(Event.ticket_tiers),
+        joinedload(Event.categories),
+    ).filter(Event.id == event_id).first()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Tier stats with revenue
+    tiers = []
+    total_revenue = 0
+    total_sold = 0
+    for tier in event.ticket_tiers:
+        revenue = tier.price * tier.quantity_sold
+        total_revenue += revenue
+        total_sold += tier.quantity_sold
+        tiers.append({
+            "id": tier.id,
+            "name": tier.name,
+            "price": tier.price,
+            "quantity_available": tier.quantity_available,
+            "quantity_sold": tier.quantity_sold,
+            "revenue_cents": revenue,
+            "status": tier.status.value if tier.status else "active",
+        })
+
+    # Analytics (30-day window)
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    total_views = db.query(func.count(PageView.id)).filter(
+        PageView.event_id == event_id, PageView.created_at >= cutoff
+    ).scalar() or 0
+    unique_visitors = db.query(func.count(func.distinct(PageView.ip_hash))).filter(
+        PageView.event_id == event_id, PageView.created_at >= cutoff
+    ).scalar() or 0
+    top_referrers = (
+        db.query(PageView.referrer, func.count(PageView.id).label("count"))
+        .filter(PageView.event_id == event_id, PageView.created_at >= cutoff,
+                PageView.referrer != None, PageView.referrer != "")
+        .group_by(PageView.referrer)
+        .order_by(func.count(PageView.id).desc())
+        .limit(5)
+        .all()
+    )
+
+    # Recent activity (last 20 purchases + check-ins)
+    recent_tickets = (
+        db.query(Ticket)
+        .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
+        .join(EventGoer, Ticket.event_goer_id == EventGoer.id)
+        .filter(
+            TicketTier.event_id == event_id,
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+        )
+        .order_by(Ticket.purchased_at.desc())
+        .limit(20)
+        .all()
+    )
+
+    activity = []
+    for t in recent_tickets:
+        goer = db.query(EventGoer).filter(EventGoer.id == t.event_goer_id).first()
+        tier = db.query(TicketTier).filter(TicketTier.id == t.ticket_tier_id).first()
+        activity.append({
+            "type": "check_in" if t.status == TicketStatus.CHECKED_IN else "purchase",
+            "name": goer.name if goer else "Unknown",
+            "tier": tier.name if tier else "Unknown",
+            "time": t.purchased_at.isoformat() if t.purchased_at else None,
+        })
+
+    return {
+        "event": {
+            "id": event.id,
+            "name": event.name,
+            "description": event.description,
+            "event_date": event.event_date,
+            "event_time": event.event_time,
+            "image_url": event.image_url,
+            "promo_video_url": event.promo_video_url,
+            "post_event_video_url": getattr(event, "post_event_video_url", None),
+            "doors_open_time": event.doors_open_time,
+            "status": event.status.value if event.status else "scheduled",
+            "is_visible": event.is_visible,
+            "venue": {
+                "id": event.venue.id,
+                "name": event.venue.name,
+                "address": event.venue.address,
+            } if event.venue else None,
+            "categories": [{"id": c.id, "name": c.name} for c in (event.categories or [])],
+        },
+        "tiers": tiers,
+        "total_revenue_cents": total_revenue,
+        "total_tickets_sold": total_sold,
+        "analytics": {
+            "total_views": total_views,
+            "unique_visitors": unique_visitors,
+            "top_referrers": [{"referrer": r, "count": c} for r, c in top_referrers],
+        },
+        "recent_activity": activity,
+    }
 
 
 @router.put("/events/{event_id}/admin")
@@ -750,4 +862,280 @@ async def select_style(token: str, request: Request, db: Session = Depends(get_d
         "style_id": style_id,
         "style_name": style.name,
         "message": f"Style '{style.name}' selected!",
+    }
+
+
+# ============== Live Event Display (TV/Projector) ==============
+
+
+@router.get("/events/{event_id}/live", response_class=HTMLResponse)
+def live_display_page(
+    event_id: int,
+    db: Session = Depends(get_db),
+):
+    """Public live media display for TV/projector — no token required."""
+    event = db.query(Event).options(joinedload(Event.venue)).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    all_media = (
+        db.query(EventPhoto)
+        .filter(EventPhoto.event_id == event_id)
+        .order_by(EventPhoto.created_at.asc())
+        .all()
+    )
+
+    template = jinja_env.get_template("live_display.html")
+    html = template.render(
+        event=event,
+        all_media=all_media,
+        page_type="live_display",
+        event_id=event_id,
+        **_get_branding(),
+    )
+    return HTMLResponse(content=html)
+
+
+@router.get("/events/{event_id}/live/feed")
+def live_media_feed(
+    event_id: int,
+    after: int = Query(0, description="Return media with id > this value"),
+    db: Session = Depends(get_db),
+):
+    """Public polling endpoint for live display — no token required."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    photos = db.query(EventPhoto).filter(
+        EventPhoto.event_id == event_id,
+        EventPhoto.id > after,
+    ).order_by(EventPhoto.id.asc()).all()
+
+    return {
+        "items": [
+            {
+                "id": m.id,
+                "url": m.photo_url,
+                "media_type": m.media_type or "photo",
+                "uploaded_by": m.uploaded_by_name or "Anonymous",
+            }
+            for m in photos
+        ],
+    }
+
+
+# ============== Media Sharing (Token-Protected Upload) ==============
+
+
+@router.get("/events/{event_id}/share", response_class=HTMLResponse)
+def media_upload_page(
+    event_id: int,
+    token: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Token-protected media upload page for checked-in attendees."""
+    from app.services.media_sharing import validate_media_token
+
+    token_obj = validate_media_token(db, token, event_id)
+    if not token_obj:
+        raise HTTPException(status_code=403, detail="Invalid or expired upload link")
+
+    event = db.query(Event).options(joinedload(Event.venue)).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Check if uploads are still open
+    if not event.uploads_open:
+        all_media = (
+            db.query(EventPhoto)
+            .filter(EventPhoto.event_id == event_id)
+            .order_by(EventPhoto.created_at.desc())
+            .all()
+        )
+        template = jinja_env.get_template("media_upload.html")
+        html = template.render(
+            event=event,
+            uploader_name="",
+            token=token,
+            expires_in="closed",
+            uploaded_media=[],
+            all_media=all_media,
+            uploads_closed=True,
+            page_type="media_upload",
+            event_id=event_id,
+            **_get_branding(),
+        )
+        return HTMLResponse(content=html)
+
+    event_goer = db.query(EventGoer).filter(EventGoer.id == token_obj.event_goer_id).first()
+
+    # Calculate time until expiration
+    now = datetime.utcnow()
+    exp = token_obj.expires_at
+    if exp.tzinfo:
+        exp = exp.replace(tzinfo=None)
+    delta = exp - now
+    hours_left = int(delta.total_seconds() / 3600)
+    if hours_left > 24:
+        expires_in = f"in {hours_left} hours"
+    elif hours_left > 0:
+        expires_in = f"in {hours_left} hour{'s' if hours_left > 1 else ''}"
+    else:
+        expires_in = "soon"
+
+    uploaded_media = (
+        db.query(EventPhoto)
+        .filter(EventPhoto.event_id == event_id, EventPhoto.event_goer_id == event_goer.id)
+        .order_by(EventPhoto.created_at.desc())
+        .all()
+    )
+
+    # All event media for the live gallery (from all attendees)
+    all_media = (
+        db.query(EventPhoto)
+        .filter(EventPhoto.event_id == event_id)
+        .order_by(EventPhoto.created_at.desc())
+        .all()
+    )
+
+    template = jinja_env.get_template("media_upload.html")
+    html = template.render(
+        event=event,
+        uploader_name=event_goer.name,
+        token=token,
+        expires_in=expires_in,
+        uploaded_media=uploaded_media,
+        all_media=all_media,
+        uploads_closed=False,
+        page_type="media_upload",
+        event_id=event_id,
+        **_get_branding(),
+    )
+    return HTMLResponse(content=html)
+
+
+@router.post("/events/{event_id}/share/upload")
+async def upload_event_media(
+    event_id: int,
+    token: str = Query(...),
+    files: list[UploadFile] = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db),
+):
+    """Token-protected media upload endpoint for photos and videos."""
+    from app.services.media_sharing import validate_media_token
+
+    token_obj = validate_media_token(db, token, event_id)
+    if not token_obj:
+        raise HTTPException(status_code=403, detail="Invalid or expired upload link")
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    if not event.uploads_open:
+        raise HTTPException(status_code=403, detail="Uploads are closed for this event")
+
+    event_goer = db.query(EventGoer).filter(EventGoer.id == token_obj.event_goer_id).first()
+
+    settings = get_settings()
+    uploads_dir_path = Path(settings.uploads_dir)
+    uploads_dir_path.mkdir(exist_ok=True)
+
+    uploaded = []
+    uploaded_photos = []
+    for file in files:
+        if not file.content_type:
+            continue
+        is_image = file.content_type.startswith("image/")
+        is_video = file.content_type.startswith("video/")
+        if not (is_image or is_video):
+            continue
+
+        media_type = "photo" if is_image else "video"
+        ext = Path(file.filename).suffix if file.filename else (".jpg" if is_image else ".mp4")
+        filename = f"media_{event_id}_{uuid.uuid4().hex}{ext}"
+        file_path = uploads_dir_path / filename
+
+        content = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+
+        media = EventPhoto(
+            event_id=event_id,
+            photo_url=f"/uploads/{filename}",
+            uploaded_by_name=event_goer.name,
+            event_goer_id=event_goer.id,
+            media_type=media_type,
+        )
+        db.add(media)
+        uploaded.append(filename)
+        uploaded_photos.append(media)
+
+    db.commit()
+
+    # Broadcast SSE so live displays update instantly
+    try:
+        from app.routers.mcp import sse_manager
+        for media in uploaded_photos:
+            db.refresh(media)
+            await sse_manager.broadcast("media_uploaded", {
+                "event_id": event_id,
+                "media_id": media.id,
+                "url": media.photo_url,
+                "media_type": media.media_type,
+                "uploaded_by": media.uploaded_by_name or "Anonymous",
+            })
+    except Exception:
+        pass
+
+    # Schedule background video processing (trim + compress)
+    for fname in uploaded:
+        if fname.rsplit(".", 1)[-1].lower() in ("mp4", "mov", "webm", "avi", "mkv"):
+            from app.services.video_processing import process_uploaded_video
+            video_path = str(uploads_dir_path / fname)
+            background_tasks.add_task(process_uploaded_video, video_path)
+
+    return {
+        "success": True,
+        "uploaded_count": len(uploaded),
+        "message": f"{len(uploaded)} file(s) uploaded successfully!",
+        "files": [
+            {"url": f"/uploads/{f}", "media_type": "video" if f.rsplit(".", 1)[-1] in ("mp4", "mov", "webm", "avi") else "photo"}
+            for f in uploaded
+        ],
+    }
+
+
+@router.get("/events/{event_id}/share/feed")
+def media_feed(
+    event_id: int,
+    token: str = Query(...),
+    after: int = Query(0, description="Return media with id > this value"),
+    db: Session = Depends(get_db),
+):
+    """Polling endpoint for real-time media gallery. Returns new uploads since `after` id."""
+    from app.services.media_sharing import validate_media_token
+
+    token_obj = validate_media_token(db, token, event_id)
+    if not token_obj:
+        raise HTTPException(status_code=403, detail="Invalid or expired token")
+
+    query = db.query(EventPhoto).filter(
+        EventPhoto.event_id == event_id,
+        EventPhoto.id > after,
+    ).order_by(EventPhoto.id.asc()).all()
+
+    return {
+        "items": [
+            {
+                "id": m.id,
+                "url": m.photo_url,
+                "media_type": m.media_type or "photo",
+                "uploaded_by": m.uploaded_by_name or "Anonymous",
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in query
+        ],
     }

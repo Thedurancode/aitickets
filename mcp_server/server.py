@@ -19,7 +19,7 @@ from app.models import (
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference, EventCategory,
     MarketingCampaign, MarketingList, PromoCode, DiscountType, EventPhoto,
-    WaitlistEntry, WaitlistStatus,
+    WaitlistEntry, WaitlistStatus, MediaShareToken,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -268,7 +268,8 @@ async def list_tools():
                     "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "List of category IDs to assign (replaces existing)"},
                     "doors_open_time": {"type": "string", "description": "Doors open time in HH:MM format (optional)"},
                     "is_visible": {"type": "boolean", "description": "Whether event is visible on public listing (optional)"},
-                    "promoter_phone": {"type": "string", "description": "Promoter phone number for magic link admin access (optional)"},
+                    "promoter_phone": {"type": "string", "description": "Promoter phone number for magic link admin access and inventory alerts (optional)"},
+                    "promoter_email": {"type": "string", "description": "Promoter email for inventory alerts and notifications (optional)"},
                     "promoter_name": {"type": "string", "description": "Promoter name (optional)"},
                     "post_event_video_url": {"type": "string", "description": "Post-event recap/highlight video URL (optional)"},
                 },
@@ -308,6 +309,52 @@ async def list_tools():
                     "event_id": {"type": "integer", "description": "The event ID"},
                 },
                 "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="send_media_share_links",
+            description="Send unique photo/video upload links to all checked-in attendees for an event. Each attendee gets a personal link (email + SMS) that expires 48 hours after the event. Only sends to checked-in attendees.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_event_media",
+            description="List all uploaded photos and videos for an event with uploader attribution (who uploaded what)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "media_type": {"type": "string", "description": "Filter by type: 'photo', 'video', or 'all' (default: all)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="generate_highlight_video",
+            description="Auto-generate a highlight recap video from all attendee-uploaded photos and videos for an event. Uses Ken Burns zoom on photos, crossfade transitions, and event name overlay. Takes 30-60 seconds. The result is saved to the event's post_event_video_url.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID to generate a highlight video for"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="toggle_event_uploads",
+            description="Open or close media uploads for an event. When closed, attendees see a 'uploads closed' message and cannot upload new photos/videos. The live display still shows existing media.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "The event ID"},
+                    "action": {"type": "string", "enum": ["open", "close"], "description": "Whether to open or close uploads"},
+                },
+                "required": ["event_id", "action"],
             },
         ),
         Tool(
@@ -1578,6 +1625,34 @@ async def list_tools():
             },
         ),
         Tool(
+            name="set_inventory_alerts",
+            description="Configure inventory alert thresholds for a ticket tier. Alerts fire when the tier reaches these sold percentages (e.g. 90%, 95%, 100%). Alerts show on the dashboard and fire webhooks.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tier_id": {"type": "integer", "description": "The ticket tier ID"},
+                    "thresholds": {
+                        "type": "array",
+                        "items": {"type": "integer"},
+                        "description": "List of percentage thresholds (e.g. [90, 95, 100]). Empty array disables alerts.",
+                    },
+                },
+                "required": ["tier_id", "thresholds"],
+            },
+        ),
+        Tool(
+            name="get_inventory_alerts",
+            description="Get inventory alert configuration and status for a ticket tier or all tiers of an event. Shows thresholds, fired alerts, and remaining tickets.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tier_id": {"type": "integer", "description": "Specific tier ID (optional)"},
+                    "event_id": {"type": "integer", "description": "Event ID to get all tier alerts (optional)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
             name="get_revenue_forecast",
             description="Project total revenue across all upcoming events for the next 30/60/90 days. Uses current ticket velocity, historical completion rates, and per-event confidence intervals. Returns per-event breakdown with low/mid/high projections.",
             inputSchema={
@@ -2318,6 +2393,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             event.is_visible = arguments["is_visible"]
         if "promoter_phone" in arguments:
             event.promoter_phone = arguments["promoter_phone"]
+        if "promoter_email" in arguments:
+            event.promoter_email = arguments["promoter_email"]
         if "promoter_name" in arguments:
             event.promoter_name = arguments["promoter_name"]
         if "post_event_video_url" in arguments:
@@ -2473,6 +2550,152 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 }
                 for p in photos
             ],
+        }
+
+    elif name == "send_media_share_links":
+        from app.services.media_sharing import generate_media_share_token, send_media_share_notification
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        # Get all checked-in tickets
+        checked_in_tickets = (
+            db.query(Ticket)
+            .options(joinedload(Ticket.event_goer), joinedload(Ticket.ticket_tier))
+            .join(TicketTier)
+            .filter(
+                TicketTier.event_id == arguments["event_id"],
+                Ticket.status == TicketStatus.CHECKED_IN,
+            )
+            .all()
+        )
+
+        if not checked_in_tickets:
+            return {
+                "success": False,
+                "error": f"No checked-in attendees found for '{event.name}'",
+            }
+
+        # Deduplicate by event_goer_id
+        seen_goers = set()
+        unique_goers = []
+        for ticket in checked_in_tickets:
+            if ticket.event_goer_id not in seen_goers:
+                seen_goers.add(ticket.event_goer_id)
+                unique_goers.append(ticket.event_goer)
+
+        sent_email = 0
+        sent_sms = 0
+        skipped = 0
+
+        for goer in unique_goers:
+            try:
+                media_token = generate_media_share_token(db, arguments["event_id"], goer.id)
+                results = send_media_share_notification(
+                    db,
+                    event_goer=goer,
+                    event=event,
+                    token=media_token.token,
+                )
+                if results["email"]:
+                    sent_email += 1
+                if results["sms"]:
+                    sent_sms += 1
+                if not results["email"] and not results["sms"]:
+                    skipped += 1
+            except Exception:
+                skipped += 1
+
+        return {
+            "success": True,
+            "event_name": event.name,
+            "total_attendees": len(unique_goers),
+            "email_sent": sent_email,
+            "sms_sent": sent_sms,
+            "skipped": skipped,
+            "message": (
+                f"Media upload links sent for '{event.name}': "
+                f"{sent_email} emails, {sent_sms} SMS sent to {len(unique_goers)} checked-in attendee(s)"
+            ),
+        }
+
+    elif name == "get_event_media":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        query = db.query(EventPhoto).filter(EventPhoto.event_id == arguments["event_id"])
+
+        media_type_filter = arguments.get("media_type", "all")
+        if media_type_filter in ("photo", "video"):
+            query = query.filter(EventPhoto.media_type == media_type_filter)
+
+        media = query.order_by(EventPhoto.created_at.desc()).all()
+
+        return {
+            "event_id": event.id,
+            "event_name": event.name,
+            "media_count": len(media),
+            "media": [
+                {
+                    "id": m.id,
+                    "url": m.photo_url,
+                    "type": m.media_type or "photo",
+                    "uploaded_by": m.uploaded_by_name,
+                    "event_goer_id": m.event_goer_id,
+                    "created_at": str(m.created_at),
+                }
+                for m in media
+            ],
+        }
+
+    elif name == "generate_highlight_video":
+        from app.services.highlight_video import generate_highlight_video as gen_highlight
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        media_count = db.query(EventPhoto).filter(
+            EventPhoto.event_id == arguments["event_id"]
+        ).count()
+        if media_count == 0:
+            return {"error": "No media uploaded for this event yet"}
+
+        # Run synchronously (MCP tools are already in a thread)
+        result = gen_highlight(arguments["event_id"])
+
+        if not result.get("success"):
+            return {"error": result.get("error", "Highlight generation failed")}
+
+        return {
+            "success": True,
+            "message": (
+                f"Highlight video generated for '{event.name}' using "
+                f"{result['photos']} photos and {result['videos']} video clips. "
+                f"Size: {result['size_mb']} MB."
+            ),
+            "video_url": result["mp4_url"],
+            "size_mb": result["size_mb"],
+            "clips_used": result["clips_used"],
+        }
+
+    elif name == "toggle_event_uploads":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        action = arguments["action"]
+        event.uploads_open = (action == "open")
+        db.commit()
+
+        return {
+            "success": True,
+            "event_id": event.id,
+            "event_name": event.name,
+            "uploads_open": event.uploads_open,
+            "message": f"Uploads {'opened' if event.uploads_open else 'closed'} for '{event.name}'",
         }
 
     elif name == "text_guest_list":
@@ -6335,6 +6558,53 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         result = get_trigger_history(db, arguments["trigger_id"])
         return result
 
+    elif name == "set_inventory_alerts":
+        from app.models import TicketTier
+        tier = db.query(TicketTier).filter(TicketTier.id == arguments["tier_id"]).first()
+        if not tier:
+            return {"error": "Ticket tier not found"}
+        thresholds = arguments["thresholds"]
+        if thresholds:
+            tier.alert_thresholds = ",".join(str(t) for t in sorted(thresholds))
+        else:
+            tier.alert_thresholds = None
+        tier.fired_thresholds = None
+        db.commit()
+        return {
+            "tier_id": tier.id,
+            "tier_name": tier.name,
+            "thresholds": thresholds,
+            "message": f"Alerts set for {tier.name}: fire at {thresholds}% sold" if thresholds else f"Alerts disabled for {tier.name}",
+        }
+
+    elif name == "get_inventory_alerts":
+        from app.models import TicketTier
+        tier_id = arguments.get("tier_id")
+        event_id = arguments.get("event_id")
+        if tier_id:
+            tiers = db.query(TicketTier).filter(TicketTier.id == tier_id).all()
+        elif event_id:
+            tiers = db.query(TicketTier).filter(TicketTier.event_id == event_id).all()
+        else:
+            return {"error": "Provide tier_id or event_id"}
+        results = []
+        for tier in tiers:
+            pct = int((tier.quantity_sold / tier.quantity_available) * 100) if tier.quantity_available > 0 else 0
+            thresholds = [int(x) for x in tier.alert_thresholds.split(",") if x.strip()] if tier.alert_thresholds else [90, 95, 100]
+            fired = [int(x) for x in tier.fired_thresholds.split(",") if x.strip()] if tier.fired_thresholds else []
+            results.append({
+                "tier_id": tier.id,
+                "tier_name": tier.name,
+                "event_id": tier.event_id,
+                "thresholds": thresholds,
+                "fired_thresholds": fired,
+                "current_percent_sold": pct,
+                "quantity_sold": tier.quantity_sold,
+                "quantity_available": tier.quantity_available,
+                "remaining": tier.quantity_available - tier.quantity_sold,
+            })
+        return {"tiers": results, "count": len(results)}
+
     elif name == "get_revenue_forecast":
         from app.services.analytics_engine import forecast_revenue
 
@@ -7203,6 +7473,7 @@ def _event_to_dict(event: Event) -> dict:
         "status": event.status.value if event.status else "scheduled",
         "is_visible": getattr(event, 'is_visible', True),
         "promoter_phone": getattr(event, 'promoter_phone', None),
+        "promoter_email": getattr(event, 'promoter_email', None),
         "promoter_name": getattr(event, 'promoter_name', None),
         "series_id": getattr(event, 'series_id', None),
         "post_event_video_url": getattr(event, 'post_event_video_url', None),

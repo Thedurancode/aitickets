@@ -74,6 +74,7 @@ class EventCreate(EventBase):
     venue_id: int
     category_ids: list[int] = []
     promoter_phone: Optional[str] = None
+    promoter_email: Optional[str] = None
     promoter_name: Optional[str] = None
     is_visible: bool = True
     doors_open_time: Optional[str] = None
@@ -87,6 +88,7 @@ class EventUpdate(BaseModel):
     promo_video_url: Optional[str] = None
     category_ids: Optional[list[int]] = None
     promoter_phone: Optional[str] = None
+    promoter_email: Optional[str] = None
     promoter_name: Optional[str] = None
     is_visible: Optional[bool] = None
     doors_open_time: Optional[str] = None
@@ -97,8 +99,10 @@ class EventResponse(EventBase):
     venue_id: int
     image_url: Optional[str] = None
     promo_video_url: Optional[str] = None
+    post_event_video_url: Optional[str] = None
     status: EventStatus = EventStatus.SCHEDULED
     is_visible: bool = True
+    uploads_open: bool = True
     doors_open_time: Optional[str] = None
     series_id: Optional[str] = None
     categories: list[EventCategoryResponse] = []

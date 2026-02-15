@@ -115,6 +115,19 @@ async def handle_checkout_completed(session_data: dict, db: Session):
 
     db.commit()
 
+    # Check inventory thresholds
+    if tickets:
+        try:
+            from app.routers.tickets import check_inventory_thresholds
+            checked_tiers = set()
+            for ticket in tickets:
+                tid = ticket.ticket_tier.id
+                if tid not in checked_tiers:
+                    check_inventory_thresholds(ticket.ticket_tier, ticket.ticket_tier.event, db)
+                    checked_tiers.add(tid)
+        except Exception:
+            pass
+
     # Broadcast to real-time dashboard (best-effort, non-blocking)
     if tickets:
         try:
@@ -196,6 +209,18 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
                 event_id = ticket.ticket_tier.event_id
 
     db.commit()
+
+    # Check inventory thresholds (may re-arm after refund)
+    if refunded_count > 0:
+        try:
+            from app.routers.tickets import check_inventory_thresholds
+            checked_tiers = set()
+            for ticket in tickets:
+                if ticket.status == TicketStatus.REFUNDED and ticket.ticket_tier.id not in checked_tiers:
+                    check_inventory_thresholds(ticket.ticket_tier, ticket.ticket_tier.event, db)
+                    checked_tiers.add(ticket.ticket_tier.id)
+        except Exception:
+            pass
 
     # Broadcast refund to real-time dashboard
     if refunded_count > 0:
