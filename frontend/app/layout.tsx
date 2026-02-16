@@ -8,8 +8,26 @@ import { Footer } from "@/components/layout/footer";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Tickets - Discover Amazing Events",
+  title: {
+    default: "Tickets - Discover Amazing Events",
+    template: "%s | Tickets",
+  },
   description: "Find and purchase tickets to the best events near you",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL || "https://ai-tickets.fly.dev"
+  ),
+  openGraph: {
+    type: "website",
+    siteName: "Tickets",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({
