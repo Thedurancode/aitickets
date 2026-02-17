@@ -119,12 +119,12 @@ function EventDetailPageInner() {
     : 10;
 
   return (
-    <div className="container py-8">
+    <div className="container px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8">
       {/* Back button */}
       <motion.div
         initial={{ opacity: 0, x: -10 }}
         animate={{ opacity: 1, x: 0 }}
-        className="mb-6"
+        className="mb-4 sm:mb-6"
       >
         <Link href="/events">
           <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
@@ -134,7 +134,7 @@ function EventDetailPageInner() {
         </Link>
       </motion.div>
 
-      <div className="grid lg:grid-cols-3 gap-8">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-3 lg:gap-8">
         {/* Main content */}
         <div className="lg:col-span-2">
           {eventLoading ? <EventHeroSkeleton /> : event && <EventHero event={event} />}
@@ -142,12 +142,12 @@ function EventDetailPageInner() {
 
         {/* Ticket purchase panel */}
         <div className="lg:col-span-1">
-          <div className="lg:sticky lg:top-24">
+          <div className="lg:sticky lg:top-20">
             <Card className="bg-card/50 border-white/5 backdrop-blur-sm">
-              <CardHeader>
+              <CardHeader className="px-4 sm:px-6">
                 <CardTitle>Get Tickets</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="px-4 sm:px-6 space-y-4 sm:space-y-6">
                 {eventLoading ? (
                   <TierSelectorSkeleton />
                 ) : event ? (
@@ -162,7 +162,7 @@ function EventDetailPageInner() {
                       <motion.div
                         initial={{ opacity: 0, height: 0 }}
                         animate={{ opacity: 1, height: "auto" }}
-                        className="space-y-6"
+                        className="space-y-4 sm:space-y-6"
                       >
                         <QuantityPicker
                           quantity={quantity}

@@ -12,7 +12,7 @@ interface EventGridProps {
 export function EventGrid({ events, isLoading }: EventGridProps) {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {Array.from({ length: 6 }).map((_, i) => (
           <EventCardSkeleton key={i} />
         ))}
@@ -33,7 +33,7 @@ export function EventGrid({ events, isLoading }: EventGridProps) {
 
   return (
     <StaggerContainer
-      className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6"
       staggerDelay={0.1}
     >
       {events.map((event) => (

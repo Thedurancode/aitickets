@@ -60,34 +60,34 @@ export function TicketCard({ ticket }: TicketCardProps) {
             </div>
 
             {/* Ticket Info */}
-            <div className="flex-1 p-5 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-semibold text-lg text-foreground">{event.name}</h3>
-                  <p className="text-sm text-muted-foreground">{ticket.ticket_tier.name}</p>
+            <div className="flex-1 p-4 sm:p-5 space-y-3">
+              <div className="flex items-start justify-between gap-2 sm:gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-base sm:text-lg text-foreground truncate">{event.name}</h3>
+                  <p className="text-xs sm:text-sm text-muted-foreground">{ticket.ticket_tier.name}</p>
                 </div>
-                <Badge className={status.className}>{status.label}</Badge>
+                <Badge className={`${status.className} flex-shrink-0 text-xs`}>{status.label}</Badge>
               </div>
 
-              <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
+              <div className="flex flex-wrap gap-2 sm:gap-3 text-xs sm:text-sm text-muted-foreground">
                 <div className="flex items-center gap-1.5">
-                  <Calendar className="h-3.5 w-3.5 text-primary" />
+                  <Calendar className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                   {formatDate(eventDateTime)}
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <Clock className="h-3.5 w-3.5 text-primary" />
+                  <Clock className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                   {formatTime(eventDateTime)}
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <MapPin className="h-3.5 w-3.5 text-primary" />
-                  {ticket.venue.name}
+                  <MapPin className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                  <span className="truncate">{ticket.venue.name}</span>
                 </div>
               </div>
 
               {/* QR Code + Actions */}
-              <div className="flex items-end justify-between pt-2 border-t border-white/5">
+              <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-3 pt-2 border-t border-white/5">
                 {ticket.qr_code_token && (
-                  <div className="rounded-lg overflow-hidden bg-white p-1 w-16 h-16">
+                  <div className="rounded-lg overflow-hidden bg-white p-1 w-16 h-16 flex-shrink-0">
                     <img
                       src={api.tickets.getQrUrl(ticket.id)}
                       alt="QR Code"
@@ -96,20 +96,20 @@ export function TicketCard({ ticket }: TicketCardProps) {
                   </div>
                 )}
 
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <a href={api.tickets.getPdfUrl(ticket.id)} target="_blank" rel="noopener noreferrer">
-                    <Button variant="outline" size="sm" className="gap-1.5">
+                    <Button variant="outline" size="sm" className="gap-1.5 h-9">
                       <Download className="h-3.5 w-3.5" />
                       PDF
                     </Button>
                   </a>
                   <a href={api.tickets.getWalletUrl(ticket.id)} target="_blank" rel="noopener noreferrer">
-                    <Button variant="outline" size="sm" className="gap-1.5">
+                    <Button variant="outline" size="sm" className="gap-1.5 h-9">
                       <Wallet className="h-3.5 w-3.5" />
                       Wallet
                     </Button>
                   </a>
-                  <Button variant="outline" size="sm" className="gap-1.5" onClick={handleShare}>
+                  <Button variant="outline" size="sm" className="gap-1.5 h-9" onClick={handleShare}>
                     <Share2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>

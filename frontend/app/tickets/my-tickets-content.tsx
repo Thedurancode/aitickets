@@ -49,28 +49,28 @@ function MyTicketsPageInner() {
   };
 
   return (
-    <div className="container py-8 md:py-12 max-w-3xl">
+    <div className="container px-4 sm:px-6 lg:px-8 py-6 md:py-12 max-w-3xl">
       <FadeIn>
-        <div className="mb-10 text-center">
+        <div className="mb-6 sm:mb-10 text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-4"
+            className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-primary/10 border border-primary/20 mb-3 sm:mb-4"
           >
             <Ticket className="h-4 w-4 text-primary" />
-            <span className="text-sm text-primary">Your tickets</span>
+            <span className="text-xs sm:text-sm text-primary">Your tickets</span>
           </motion.div>
-          <h1 className="text-4xl md:text-5xl font-bold mb-3 text-foreground">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-2 sm:mb-3 text-foreground">
             My Tickets
           </h1>
-          <p className="text-muted-foreground text-lg">
+          <p className="text-muted-foreground text-base sm:text-lg">
             Enter your email to find your tickets
           </p>
         </div>
       </FadeIn>
 
       <FadeIn delay={0.1}>
-        <form onSubmit={handleSubmit(onSubmit)} className="flex gap-3 mb-10">
+        <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col sm:flex-row gap-3 mb-6 sm:mb-10">
           <div className="flex-1 relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input

@@ -77,11 +77,11 @@ function TierCard({ tier, isSelected, onSelect, index }: TierCardProps) {
             />
           )}
 
-          <CardContent className="p-4 flex items-center justify-between gap-4 relative">
-            <div className="flex items-center gap-4">
+          <CardContent className="p-3 sm:p-4 flex items-center justify-between gap-3 sm:gap-4 relative">
+            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
               <div
                 className={cn(
-                  "w-12 h-12 rounded-xl flex items-center justify-center transition-colors",
+                  "w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center transition-colors flex-shrink-0",
                   isSelected
                     ? "bg-primary text-primary-foreground"
                     : "bg-white/5"
@@ -93,16 +93,16 @@ function TierCard({ tier, isSelected, onSelect, index }: TierCardProps) {
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 500 }}
                   >
-                    <Check className="h-5 w-5" />
+                    <Check className="h-4 w-4 sm:h-5 sm:w-5" />
                   </motion.div>
                 ) : (
-                  <Ticket className="h-5 w-5 text-muted-foreground" />
+                  <Ticket className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
                 )}
               </div>
 
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-foreground">{tier.name}</span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                  <span className="font-medium text-sm sm:text-base text-foreground">{tier.name}</span>
                   {isSoldOut && (
                     <Badge variant="destructive" className="text-xs">
                       Sold Out
@@ -123,8 +123,8 @@ function TierCard({ tier, isSelected, onSelect, index }: TierCardProps) {
               </div>
             </div>
 
-            <div className="text-right">
-              <div className="font-bold text-xl text-foreground">
+            <div className="text-right flex-shrink-0">
+              <div className="font-bold text-lg sm:text-xl text-foreground">
                 {tier.price === 0 ? (
                   <span className="text-emerald-400">Free</span>
                 ) : (

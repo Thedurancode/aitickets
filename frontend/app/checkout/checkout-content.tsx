@@ -109,11 +109,11 @@ function CheckoutPageInner() {
   const total = getTotal();
 
   return (
-    <div className="container py-8 max-w-4xl mx-auto">
+    <div className="container px-4 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-8 max-w-4xl mx-auto">
       {/* Back button */}
       <FadeIn>
         <Link href={`/events/${event.id}`}>
-          <Button variant="ghost" size="sm" className="mb-6">
+          <Button variant="ghost" size="sm" className="mb-4 sm:mb-6">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Event
           </Button>
@@ -121,10 +121,10 @@ function CheckoutPageInner() {
       </FadeIn>
 
       <FadeIn delay={0.1}>
-        <h1 className="text-3xl font-bold mb-8">Checkout</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold mb-6 sm:mb-8">Checkout</h1>
       </FadeIn>
 
-      <div className="grid md:grid-cols-2 gap-8">
+      <div className="grid gap-6 md:grid-cols-2 md:gap-8">
         {/* Order Summary */}
         <FadeIn delay={0.2}>
           <OrderSummary

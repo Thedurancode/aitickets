@@ -32,7 +32,7 @@ export function QuantityPicker({
             size="icon"
             onClick={onDecrement}
             disabled={!canDecrement}
-            className="h-10 w-10"
+            className="h-11 w-11"
           >
             <Minus className="h-4 w-4" />
           </Button>
@@ -58,7 +58,7 @@ export function QuantityPicker({
             size="icon"
             onClick={onIncrement}
             disabled={!canIncrement}
-            className="h-10 w-10"
+            className="h-11 w-11"
           >
             <Plus className="h-4 w-4" />
           </Button>
@@ -95,7 +95,7 @@ export function QuickQuantitySelect({
           whileTap={{ scale: 0.95 }}
           onClick={() => onChange(num)}
           className={cn(
-            "h-10 w-10 rounded-full text-sm font-medium transition-colors",
+            "h-11 w-11 rounded-full text-sm font-medium transition-colors",
             quantity === num
               ? "bg-primary text-primary-foreground"
               : "bg-muted hover:bg-muted/80"

@@ -44,30 +44,30 @@ function EventsPageInner() {
   }, [events, searchQuery]);
 
   return (
-    <div className="container py-8 md:py-12">
+    <div className="container px-4 sm:px-6 lg:px-8 py-6 md:py-12">
       <FadeIn>
-        <div className="mb-10 text-center md:text-left">
+        <div className="mb-6 sm:mb-10 text-center md:text-left">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 mb-4"
+            className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full bg-primary/10 border border-primary/20 mb-3 sm:mb-4"
           >
             <Sparkles className="h-4 w-4 text-primary" />
-            <span className="text-sm text-primary">Discover amazing events</span>
+            <span className="text-xs sm:text-sm text-primary">Discover amazing events</span>
           </motion.div>
-          <h1 className="text-4xl md:text-5xl font-bold mb-3 text-foreground">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold mb-2 sm:mb-3 text-foreground">
             Find Your Next
             <br />
             <span className="text-muted-foreground">Experience</span>
           </h1>
-          <p className="text-muted-foreground text-lg max-w-2xl">
+          <p className="text-muted-foreground text-base sm:text-lg max-w-2xl mx-auto md:mx-0">
             Browse tickets to the best events happening near you
           </p>
         </div>
       </FadeIn>
 
       <FadeIn delay={0.1}>
-        <div className="space-y-4 mb-10">
+        <div className="space-y-3 sm:space-y-4 mb-6 sm:mb-10">
           <SearchInput
             value={searchQuery}
             onChange={setSearchQuery}

@@ -118,21 +118,21 @@ function SuccessInner() {
   const venue = firstTicket?.venue;
 
   return (
-    <div className="container py-12 max-w-2xl mx-auto text-center">
+    <div className="container px-4 sm:px-6 lg:px-8 py-8 sm:py-12 max-w-2xl mx-auto text-center">
       {/* Success Animation */}
       <motion.div
         initial={{ scale: 0 }}
         animate={{ scale: 1 }}
         transition={{ type: "spring", stiffness: 200, damping: 15 }}
-        className="mb-8"
+        className="mb-6 sm:mb-8"
       >
-        <div className="w-24 h-24 mx-auto bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
+        <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
           <motion.div
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ delay: 0.2, type: "spring" }}
           >
-            <CheckCircle className="h-12 w-12 text-green-600 dark:text-green-400" />
+            <CheckCircle className="h-10 w-10 sm:h-12 sm:w-12 text-green-600 dark:text-green-400" />
           </motion.div>
         </div>
       </motion.div>
@@ -142,8 +142,8 @@ function SuccessInner() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3 }}
       >
-        <h1 className="text-3xl font-bold mb-2">You're all set!</h1>
-        <p className="text-muted-foreground mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold mb-2">You're all set!</h1>
+        <p className="text-muted-foreground text-sm sm:text-base mb-6 sm:mb-8">
           Your tickets have been confirmed. Check your email for details.
         </p>
       </motion.div>
@@ -192,7 +192,7 @@ function SuccessInner() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
-            className="grid grid-cols-2 gap-4 mb-8"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8"
           >
             <a
               href={generateCalendarUrl(firstTicket)}

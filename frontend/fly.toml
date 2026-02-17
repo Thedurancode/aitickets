@@ -9,6 +9,7 @@ primary_region = 'dfw'
 [build]
   [build.args]
     NEXT_PUBLIC_API_URL = "https://ai-tickets.fly.dev"
+    NEXT_PUBLIC_SITE_URL = "https://ai-tickets-web.fly.dev"
 
 [env]
   PORT = '3000'
