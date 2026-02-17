@@ -21,7 +21,7 @@ export function EventHero({ event }: EventHeroProps) {
   return (
     <div className="relative">
       {/* Hero Image */}
-      <div className="relative aspect-[21/9] md:aspect-[2.5/1] overflow-hidden rounded-2xl">
+      <div className="relative aspect-[4/3] sm:aspect-[16/9] md:aspect-[2/1] overflow-hidden rounded-2xl">
         {event.image_url ? (
           <motion.div
             layoutId={`event-image-${event.id}`}
@@ -121,7 +121,7 @@ export function EventHero({ event }: EventHeroProps) {
 export function EventHeroSkeleton() {
   return (
     <div>
-      <div className="relative aspect-[21/9] md:aspect-[2.5/1] rounded-2xl shimmer" />
+      <div className="relative aspect-[4/3] sm:aspect-[16/9] md:aspect-[2/1] rounded-2xl shimmer" />
       <div className="mt-4 sm:mt-6 lg:mt-8 space-y-4 sm:space-y-6">
         <div className="h-8 sm:h-12 rounded shimmer w-3/4" />
         <div className="flex flex-wrap gap-2 sm:gap-4">

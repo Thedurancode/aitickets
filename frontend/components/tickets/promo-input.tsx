@@ -21,6 +21,7 @@ export function PromoInput({
   onApply,
   appliedPromo,
 }: PromoInputProps) {
+  const [isOpen, setIsOpen] = useState(false);
   const [code, setCode] = useState("");
   const [isValidating, setIsValidating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,48 +85,64 @@ export function PromoInput({
 
   return (
     <div className="space-y-2">
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Promo code"
-            value={code}
-            onChange={(e) => {
-              setCode(e.target.value.toUpperCase());
-              setError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                handleApply();
-              }
-            }}
-            className={cn("pl-10", error && "border-destructive")}
-            disabled={!ticketTierId}
-          />
-        </div>
-        <Button
-          variant="outline"
-          onClick={handleApply}
-          disabled={!code.trim() || !ticketTierId || isValidating}
-        >
-          {isValidating ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            "Apply"
-          )}
-        </Button>
-      </div>
-
       <AnimatePresence>
-        {error && (
-          <motion.p
+        {!isOpen ? (
+          <motion.button
+            key="toggle"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setIsOpen(true)}
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Tag className="h-3.5 w-3.5" />
+            Have a promo code?
+          </motion.button>
+        ) : (
+          <motion.div
+            key="input"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
             exit={{ opacity: 0, height: 0 }}
-            className="text-sm text-destructive"
+            className="space-y-2"
           >
-            {error}
-          </motion.p>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Promo code"
+                  value={code}
+                  onChange={(e) => {
+                    setCode(e.target.value.toUpperCase());
+                    setError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleApply();
+                    }
+                  }}
+                  className={cn("pl-10", error && "border-destructive")}
+                  disabled={!ticketTierId}
+                  autoFocus
+                />
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleApply}
+                disabled={!code.trim() || !ticketTierId || isValidating}
+              >
+                {isValidating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  "Apply"
+                )}
+              </Button>
+            </div>
+
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

@@ -26,7 +26,7 @@ export function EventCard({ event }: EventCardProps) {
           transition={{ type: "spring", stiffness: 300, damping: 20 }}
         >
           <Card className="overflow-hidden h-full bg-card/50 border-white/5 card-glow cursor-pointer gradient-border">
-            <div className="relative aspect-[16/9] overflow-hidden">
+            <div className="relative aspect-[4/3] overflow-hidden">
               {event.image_url ? (
                 <motion.div
                   layoutId={`event-image-${event.id}`}
@@ -102,7 +102,7 @@ export function EventCard({ event }: EventCardProps) {
 export function EventCardSkeleton() {
   return (
     <Card className="overflow-hidden bg-card/50 border-white/5">
-      <div className="relative aspect-[16/9] shimmer" />
+      <div className="relative aspect-[4/3] shimmer" />
       <CardContent className="p-5 space-y-3">
         <div className="h-6 rounded shimmer w-3/4" />
         <div className="space-y-2">
