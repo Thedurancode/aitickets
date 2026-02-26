@@ -128,11 +128,23 @@ pip install -r requirements.txt
 
 ### 2. Configure Environment
 
+The project supports environment-specific configuration files:
+- `.env.development` - Local development (SQLite, DEBUG logging)
+- `.env.production` - Production deployment (PostgreSQL, structured logs)
+- `.env.test` - Testing environment (in-memory DB)
+
+**For development:**
+```bash
+# The .env.development file is already set up with sensible defaults
+# Just add your API keys to it
+```
+
+**Or use the legacy single .env file:**
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your API keys:
+Edit your environment file with your API keys:
 
 ```env
 # Required for LLM routing (get key at https://openrouter.ai)
@@ -161,9 +173,23 @@ ORG_LOGO_URL=https://...
 
 ### 3. Run the Server
 
+**Using Make (recommended):**
 ```bash
+# Run both API and MCP servers
+make dev
+
+# Or run individually
+make api    # FastAPI only
+make mcp    # MCP server only
+```
+
+**Or manually:**
+```bash
+# Set environment (optional, defaults to development)
+export ENV=development
+
 # REST API + Public Pages
-uvicorn app.main:app --port 8000
+uvicorn app.main:app --reload --port 8000
 
 # MCP Server (voice agent)
 python -m mcp_server.http_server --port 3001
@@ -187,7 +213,14 @@ open http://localhost:8000/events
 ### 5. Run Tests
 
 ```bash
-pytest tests/ -q
+# Using Make
+make test          # Run all tests
+make test-cov      # Run with coverage report
+make lint          # Run linter
+make format        # Format code
+
+# Or manually
+ENV=test pytest tests/ -v
 # 149 passed
 ```
 
@@ -311,11 +344,62 @@ ai-tickets/
 
 ---
 
+## Developer Tools
+
+### Make Commands
+
+The project includes a Makefile with common development tasks:
+
+```bash
+make help         # Show all available commands
+make dev          # Run API + MCP servers concurrently
+make api          # Run FastAPI server only
+make mcp          # Run MCP server only
+make test         # Run pytest tests
+make test-cov     # Run tests with coverage report
+make lint         # Run ruff linter
+make format       # Format code with ruff
+make clean        # Clean cache and build files
+make install      # Install dependencies
+make migrate      # Run database migrations
+make health       # Check health endpoint
+```
+
+### Environment Management
+
+Set the `ENV` variable to switch configurations:
+
+```bash
+ENV=development make dev   # Use .env.development
+ENV=production make dev    # Use .env.production
+ENV=test make test         # Use .env.test
+```
+
+### Code Quality
+
+- **Linting**: Ruff with strict rules (see `pyproject.toml`)
+- **Formatting**: Consistent code style via `.editorconfig`
+- **Pre-commit hooks**: Run `pre-commit install` (optional)
+
+### Logging
+
+Configure logging via environment variables:
+- `LOG_LEVEL`: DEBUG, INFO, WARNING, ERROR, CRITICAL
+- `LOG_FORMAT`: `structured` (JSON) or `human` (readable)
+
+All requests include a unique `X-Request-ID` header for distributed tracing.
+
+---
+
 ## Deployment
 
 ### Fly.io (Production)
 
 ```bash
+# Deploy using Make
+make fly-deploy
+
+# Or directly
 fly deploy --remote-only
 ```
 
@@ -324,12 +408,15 @@ The app runs on Fly.io with PostgreSQL. See `fly.toml` for configuration.
 ### Environment Variables (Production)
 
 Set via `fly secrets set`:
+- `ENV=production` — Use production configuration
 - `DATABASE_URL` — PostgreSQL connection string
-- `STRIPE_SECRET_KEY` — Stripe payments
+- `STRIPE_SECRET_KEY` — Stripe payments (use live keys)
 - `RESEND_API_KEY` — Email delivery
 - `BASE_URL` — Public URL (e.g., `https://ai-tickets.fly.dev`)
 - `OPENROUTER_API_KEY` — LLM routing
 - `OPENAI_API_KEY` — RAG embeddings (optional)
+- `MCP_API_KEY` — Required in production for MCP endpoints
+- `ADMIN_API_KEY` — Required in production for admin endpoints
 
 ---
 

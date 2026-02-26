@@ -45,6 +45,7 @@ def send_ticket_email(
     tier_name: str,
     ticket_id: int,
     qr_code_token: str,
+    event_id: int = None,
 ) -> bool:
     """Send a ticket confirmation email with QR code."""
     settings = get_settings()
@@ -63,6 +64,7 @@ def send_ticket_email(
         venue_address=venue_address,
         tier_name=tier_name,
         ticket_id=ticket_id,
+        event_id=event_id,
         qr_code_base64=qr_code_base64,
         validation_url=f"{settings.base_url}/tickets/validate/{qr_code_token}",
         base_url=settings.base_url,

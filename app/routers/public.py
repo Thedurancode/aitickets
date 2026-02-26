@@ -3,9 +3,10 @@
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote as urlquote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, UploadFile, File
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
@@ -42,6 +43,25 @@ def _format_date(value):
         return value
 
 jinja_env.filters["fdate"] = _format_date
+jinja_env.filters["urlencode"] = lambda x: urlquote(str(x), safe='')
+jinja_env.filters["date"] = lambda x, fmt: datetime.fromisoformat(str(x)).strftime(fmt) if x else ""
+
+
+def _youtube_id(url):
+    """Extract YouTube video ID from URL."""
+    if not url:
+        return ""
+    import re
+    patterns = [
+        r'(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?\/]+)',
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return ""
+
+jinja_env.filters["youtube_id"] = _youtube_id
 
 
 def _is_youtube(url):
@@ -194,6 +214,10 @@ def event_detail(
             WaitlistEntry.status == WaitlistStatus.WAITING,
         ).scalar() or 0
 
+    # Generate Google Calendar URL
+    from app.services.calendar import generate_google_calendar_url
+    google_calendar_url = generate_google_calendar_url(event)
+
     template = jinja_env.get_template("event_detail.html")
     html = template.render(
         event=event,
@@ -201,6 +225,7 @@ def event_detail(
         photos=photos,
         all_sold_out=all_sold_out,
         waitlist_count=waitlist_count,
+        google_calendar_url=google_calendar_url,
         page_type="detail",
         event_id=event_id,
         **_get_branding(),
@@ -538,9 +563,13 @@ def event_photos_page(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
+    # Only show approved photos
     photos = (
         db.query(EventPhoto)
-        .filter(EventPhoto.event_id == event_id)
+        .filter(
+            EventPhoto.event_id == event_id,
+            EventPhoto.moderation_status == "approved"
+        )
         .order_by(EventPhoto.created_at.desc())
         .all()
     )
@@ -556,6 +585,121 @@ def event_photos_page(
     return HTMLResponse(content=html)
 
 
+@router.get("/events/{event_id}/recap", response_class=HTMLResponse)
+def event_recap_page(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Post-event recap page with stats, media gallery, and survey results."""
+    event = db.query(Event).options(
+        joinedload(Event.venue),
+        joinedload(Event.categories),
+    ).filter(Event.id == event_id).first()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Get all approved media
+    all_media = (
+        db.query(EventPhoto)
+        .filter(
+            EventPhoto.event_id == event_id,
+            EventPhoto.moderation_status == "approved"
+        )
+        .order_by(EventPhoto.created_at.desc())
+        .all()
+    )
+
+    # Calculate stats
+    from sqlalchemy import func as sqlfunc
+    stats = {
+        "attendees": db.query(Ticket)
+            .join(TicketTier)
+            .filter(
+                TicketTier.event_id == event_id,
+                Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN])
+            )
+            .count() if hasattr(TicketStatus, 'PAID') else 0,
+        "photos": sum(1 for m in all_media if m.media_type == "photo"),
+        "videos": sum(1 for m in all_media if m.media_type == "video"),
+    }
+
+    # Get survey results if available
+    survey_results = None
+    try:
+        from app.services.surveys import get_survey_results
+        survey_results = get_survey_results(db, event_id)
+        # Add recent comments with formatted dates
+        if survey_results.get("recent_comments"):
+            for comment in survey_results["recent_comments"]:
+                comment["submitted_at"] = datetime.fromisoformat(comment["submitted_at"]).strftime("%B %d, %Y")
+    except Exception:
+        pass
+
+    # Get upcoming events (same category, scheduled, future)
+    from datetime import datetime as dt
+    now_str = dt.now().strftime("%Y-%m-%d")
+    upcoming_events = (
+        db.query(Event)
+        .join(Event.categories)
+        .filter(
+            Event.id != event_id,
+            Event.status == EventStatus.SCHEDULED,
+            Event.event_date >= now_str,
+            Event.is_visible == True,
+        )
+        .order_by(Event.event_date.asc())
+        .limit(3)
+        .all()
+    )
+
+    template = jinja_env.get_template("event_recap.html")
+    html = template.render(
+        event=event,
+        all_media=all_media,
+        stats=stats,
+        survey_results=survey_results,
+        upcoming_events=upcoming_events,
+        request=request,
+        page_type="recap",
+        event_id=event_id,
+        google_calendar_url=generate_google_calendar_url(event),
+        **_get_branding(),
+    )
+    return HTMLResponse(content=html)
+
+
+@router.get("/events/{event_id}/calendar.ics")
+def event_calendar_file(
+    event_id: int,
+    ticket_id: int = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Download event as .ics calendar file."""
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Load ticket if provided
+    ticket = None
+    if ticket_id:
+        ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+
+    # Generate ICS file
+    from app.services.calendar import generate_event_ics
+    ics_content, filename = generate_event_ics(event, ticket)
+
+    return Response(
+        content=ics_content,
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "public, max-age=86400",  # Cache for 1 day
+        }
+    )
+
+
 @router.post("/events/{event_id}/photos/upload")
 async def upload_event_photos(
     event_id: int,
@@ -563,7 +707,7 @@ async def upload_event_photos(
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ):
-    """Public photo upload for event attendees."""
+    """Public photo upload for event attendees with content moderation."""
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -572,7 +716,12 @@ async def upload_event_photos(
     uploads_dir_path = Path(settings.uploads_dir)
     uploads_dir_path.mkdir(exist_ok=True)
 
+    # Import content moderation
+    from app.services.content_moderation import get_moderator
+    moderator = get_moderator()
+
     uploaded = []
+    rejected = []
     for file in files:
         if not file.content_type or not file.content_type.startswith("image/"):
             continue
@@ -585,21 +734,43 @@ async def upload_event_photos(
         with open(file_path, "wb") as f:
             f.write(content)
 
+        # Run content moderation
+        moderation_result = moderator.check_image(str(file_path))
+
+        if not moderation_result.safe:
+            # Delete rejected image
+            file_path.unlink(missing_ok=True)
+            rejected.append({
+                "filename": filename,
+                "reason": moderation_result.status,
+                "score": moderation_result.score
+            })
+            continue
+
         photo = EventPhoto(
             event_id=event_id,
             photo_url=f"/uploads/{filename}",
             uploaded_by_name=uploaded_by.strip() or None,
+            moderation_status=moderation_result.status,
+            moderation_score=moderation_result.score,
+            moderation_scores_json=str(moderation_result.scores),
         )
         db.add(photo)
         uploaded.append(filename)
 
     db.commit()
 
-    return {
+    response = {
         "success": True,
         "uploaded_count": len(uploaded),
         "message": f"{len(uploaded)} photo(s) uploaded successfully",
     }
+
+    if rejected:
+        response["rejected_count"] = len(rejected)
+        response["rejected"] = rejected
+
+    return response
 
 
 @router.post("/events/{event_id}/waitlist")
@@ -991,10 +1162,13 @@ def media_upload_page(
         .all()
     )
 
-    # All event media for the live gallery (from all attendees)
+    # All event media for the live gallery (from all attendees) - only approved
     all_media = (
         db.query(EventPhoto)
-        .filter(EventPhoto.event_id == event_id)
+        .filter(
+            EventPhoto.event_id == event_id,
+            EventPhoto.moderation_status == "approved"
+        )
         .order_by(EventPhoto.created_at.desc())
         .all()
     )
@@ -1023,8 +1197,9 @@ async def upload_event_media(
     background_tasks: BackgroundTasks = BackgroundTasks(),
     db: Session = Depends(get_db),
 ):
-    """Token-protected media upload endpoint for photos and videos."""
+    """Token-protected media upload endpoint for photos and videos with content moderation."""
     from app.services.media_sharing import validate_media_token
+    from app.services.content_moderation import get_moderator
 
     token_obj = validate_media_token(db, token, event_id)
     if not token_obj:
@@ -1043,8 +1218,11 @@ async def upload_event_media(
     uploads_dir_path = Path(settings.uploads_dir)
     uploads_dir_path.mkdir(exist_ok=True)
 
+    moderator = get_moderator()
+
     uploaded = []
     uploaded_photos = []
+    rejected = []
     for file in files:
         if not file.content_type:
             continue
@@ -1062,13 +1240,41 @@ async def upload_event_media(
         with open(file_path, "wb") as f:
             f.write(content)
 
-        media = EventPhoto(
-            event_id=event_id,
-            photo_url=f"/uploads/{filename}",
-            uploaded_by_name=event_goer.name,
-            event_goer_id=event_goer.id,
-            media_type=media_type,
-        )
+        # Only moderate images, skip videos
+        if is_image:
+            moderation_result = moderator.check_image(str(file_path))
+
+            if not moderation_result.safe:
+                # Delete rejected image
+                file_path.unlink(missing_ok=True)
+                rejected.append({
+                    "filename": filename,
+                    "reason": moderation_result.status,
+                    "score": moderation_result.score
+                })
+                continue
+
+            media = EventPhoto(
+                event_id=event_id,
+                photo_url=f"/uploads/{filename}",
+                uploaded_by_name=event_goer.name,
+                event_goer_id=event_goer.id,
+                media_type=media_type,
+                moderation_status=moderation_result.status,
+                moderation_score=moderation_result.score,
+                moderation_scores_json=str(moderation_result.scores),
+            )
+        else:
+            # Videos are auto-approved (not moderated)
+            media = EventPhoto(
+                event_id=event_id,
+                photo_url=f"/uploads/{filename}",
+                uploaded_by_name=event_goer.name,
+                event_goer_id=event_goer.id,
+                media_type=media_type,
+                moderation_status="approved",
+            )
+
         db.add(media)
         uploaded.append(filename)
         uploaded_photos.append(media)
@@ -1097,7 +1303,7 @@ async def upload_event_media(
             video_path = str(uploads_dir_path / fname)
             background_tasks.add_task(process_uploaded_video, video_path)
 
-    return {
+    response = {
         "success": True,
         "uploaded_count": len(uploaded),
         "message": f"{len(uploaded)} file(s) uploaded successfully!",
@@ -1106,6 +1312,12 @@ async def upload_event_media(
             for f in uploaded
         ],
     }
+
+    if rejected:
+        response["rejected_count"] = len(rejected)
+        response["rejected"] = rejected
+
+    return response
 
 
 @router.get("/events/{event_id}/share/feed")

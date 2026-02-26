@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import os
 
 
 class Settings(BaseSettings):
@@ -20,9 +21,21 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_phone_number: str = ""
 
+    # Telnyx (Voice Calling)
+    telnyx_api_key: str = ""
+    telnyx_connection_id: str = ""
+    telnyx_phone_number: str = ""
+
     # Postiz (Social Media)
     postiz_api_key: str = ""
     postiz_url: str = "https://api.postiz.com"  # or self-hosted URL
+
+    # Meta Ads (Facebook/Instagram)
+    meta_app_id: str = ""
+    meta_app_secret: str = ""
+    meta_access_token: str = ""
+    meta_ad_account_id: str = ""  # Format: act_xxxxx
+    meta_business_id: str = ""
 
     # Apple Wallet
     apple_wallet_team_id: str = ""
@@ -63,8 +76,20 @@ class Settings(BaseSettings):
     zhipu_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
     llm_router_model: str = "openai/gpt-4o-mini"
 
+    # Logging
+    log_level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_format: str = "structured"  # structured or human
+
+    # Content Moderation (NSFW detection)
+    content_moderation_enabled: bool = True  # Enable/disable content moderation
+    nsfw_threshold: float = 0.5  # Threshold for blocking content (0-1)
+    auto_approve_safe: bool = True  # Auto-approve content below threshold
+
     class Config:
-        env_file = ".env"
+        # Support environment-specific .env files
+        # Usage: ENV=production python app.py
+        # Falls back to .env if ENV not set
+        env_file = f".env.{os.getenv('ENV', 'development')}" if os.getenv('ENV') else ".env"
         env_file_encoding = "utf-8"
 
 

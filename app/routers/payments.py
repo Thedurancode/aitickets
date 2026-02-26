@@ -182,6 +182,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
             tier_name=tier.name,
             ticket_id=ticket.id,
             qr_code_token=ticket.qr_code_token,
+            event_id=event.id,
         )
 
 
