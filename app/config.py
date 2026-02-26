@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     org_name: str = "Toronto Raptors"
     org_color: str = "#CE1141"
     org_logo_url: str = "https://upload.wikimedia.org/wikipedia/en/3/36/Toronto_Raptors_logo.svg"
+    show_header_links: bool = True  # Show/hide navigation links in header
 
     # Notifications
     reminder_hours_before: int = 24

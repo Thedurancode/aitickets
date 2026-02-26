@@ -113,6 +113,8 @@ class Event(Base):
     event_date = Column(String(20), nullable=False)  # YYYY-MM-DD format
     event_time = Column(String(10), nullable=False)  # HH:MM format
     doors_open_time = Column(String(10), nullable=True)  # HH:MM format
+    sale_start_date = Column(String(20), nullable=True)  # YYYY-MM-DD format - when tickets go on sale
+    sale_start_time = Column(String(10), nullable=True)  # HH:MM format - when tickets go on sale
     status = Column(Enum(EventStatus), default=EventStatus.SCHEDULED)
     is_visible = Column(Boolean, default=True)
     cancellation_reason = Column(Text, nullable=True)

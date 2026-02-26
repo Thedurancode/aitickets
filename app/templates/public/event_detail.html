@@ -32,7 +32,7 @@
 
 <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
     <!-- Left Column: Event Details -->
-    <div class="lg:col-span-2 space-y-6">
+    <div class="lg:col-span-2 space-y-2 sm:space-y-6">
         <!-- Hero Image / Promo Video -->
         <div class="aspect-[16/9] rounded-xl overflow-hidden animate-scale-in relative">
             {% if event.promo_video_url and event.promo_video_url is not youtube_url %}
@@ -104,15 +104,42 @@
 
             <!-- Description -->
             {% if event.description %}
-            <div class="prose prose-invert max-w-none">
+            <div class="prose prose-invert max-w-none pb-2">
                 <p class="text-gray-300 leading-relaxed whitespace-pre-line">{{ event.description }}</p>
             </div>
             {% endif %}
+
+            <!-- Share -->
+            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 pt-2 sm:pt-4 border-t border-gray-800">
+                <span class="text-sm text-gray-500">Share:</span>
+                <button onclick="copyLink()" id="copy-btn" class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition-colors">
+                    Copy Link
+                </button>
+            </div>
+
+            <!-- Add to Calendar -->
+            <div class="pt-2 sm:pt-4 border-t border-gray-800">
+                <span class="text-sm text-gray-500 block mb-3">Add to Calendar:</span>
+                <div class="flex flex-wrap gap-2">
+                    <a href="{{ google_calendar_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-100 rounded-lg text-sm text-gray-900 font-medium transition-colors">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/>
+                        </svg>
+                        Google
+                    </a>
+                    <a href="/events/{{ event.id }}/calendar.ics" class="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition-colors">
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/>
+                        </svg>
+                        Download .ics
+                    </a>
+                </div>
+            </div>
         </div>
 
         <!-- Promo Video (YouTube only — direct videos already loop in hero) -->
         {% if event.promo_video_url and event.promo_video_url is youtube_url %}
-        <div class="mt-6" data-animate>
+        <div class="mt-2 sm:mt-6 hidden sm:block" data-animate>
             <h2 class="text-xl font-bold mb-4">Preview</h2>
             <div class="aspect-video rounded-xl overflow-hidden bg-gray-900" id="video-container">
                 <!-- JS will embed YouTube player -->
@@ -122,7 +149,7 @@
 
         <!-- Post-Event Recap Video -->
         {% if event.post_event_video_url %}
-        <div class="mt-6" data-animate>
+        <div class="mt-2 sm:mt-6 hidden sm:block" data-animate>
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-xl font-bold">Event Recap</h2>
                 <a href="/events/{{ event.id }}/recap" class="text-sm text-brand hover:underline">View Full Recap →</a>
@@ -135,7 +162,7 @@
 
         <!-- Photo Gallery -->
         {% if photos %}
-        <div class="mt-6" data-animate>
+        <div class="mt-2 sm:mt-6 hidden sm:block" data-animate>
             <div class="flex items-center justify-between mb-4">
                 <h2 class="text-xl font-bold">Photos ({{ photos|length }})</h2>
                 <a href="/events/{{ event.id }}/photos" class="text-sm text-brand hover:underline">View All / Upload</a>
@@ -154,39 +181,48 @@
             </div>
         </div>
         {% endif %}
-
-        <!-- Share -->
-        <div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 pt-4 border-t border-gray-800">
-            <span class="text-sm text-gray-500">Share:</span>
-            <button onclick="copyLink()" id="copy-btn" class="px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition-colors">
-                Copy Link
-            </button>
-        </div>
-
-        <!-- Add to Calendar -->
-        <div class="pt-4 border-t border-gray-800">
-            <span class="text-sm text-gray-500 block mb-3">Add to Calendar:</span>
-            <div class="flex flex-wrap gap-2">
-                <a href="{{ google_calendar_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-gray-100 rounded-lg text-sm text-gray-900 font-medium transition-colors">
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/>
-                    </svg>
-                    Google
-                </a>
-                <a href="/events/{{ event.id }}/calendar.ics" class="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-gray-300 transition-colors">
-                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/>
-                    </svg>
-                    Download .ics
-                </a>
-            </div>
-        </div>
     </div>
 
     <!-- Right Column: Tickets -->
     <div class="space-y-4">
         <div class="sticky top-6">
+            <!-- Countdown to Sale Start -->
+            {% if event.sale_start_date and event.sale_start_time %}
+            <div id="countdown-section" class="mb-4 bg-gray-900 border border-brand/30 rounded-xl p-5 space-y-3">
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-brand" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <h3 class="font-semibold text-brand">Tickets Go On Sale Soon</h3>
+                </div>
+                <p class="text-sm text-gray-400">Starting {{ event.sale_start_date|fdate }} at {{ event.sale_start_time }}</p>
+                <div id="countdown-timer" class="flex justify-center gap-3 py-2">
+                    <div class="text-center">
+                        <div id="cd-days" class="text-2xl sm:text-3xl font-bold text-white">00</div>
+                        <div class="text-xs text-gray-500">Days</div>
+                    </div>
+                    <div class="text-2xl font-bold text-gray-700">:</div>
+                    <div class="text-center">
+                        <div id="cd-hours" class="text-2xl sm:text-3xl font-bold text-white">00</div>
+                        <div class="text-xs text-gray-500">Hours</div>
+                    </div>
+                    <div class="text-2xl font-bold text-gray-700">:</div>
+                    <div class="text-center">
+                        <div id="cd-minutes" class="text-2xl sm:text-3xl font-bold text-white">00</div>
+                        <div class="text-xs text-gray-500">Minutes</div>
+                    </div>
+                    <div class="text-2xl font-bold text-gray-700">:</div>
+                    <div class="text-center">
+                        <div id="cd-seconds" class="text-2xl sm:text-3xl font-bold text-brand">00</div>
+                        <div class="text-xs text-gray-500">Seconds</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if tiers %}
             <h2 class="text-xl font-bold mb-4">Tickets</h2>
+            {% endif %}
 
             {% if event.status.value == "scheduled" %}
             <!-- Ticket Tiers -->
@@ -313,6 +349,7 @@
 var eventId = {{ event.id }};
 var selectedTierId = null;
 var promoDiscount = null;
+var saleStartDateTime = {% if event.sale_start_date and event.sale_start_time %}new Date("{{ event.sale_start_date }}T" + "{{ event.sale_start_time }}"){% else %}null{% endif %};
 
 {% if event.promo_video_url and event.promo_video_url is youtube_url %}
 (function() {
@@ -339,6 +376,69 @@ var promoDiscount = null;
     }
 })();
 {% endif %}
+
+// Countdown timer for ticket sale start
+(function() {
+    if (!saleStartDateTime) return;
+
+    var countdownSection = document.getElementById('countdown-section');
+    var tiersContainer = document.getElementById('tiers-container');
+
+    function updateCountdown() {
+        var now = new Date();
+        var diff = saleStartDateTime - now;
+
+        if (diff <= 0) {
+            // Sale has started!
+            countdownSection.classList.add('hidden');
+            enableTicketPurchase();
+            return;
+        }
+
+        // Disable ticket purchase until sale starts
+        disableTicketPurchase();
+
+        // Calculate time components
+        var days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        var hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        var minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        var seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+        // Update display
+        document.getElementById('cd-days').textContent = String(days).padStart(2, '0');
+        document.getElementById('cd-hours').textContent = String(hours).padStart(2, '0');
+        document.getElementById('cd-minutes').textContent = String(minutes).padStart(2, '0');
+        document.getElementById('cd-seconds').textContent = String(seconds).padStart(2, '0');
+    }
+
+    function disableTicketPurchase() {
+        if (tiersContainer) {
+            var buttons = tiersContainer.querySelectorAll('.select-btn');
+            buttons.forEach(function(btn) {
+                btn.disabled = true;
+                btn.textContent = 'Tickets Not Yet On Sale';
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+            });
+        }
+    }
+
+    function enableTicketPurchase() {
+        if (tiersContainer) {
+            var buttons = tiersContainer.querySelectorAll('.select-btn');
+            buttons.forEach(function(btn) {
+                btn.disabled = false;
+                btn.textContent = 'Get Tickets';
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            });
+        }
+    }
+
+    // Initial update
+    updateCountdown();
+
+    // Update every second
+    setInterval(updateCountdown, 1000);
+})();
 
 function selectTier(tierId) {
     selectedTierId = tierId;

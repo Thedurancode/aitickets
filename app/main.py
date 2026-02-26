@@ -18,6 +18,9 @@ from app.rate_limit import limiter
 from app.logging_config import setup_logging
 from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates
 
+# Module-level logger (must be before exception handlers which use it)
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -81,6 +81,7 @@ def _get_branding():
         "org_color": settings.org_color,
         "org_logo_url": settings.org_logo_url,
         "base_url": settings.base_url,
+        "show_header_links": settings.show_header_links,
     }
 
 

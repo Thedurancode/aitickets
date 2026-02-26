@@ -530,3 +530,37 @@ async def route_with_fallback(
         }
 
     return result
+
+
+async def route_to_llm(
+    prompt: str,
+    system_prompt: str = None,
+    response_format: dict = None,
+) -> str:
+    """
+    Simple wrapper to send a prompt to the LLM and get a text response.
+
+    Args:
+        prompt: The user prompt to send
+        system_prompt: Optional system prompt
+        response_format: Optional JSON schema for structured responses
+
+    Returns:
+        The LLM's text response
+    """
+    client, model = get_client()
+
+    if client is None:
+        raise ValueError("No LLM API key configured (set OPENROUTER_API_KEY or OPENAI_API_KEY)")
+
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    kwargs = {"model": model, "messages": messages}
+    if response_format:
+        kwargs["response_format"] = response_format
+
+    response = await client.chat.completions.create(**kwargs)
+    return response.choices[0].message.content
