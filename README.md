@@ -26,7 +26,7 @@ User: "Add Ed Duran as CEO to the About page"
 Agent: "Added Ed Duran (CEO) to the About Us team section."
 ```
 
-The system uses **LLM-powered routing** to understand natural language, extract names/dates/quantities, and execute the right action from **125+ available MCP tools**.
+The system uses **LLM-powered routing** to understand natural language, extract names/dates/quantities, and execute the right action from **150+ available MCP tools**.
 
 ---
 
@@ -41,9 +41,11 @@ The system uses **LLM-powered routing** to understand natural language, extract 
 - **PDF Tickets** — Downloadable PDF tickets with event details and QR code
 - **Apple Wallet** — Generate `.pkpass` files for iOS Wallet
 - **Waitlist** — Auto-managed waitlist with position tracking and notification on availability
+- **Event Categories** — Tag events with multiple categories/genres for filtering
+- **Event Photos** — Public photo gallery for event attendees with upload
 
 ### Voice Agent / MCP Integration
-- **125+ MCP Tools** — Full ticketing operations exposed as callable tools
+- **150+ MCP Tools** — Full ticketing operations exposed as callable tools
 - **Natural Language Understanding** — GPT-4o-mini via OpenRouter for intent routing
 - **Multi-Turn Conversations** — Session context remembers last event/customer across requests
 - **Speech Responses** — Returns human-friendly sentences, not raw JSON
@@ -55,25 +57,79 @@ The system uses **LLM-powered routing** to understand natural language, extract 
 - **Smart Search** — Fuzzy name search, exact phone/email lookup, guest finder
 - **Customer Notes** — AI-captured insights from conversations (preferences, issues, VIP flags)
 - **Family/Group Detection** — Intelligent relationship resolver for group attendees
-- **Churn Prediction** — Identify at-risk customers before they leave
+- **Churn Prediction** — Identify at-risk customers before they leave using RFM analysis
+- **Customer Segmentation** — RFM-based segments: Champions, Loyal, Potential Loyalists, At Risk, Hibernating, Lost
 - **Personalization** — Preferred seating, language, contact method, favorite event types
+- **Birthday Collection** — GDPR-compliant birthday marketing with opt-in consent
+- **Anniversary Tracking** — Special occasion tracking for personalized outreach
 
 ### Marketing & Notifications
 - **Email Notifications** — Via Resend: confirmations, reminders, updates, cancellations
 - **SMS Notifications** — Via Twilio: ticket delivery, reminders, marketing blasts
-- **Marketing Campaigns** — Segmented targeting with saved audience lists
+- **Marketing Campaigns** — Segmented targeting with advanced filters:
+  - VIP customers, high spenders, recent purchasers
+  - Birthday targeting (with opt-in)
+  - Geographic targeting by postal code
+  - Event-specific attendee lists
+  - No-show customers for re-engagement
+  - Custom segments saved for reuse
+- **Preview Before Send** — Test marketing lists before saving/sending
 - **Auto-Triggers** — Automated campaigns on low sell-through, almost sold-out, post-event
 - **Cart Recovery** — Detect and recover abandoned checkout sessions
 - **Post-Event Surveys** — Automated survey emails with 1-10 rating and comments
 - **Social Media** — Post to social channels via Postiz integration
 
+### Voice Calling System
+- **Telnyx Integration** — Outbound voice calling with text-to-speech
+- **Campaign Management** — Schedule and manage voice call campaigns
+- **Call Scripts** — Custom scripts for different goals (reminders, offers, feedback, birthday wishes)
+- **Targeting Options** — Call all opted-in users, specific events, or custom segments
+- **Compliance** — Do-not-call respect, calling hours (start/stop times), timezone awareness
+- **Retry Logic** — Automatic retries for busy/no-answer with configurable delays
+- **Call Tracking** — Full audit log with outcomes (answered, voicemail, failed)
+- **Speech-to-Text** — Optional transcription of call responses
+- **Gather Input** — Collect keypress responses during calls
+
+### Meta Ads Integration
+- **Facebook & Instagram Ads** — Create ad campaigns directly from event data
+- **Geo-Targeting** — Automatic radius targeting around event venue
+- **Auto-Generated Copy** — AI-written ad headlines and descriptions
+- **Image Upload** — Use event images for ad creatives
+- **Performance Tracking** — Get insights on spend, impressions, clicks, conversions
+- **Campaign Management** — Pause, resume, update budgets for existing campaigns
+- **Targeting Suggestions** — AI-recommended targeting parameters based on event characteristics
+- **Strategy Generator** — One-click AI-powered ad strategy creation
+
+### Template-Based Flyer Generation
+- **AI Flyer Generation** — Generate event flyers using reference templates via NanoBanana AI
+- **Style Transfer** — AI analyzes template layout, typography, colors, and visual elements
+- **Template Gallery** — Curated collection of flyer templates with usage tracking
+- **SMS Magic Link** — Send template selection link via SMS for promoter selection
+- **Public Template Browser** — Mobile-friendly template selection interface
+- **One-Click Generation** — Generate new flyers matching template style with event content
+
+### Event Image Management
+- **SMS Image Updates** — Promoters can upload event images via SMS magic link
+- **Magic Link Auth** — Secure, time-limited access tokens for image upload
+- **Mobile Upload Page** — Responsive interface for photo uploads from any device
+- **Instant Preview** — See current image and upload replacement in one flow
+
+### Content Moderation
+- **Automated Moderation** — AI-powered content filtering for user-generated content
+- **Flagged Content Review** — Review queue for moderated content
+- **Auto-Approval** - Configurable auto-publish for trusted content
+- **Moderation Rules** — Customizable moderation criteria and thresholds
+
 ### Analytics & Insights
 - **Revenue Reports** — Sales by event, tier, time period with revenue forecasting
 - **Conversion Tracking** — Page view → purchase funnel with UTM attribution
+- **Real-Time Page Views** — Live tracking of event page traffic
+- **Traffic Sources** — Referrer breakdown and UTM campaign performance
 - **Demand Prediction** — Mathematical models for ticket demand forecasting
 - **Pricing Suggestions** — Dynamic pricing recommendations based on demand signals
 - **Trending Events** — Identify hot-selling events across the platform
 - **Event Recommendations** — Suggest events to customers based on history
+- **Live View Count** — Real-time concurrent viewers on event pages
 
 ### Knowledge Base (RAG)
 - **Document Upload** — PDF, TXT, Markdown file ingestion
@@ -96,6 +152,12 @@ The system uses **LLM-powered routing** to understand natural language, extract 
 - **Public Page** — Beautiful responsive page with scroll animations, brand theming
 - **4 MCP Tools** — `get_about_page`, `update_about_section`, `add_team_member`, `remove_team_member`
 
+### Event Recap System
+- **Post-Event Summaries** — Automated event recap pages with photos and stats
+- **Photo Memories** — Collect and display attendee photos after events
+- **Attendance Stats** — Show ticket sales, check-ins, and revenue
+- **Shareable Recaps** — Public recap pages for social sharing
+
 ### Public Website
 - **Event Listing** — Browse events with category filtering and search
 - **Event Detail Pages** — Full event info, ticket tiers, purchase flow, photo gallery
@@ -103,6 +165,8 @@ The system uses **LLM-powered routing** to understand natural language, extract 
 - **Event Admin Dashboard** — Magic-link protected admin with analytics
 - **About Us Page** — Voice-editable org page with team, mission, contact info
 - **Brand Theming** — Org name, color, and logo applied across all pages
+- **SEO Optimized** — OpenGraph, JSON-LD structured data, sitemap, robots.txt
+- **Mobile Responsive** — Optimized for all screen sizes
 
 ### Operations & Admin
 - **Check-In System** — QR scan or name lookup with undo capability
@@ -111,6 +175,8 @@ The system uses **LLM-powered routing** to understand natural language, extract 
 - **Health Checks** — DB-aware health endpoint for monitoring
 - **Rate Limiting** — API rate limiting via SlowAPI
 - **CORS Support** — Configurable allowed origins
+- **Request Tracing** — Unique request IDs for distributed logging
+- **Structured Logging** — JSON logs in production, human-readable in dev
 
 ---
 
@@ -232,7 +298,7 @@ ENV=test pytest tests/ -v
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/voice/action` | POST | Main voice agent endpoint — natural language |
-| `/tools` | GET | List all 125+ MCP tools |
+| `/tools` | GET | List all 150+ MCP tools |
 | `/tools/{name}` | POST | Call a specific tool directly |
 | `/mcp/sse` | GET | MCP protocol SSE stream |
 | `/mcp/message` | POST | MCP JSON-RPC messages |
@@ -252,6 +318,10 @@ ENV=test pytest tests/ -v
 | **Knowledge** | `POST /knowledge/upload`, `POST /knowledge/paste`, `GET /knowledge/search` | RAG documents |
 | **Webhooks** | `POST/GET /webhooks/outbound`, `POST /webhooks/outbound/{id}/test` | Outbound webhooks |
 | **About** | `GET/PUT /about`, `POST/DELETE /about/team-member` | About page CMS |
+| **Flyer Templates** | `GET/POST /flyer-templates`, `GET/PUT/DELETE /flyer-templates/{id}` | Template management |
+| **Flyer Generation** | `POST /flyer-templates/generate`, `POST /flyer-templates/events/{id}/generate/{templateId}` | AI flyer generation |
+| **Meta Ads** | `POST /meta-ads/campaigns`, `GET /meta-ads/campaigns/{id}/insights` | Facebook/Instagram ads |
+| **Event Image Update** | `POST /event-image-update/generate-token`, `POST /event-image-update/upload` | SMS image upload |
 
 ### Public Pages
 | Path | Description |
@@ -260,7 +330,10 @@ ENV=test pytest tests/ -v
 | `/events/{id}` | Event detail with ticket purchase |
 | `/events/{id}/admin?token=...` | Magic-link protected admin dashboard |
 | `/events/{id}/photos` | Photo gallery with upload |
+| `/events/{id}/recap` | Post-event recap page with photos |
 | `/about` | About Us page |
+| `/update-event-image/{token}` | Magic-link event image upload page |
+| `/flyer-templates/select/{token}` | Magic-link template selection page |
 | `/docs` | Swagger API documentation |
 
 ---
@@ -279,11 +352,11 @@ ENV=test pytest tests/ -v
 ├─────────────────────────────────────────────────────────────┤
 │  1. LLM Router (GPT-4o-mini via OpenRouter)                │
 │     - Understands natural language                          │
-│     - Picks from 125+ tools                                │
+│     - Picks from 150+ tools                                │
 │     - Extracts arguments (names, dates, etc.)              │
 ├─────────────────────────────────────────────────────────────┤
 │  2. MCP Tool Execution                                     │
-│     - 125+ tools across 15 categories                      │
+│     - 150+ tools across 20+ categories                      │
 │     - Session context for multi-turn conversations         │
 │     - Entity tracking (current customer/event)             │
 ├─────────────────────────────────────────────────────────────┤
@@ -297,8 +370,11 @@ ENV=test pytest tests/ -v
 │   Stripe     │   Resend     │   Twilio     │   OpenAI     │
 │  Payments    │   Email      │    SMS       │  Embeddings  │
 ├──────────────┼──────────────┼──────────────┼──────────────┤
-│   Postiz     │ Apple Wallet │  Webhooks    │  PostgreSQL  │
-│ Social Media │   .pkpass    │ HMAC-signed  │   Database   │
+│   Telnyx     │   Meta Ads   │  NanoBanana  │  PostgreSQL  │
+│Voice Calling │ FB/IG Ads    │   Image Gen  │   Database   │
+├──────────────┼──────────────┼──────────────┼──────────────┤
+│   Postiz     │ Apple Wallet │  Webhooks    │   OpenRouter │
+│ Social Media │   .pkpass    │ HMAC-signed  │   LLM Router  │
 └──────────────┴──────────────┴──────────────┴──────────────┘
 ```
 
@@ -332,7 +408,7 @@ ai-tickets/
 │   ├── migrations/            # Custom migration files
 │   └── templates/public/      # Jinja2 HTML templates
 ├── mcp_server/
-│   ├── server.py              # 125+ MCP tool definitions
+│   ├── server.py              # 150+ MCP tool definitions
 │   └── http_server.py         # HTTP/SSE transport
 ├── tests/                     # 149 tests across 13 files
 ├── templates/                 # Email templates
@@ -431,8 +507,11 @@ Set via `fly secrets set`:
 | **Payments** | Stripe |
 | **Email** | Resend |
 | **SMS** | Twilio |
-| **AI/LLM** | OpenRouter (GPT-4o-mini), OpenAI (embeddings) |
+| **Voice Calls** | Telnyx (outbound calling, TTS) |
+| **AI/LLM** | OpenRouter (GPT-4o-mini), OpenAI (embeddings), NanoBanana (image gen) |
+| **Ads** | Meta Marketing API (Facebook/Instagram) |
 | **Voice Protocol** | MCP (Model Context Protocol) |
+| **Social Media** | Postiz |
 | **Hosting** | Fly.io |
 | **CI** | GitHub Actions (lint + test) |
 
