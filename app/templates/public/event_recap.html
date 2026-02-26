@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+
+{% block title %}Event Recap: {{ event.name }}{% endblock %}
+
+{% block og_meta %}
+<meta property="og:title" content="Event Recap: {{ event.name }} | {{ org_name }}">
+<meta property="og:description" content="See photos, videos, and highlights from {{ event.name }} on {{ event.event_date }}.">
+<meta property="og:type" content="article">
+{% if event.image_url %}
+<meta property="og:image" content="{{ event.image_url }}">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<style>
+.recap-hero {
+    background: linear-gradient(to bottom, rgba(0,0,0,0.7), rgba(0,0,0,0.9)),
+                url({{ event.image_url or '/static/default-event.jpg' }}) center/cover;
+    min-height: 40vh;
+}
+.stat-card {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.1);
+}
+.media-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+}
+.media-item {
+    aspect-ratio: 1;
+    overflow: hidden;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: transform 0.3s ease;
+}
+.media-item:hover {
+    transform: scale(1.03);
+}
+.media-item img, .media-item video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+.comment-card {
+    background: rgba(255,255,255,0.03);
+    border-left: 3px solid {{ org_color }};
+}
+@media (min-width: 768px) {
+    .media-grid {
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    }
+}
+</style>
+
+<!-- Hero Section -->
+<div class="recap-hero flex items-end pb-12 px-4 -mx-4 -mt-6 mb-8">
+    <div class="max-w-4xl mx-auto w-full">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium mb-4" style="background: rgba(255,255,255,0.15);">
+            <span>🎉</span>
+            <span>Event Recap</span>
+        </div>
+        <h1 class="text-4xl sm:text-5xl font-extrabold text-white mb-2">{{ event.name }}</h1>
+        <p class="text-xl text-white/80">{{ event.event_date|fdate }}{% if event.venue %} at {{ event.venue.name }}{% endif %}</p>
+    </div>
+</div>
+
+<div class="max-w-6xl mx-auto px-4 space-y-12">
+
+    <!-- Highlight Video -->
+    {% if event.post_event_video_url %}
+    <section data-animate>
+        <h2 class="text-2xl font-bold mb-4">✨ Event Highlights</h2>
+        <div class="aspect-video bg-gray-900 rounded-xl overflow-hidden">
+            {% if event.post_event_video_url is youtube_url %}
+            <iframe src="https://www.youtube.com/embed/{{ event.post_event_video_url | youtube_id }}"
+                    class="w-full h-full" frameborder="0" allowfullscreen></iframe>
+            {% else %}
+            <video src="{{ event.post_event_video_url }}" controls class="w-full h-full"></video>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Stats Section -->
+    <section data-animate>
+        <h2 class="text-2xl font-bold mb-4">📊 Event Stats</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="stat-card rounded-xl p-4 text-center">
+                <div class="text-3xl font-bold text-white">{{ stats.attendees or 0 }}</div>
+                <div class="text-sm text-gray-400">Attendees</div>
+            </div>
+            <div class="stat-card rounded-xl p-4 text-center">
+                <div class="text-3xl font-bold text-white">{{ stats.photos or 0 }}</div>
+                <div class="text-sm text-gray-400">Photos</div>
+            </div>
+            <div class="stat-card rounded-xl p-4 text-center">
+                <div class="text-3xl font-bold text-white">{{ stats.videos or 0 }}</div>
+                <div class="text-sm text-gray-400">Videos</div>
+            </div>
+            <div class="stat-card rounded-xl p-4 text-center">
+                <div class="text-3xl font-bold" style="color: {{ org_color }};">{{ stats.rating or '-' }}</div>
+                <div class="text-sm text-gray-400">Avg Rating</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Survey Results -->
+    {% if survey_results %}
+    <section data-animate>
+        <h2 class="text-2xl font-bold mb-4">💬 What People Said</h2>
+        {% if survey_results.nps_score is defined %}
+        <div class="stat-card rounded-xl p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <div class="text-sm text-gray-400">NPS Score</div>
+                    <div class="text-4xl font-bold {% if survey_results.nps_score >= 50 %}text-green-400{% elif survey_results.nps_score >= 0 %}text-yellow-400{% else %}text-red-400{% endif %}">
+                        {{ survey_results.nps_score }}
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-sm text-gray-400">Response Rate</div>
+                    <div class="text-xl font-semibold text-white">{{ survey_results.response_rate_percent }}%</div>
+                </div>
+            </div>
+            {% if survey_results.promoters is defined %}
+            <div class="flex gap-2 text-sm">
+                <span class="px-2 py-1 rounded bg-green-900/30 text-green-400">
+                    Promoters: {{ survey_results.promoters }}
+                </span>
+                <span class="px-2 py-1 rounded bg-yellow-900/30 text-yellow-400">
+                    Passive: {{ survey_results.passives }}
+                </span>
+                <span class="px-2 py-1 rounded bg-red-900/30 text-red-400">
+                    Detractors: {{ survey_results.detractors }}
+                </span>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Comments -->
+        {% if survey_results.recent_comments %}
+        <div class="space-y-3">
+            {% for comment in survey_results.recent_comments[:6] %}
+            <div class="comment-card rounded-lg p-4">
+                <div class="flex items-center gap-2 mb-2">
+                    <span class="text-yellow-400">
+                        {% for i in range(comment.rating) %}★{% endfor %}
+                    </span>
+                    <span class="text-sm text-gray-400">{{ comment.submitted_at | date('M/d') }}</span>
+                </div>
+                <p class="text-gray-300">{{ comment.comment }}</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </section>
+    {% endif %}
+
+    <!-- Media Gallery -->
+    {% if all_media %}
+    <section data-animate>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-2xl font-bold">📸 Photos & Videos</h2>
+            <span class="text-sm text-gray-400">{{ all_media|length }} moments captured</span>
+        </div>
+        <div class="media-grid">
+            {% for media in all_media %}
+            <div class="media-item bg-gray-900" onclick="openLightbox('{{ media.photo_url }}', '{{ media.media_type }}')">
+                {% if media.media_type == 'video' %}
+                <video src="{{ media.photo_url }}" muted preload="metadata"></video>
+                <div class="absolute inset-0 flex items-center justify-center bg-black/30">
+                    <svg class="w-12 h-12 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M8 5v14l11-7z"/>
+                    </svg>
+                </div>
+                {% else %}
+                <img src="{{ media.photo_url }}" alt="Event photo{% if media.uploaded_by_name %} by {{ media.uploaded_by_name }}{% endif %}" loading="lazy">
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Description -->
+    {% if event.description %}
+    <section data-animate>
+        <h2 class="text-2xl font-bold mb-4">About This Event</h2>
+        <div class="prose prose-invert max-w-none">
+            <p class="text-gray-300 leading-relaxed whitespace-pre-line">{{ event.description }}</p>
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Add to Calendar Section -->
+    <section data-animate>
+        <h2 class="text-2xl font-bold mb-4">📅 Add to Calendar</h2>
+        <div class="flex flex-wrap gap-3">
+            <a href="{{ google_calendar_url }}" target="_blank" rel="noopener" class="inline-flex items-center gap-2 px-6 py-3 bg-white hover:bg-gray-100 rounded-lg font-medium transition-colors text-gray-900">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/>
+                </svg>
+                Google Calendar
+            </a>
+            <a href="/events/{{ event.id }}/calendar.ics" class="inline-flex items-center gap-2 px-6 py-3 bg-gray-800 hover:bg-gray-700 rounded-lg font-medium transition-colors text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/>
+                </svg>
+                Download .ics (Apple, Outlook)
+            </a>
+        </div>
+        <p class="text-sm text-gray-500 mt-3">Works with Google Calendar, Apple Calendar, Outlook, and more.</p>
+    </section>
+
+    <!-- Share Section -->
+    <section data-animate>
+        <h2 class="text-2xl font-bold mb-4">🔗 Share This Recap</h2>
+        <div class="flex flex-wrap gap-3">
+            <button onclick="copyLink()" id="copy-btn" class="px-6 py-3 bg-gray-800 hover:bg-gray-700 rounded-lg font-medium transition-colors flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                </svg>
+                Copy Link
+            </button>
+            <a href="https://www.facebook.com/sharer/sharer.php?u={{ base_url }}/events/{{ event.id }}/recap"
+               target="_blank" rel="noopener"
+               class="px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors">
+                Facebook
+            </a>
+            <a href="https://twitter.com/intent/tweet?url={{ base_url }}/events/{{ event.id }}/recap&text=Check out {{ event.name }}!"
+               target="_blank" rel="noopener"
+               class="px-6 py-3 bg-sky-500 hover:bg-sky-600 rounded-lg font-medium transition-colors">
+                Twitter
+            </a>
+        </div>
+    </section>
+
+    <!-- Upcoming Events -->
+    {% if upcoming_events %}
+    <section data-animate>
+        <h2 class="text-2xl font-bold mb-4">📅 Upcoming Events</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {% for upcoming in upcoming_events[:3] %}
+            <a href="/events/{{ upcoming.id }}" class="block bg-gray-900 rounded-xl overflow-hidden hover:ring-2 hover:ring-brand transition-all">
+                {% if upcoming.image_url %}
+                <img src="{{ upcoming.image_url }}" alt="{{ upcoming.name }}" class="w-full aspect-video object-cover">
+                {% endif %}
+                <div class="p-4">
+                    <div class="text-sm text-brand mb-1">{{ upcoming.event_date|fdate }}</div>
+                    <h3 class="font-semibold text-white mb-1 line-clamp-2">{{ upcoming.name }}</h3>
+                    {% if upcoming.venue %}
+                    <div class="text-sm text-gray-400">{{ upcoming.venue.name }}</div>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Back Link -->
+    <div class="text-center py-8">
+        <a href="/events" class="inline-flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/>
+            </svg>
+            Back to All Events
+        </a>
+    </div>
+
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox" class="fixed inset-0 z-[60] bg-black/95 flex items-center justify-center hidden" onclick="closeLightbox()">
+    <button class="absolute top-4 right-4 text-white/70 hover:text-white p-2 z-10" onclick="closeLightbox()">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+    </button>
+    <div id="lightbox-content" class="max-w-[90vw] max-h-[90vh]"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+var currentMediaIndex = 0;
+var allMediaUrls = {{ all_media | map(attribute='photo_url') | list }};
+
+function openLightbox(url, type) {
+    currentMediaIndex = allMediaUrls.indexOf(url);
+    renderLightboxContent(url, type);
+    document.getElementById('lightbox').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+function renderLightboxContent(url, type) {
+    var container = document.getElementById('lightbox-content');
+    if (type === 'video') {
+        container.innerHTML = '<video src="' + url + '" controls autoplay class="max-w-full max-h-[90vh] rounded-lg"></video>';
+    } else {
+        container.innerHTML = '<img src="' + url + '" class="max-w-full max-h-[90vh] object-contain rounded-lg">';
+    }
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox').classList.add('hidden');
+    document.getElementById('lightbox-content').innerHTML = '';
+    document.body.style.overflow = '';
+}
+
+function navigateLightbox(direction) {
+    currentMediaIndex = (currentMediaIndex + direction + allMediaUrls.length) % allMediaUrls.length;
+    // Determine if it's a video by checking the extension
+    var url = allMediaUrls[currentMediaIndex];
+    var type = url.match(/\.(mp4|mov|webm)$/i) ? 'video' : 'photo';
+    renderLightboxContent(url, type);
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeLightbox();
+    if (e.key === 'ArrowLeft') navigateLightbox(-1);
+    if (e.key === 'ArrowRight') navigateLightbox(1);
+});
+
+function copyLink() {
+    navigator.clipboard.writeText(window.location.href).then(function() {
+        var btn = document.getElementById('copy-btn');
+        var originalText = btn.innerHTML;
+        btn.innerHTML = '<svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>Copied!';
+        setTimeout(function() { btn.innerHTML = originalText; }, 2000);
+    });
+}
+</script>
+{% endblock %}
