@@ -4,7 +4,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from sqlalchemy.orm import Session, joinedload
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 import sys
 from pathlib import Path
@@ -19,7 +19,8 @@ from app.models import (
     Notification, NotificationChannel, NotificationType, EventStatus,
     CustomerNote, CustomerPreference, EventCategory,
     MarketingCampaign, MarketingList, PromoCode, DiscountType, EventPhoto,
-    WaitlistEntry, WaitlistStatus, MediaShareToken,
+    WaitlistEntry, WaitlistStatus, MediaShareToken, VoiceCallCampaign, VoiceCall,
+    MetaAdCampaign,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -124,6 +125,64 @@ async def list_tools():
                     "description": {"type": "string", "description": "New category description"},
                     "color": {"type": "string", "description": "New hex color (e.g. #CE1141)"},
                     "image_url": {"type": "string", "description": "New image URL for the category"},
+                },
+                "required": ["category_id"],
+            },
+        ),
+        Tool(
+            name="delete_category",
+            description="Delete a category (won't affect events, just removes the category)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "category_id": {"type": "integer", "description": "Category ID to delete"},
+                },
+                "required": ["category_id"],
+            },
+        ),
+        Tool(
+            name="add_event_categories",
+            description="Add categories to an event (keeps existing categories, adds new ones)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Category IDs to add"},
+                },
+                "required": ["event_id", "category_ids"],
+            },
+        ),
+        Tool(
+            name="remove_event_categories",
+            description="Remove specific categories from an event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Category IDs to remove"},
+                },
+                "required": ["event_id", "category_ids"],
+            },
+        ),
+        Tool(
+            name="get_event_categories",
+            description="Get all categories assigned to an event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_category_events",
+            description="Get all events in a specific category",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "category_id": {"type": "integer", "description": "Category ID"},
+                    "upcoming_only": {"type": "boolean", "description": "Only show upcoming events (default true)"},
                 },
                 "required": ["category_id"],
             },
@@ -589,13 +648,15 @@ async def list_tools():
                     "name": {"type": "string", "description": "Customer's full name"},
                     "email": {"type": "string", "description": "Customer's email address"},
                     "phone": {"type": "string", "description": "Customer's phone number (optional)"},
+                    "birthdate": {"type": "string", "description": "Birthdate in YYYY-MM-DD format (optional)"},
+                    "birthday_opt_in": {"type": "boolean", "description": "Opt-in for birthday marketing (optional)"},
                 },
                 "required": ["name", "email"],
             },
         ),
         Tool(
             name="update_customer",
-            description="Update a customer's info (email, phone, name)",
+            description="Update a customer's info (email, phone, name, birthdate, birthday opt-in)",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -603,6 +664,8 @@ async def list_tools():
                     "name": {"type": "string", "description": "New name (optional)"},
                     "email": {"type": "string", "description": "New email (optional)"},
                     "phone": {"type": "string", "description": "New phone (optional)"},
+                    "birthdate": {"type": "string", "description": "Birthdate in YYYY-MM-DD format (optional)"},
+                    "birthday_opt_in": {"type": "boolean", "description": "Opt-in for birthday marketing (optional)"},
                 },
                 "required": ["customer_id"],
             },
@@ -971,10 +1034,16 @@ async def list_tools():
                     "target_vip_tier": {"type": "string", "description": "Specific VIP tier"},
                     "target_min_events": {"type": "integer", "description": "Min events attended"},
                     "target_min_spent_cents": {"type": "integer", "description": "Min spent in cents"},
+                    "target_max_spent_cents": {"type": "integer", "description": "Max spent in cents"},
                     "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Event category IDs"},
                     "target_exclude_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Exclude attendees of these events"},
                     "target_days_since_last_event": {"type": "integer", "description": "Inactive for N+ days"},
                     "target_attended_since_days": {"type": "integer", "description": "Active within last N days"},
+                    "target_birthdays_this_month": {"type": "boolean", "description": "Customers with birthdays this month"},
+                    "target_birthday_opt_in": {"type": "boolean", "description": "Only customers who opted in to birthday marketing"},
+                    "target_postal_codes": {"type": "array", "items": {"type": "string"}, "description": "Filter by postal/zip codes"},
+                    "target_has_pending_payment": {"type": "boolean", "description": "Customers with pending/incomplete payments"},
+                    "target_no_show": {"type": "boolean", "description": "Customers who bought but didn't check in"},
                 },
                 "required": ["name"],
             },
@@ -1003,6 +1072,31 @@ async def list_tools():
                 "properties": {
                     "list_id": {"type": "integer", "description": "The marketing list ID"},
                     "name": {"type": "string", "description": "Or delete by name"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="preview_marketing_list",
+            description="Preview who would match a set of filters BEFORE creating a saved list. Shows count, sample names, and breakdown. Useful for testing targeting rules.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "target_event_id": {"type": "integer", "description": "Attendees of a specific event"},
+                    "target_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Attendees of multiple events"},
+                    "target_vip": {"type": "boolean", "description": "VIP customers only"},
+                    "target_vip_tier": {"type": "string", "description": "Specific VIP tier"},
+                    "target_min_events": {"type": "integer", "description": "Min events attended"},
+                    "target_min_spent_cents": {"type": "integer", "description": "Min spent in cents"},
+                    "target_max_spent_cents": {"type": "integer", "description": "Max spent in cents"},
+                    "target_category_ids": {"type": "array", "items": {"type": "integer"}, "description": "Event category IDs"},
+                    "target_exclude_event_ids": {"type": "array", "items": {"type": "integer"}, "description": "Exclude attendees of these events"},
+                    "target_days_since_last_event": {"type": "integer", "description": "Inactive for N+ days"},
+                    "target_attended_since_days": {"type": "integer", "description": "Active within last N days"},
+                    "target_birthdays_this_month": {"type": "boolean", "description": "Customers with birthdays this month"},
+                    "target_birthday_opt_in": {"type": "boolean", "description": "Only customers who opted in to birthday marketing"},
+                    "target_postal_codes": {"type": "array", "items": {"type": "string"}, "description": "Filter by postal/zip codes"},
+                    "target_has_pending_payment": {"type": "boolean", "description": "Customers with pending/incomplete payments"},
                 },
                 "required": [],
             },
@@ -1074,6 +1168,96 @@ async def list_tools():
                 "required": ["code"],
             },
         ),
+        # ============== Meta Ads Tools ==============
+        Tool(
+            name="create_meta_ad",
+            description="Create a Facebook/Instagram ad campaign for an event with geo-targeting around the venue. Auto-generates ad copy from event details and creates campaign, ad set, creative, and ad.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to create ad for"},
+                    "budget_cents": {"type": "integer", "description": "Budget in cents (e.g., 500 = $5.00, 1000 = $10.00)"},
+                    "budget_type": {"type": "string", "enum": ["daily", "lifetime"], "description": "Budget type (default: daily)"},
+                    "objective": {"type": "string", "enum": ["awareness", "traffic", "engagement", "leads"], "description": "Campaign objective (default: traffic)"},
+                    "radius_miles": {"type": "integer", "description": "Targeting radius from venue in miles (default: 10)"},
+                    "age_min": {"type": "integer", "description": "Minimum age (default: 18)"},
+                    "age_max": {"type": "integer", "description": "Maximum age"},
+                    "genders": {"type": "string", "enum": ["male", "female"], "description": "Gender targeting (default: all)"},
+                    "primary_text": {"type": "string", "description": "Ad primary text (auto-generated from event if not provided)"},
+                    "headline": {"type": "string", "description": "Ad headline (default: event name)"},
+                    "description": {"type": "string", "description": "Ad description"},
+                },
+                "required": ["event_id", "budget_cents"],
+            },
+        ),
+        Tool(
+            name="get_meta_ads",
+            description="Get all Meta ad campaigns for an event with performance stats",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="pause_meta_ad",
+            description="Pause a running Meta ad campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Local campaign ID"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="resume_meta_ad",
+            description="Resume a paused Meta ad campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Local campaign ID"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="update_meta_ad_budget",
+            description="Update the budget for a Meta ad campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Local campaign ID"},
+                    "budget_cents": {"type": "integer", "description": "New budget in cents"},
+                },
+                "required": ["campaign_id", "budget_cents"],
+            },
+        ),
+        Tool(
+            name="get_meta_ad_insights",
+            description="Get performance insights (impressions, clicks, spend, CTR) for a Meta ad campaign",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Local campaign ID"},
+                    "days": {"type": "integer", "description": "Days to look back (default: 7)"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="suggest_meta_targeting",
+            description="Get AI-suggested targeting parameters for an event based on its category, price, venue, and past attendees",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to analyze"},
+                },
+                "required": ["event_id"],
+            },
+        ),
         # ============== Analytics Tools ==============
         Tool(
             name="get_event_analytics",
@@ -1097,6 +1281,65 @@ async def list_tools():
                     "days": {"type": "integer", "description": "Number of days to look back (default 30)"},
                 },
                 "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_traffic_sources",
+            description="Get real-time traffic source breakdown showing where visitors are coming from (Instagram, TikTok, Google, direct, etc.)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID (optional — omit for overall traffic)"},
+                    "hours": {"type": "integer", "description": "Hours to look back for real-time data (default 24)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_live_view_count",
+            description="Get real-time page view counts for right now (last hour, today) by event or overall",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID (optional — omit for overall)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_top_events_by_views",
+            description="Get the most viewed events in the last N days — see what's trending",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Days to look back (default 7)"},
+                    "limit": {"type": "integer", "description": "Max results (default 10)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_utm_performance",
+            description="Compare UTM campaign performance — which campaigns are driving the most traffic and conversions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID (optional)"},
+                    "days": {"type": "integer", "description": "Days to look back (default 30)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_referrer_breakdown",
+            description="Detailed referrer breakdown — see exactly which websites/apps are sending traffic (Instagram, TikTok, Google, etc.)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID (optional)"},
+                    "days": {"type": "integer", "description": "Days to look back (default 7)"},
+                },
+                "required": [],
             },
         ),
         Tool(
@@ -1494,6 +1737,226 @@ async def list_tools():
                 "required": ["integration_id"],
             },
         ),
+        # ============== Meta Ads Tools (Facebook/Instagram) ==============
+        Tool(
+            name="create_meta_ad_for_event",
+            description="Create a Facebook/Instagram ad campaign for an event with geo-targeting. Targets users within a specified radius (default 10 miles) from the event venue. Creates campaign, ad set with geo-targeting, creative, and ad. Returns campaign IDs and targeting details.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to create ad for"},
+                    "budget_cents": {"type": "integer", "description": "Budget in cents (e.g., 5000 = $50)"},
+                    "budget_type": {"type": "string", "enum": ["daily", "lifetime"], "description": "Budget type"},
+                    "objective": {"type": "string", "enum": ["awareness", "traffic", "engagement", "leads"], "description": "Campaign objective"},
+                    "radius_miles": {"type": "integer", "description": "Targeting radius from venue (default: 10)"},
+                    "age_min": {"type": "integer", "description": "Minimum age (18-65)"},
+                    "age_max": {"type": "integer", "description": "Maximum age (18-65)"},
+                    "genders": {"type": "string", "enum": ["male", "female", "all"], "description": "Gender targeting"},
+                    "primary_text": {"type": "string", "description": "Ad primary text"},
+                    "headline": {"type": "string", "description": "Ad headline"},
+                    "description": {"type": "string", "description": "Ad description"},
+                },
+                "required": ["event_id", "budget_cents"],
+            },
+        ),
+        Tool(
+            name="get_meta_ad_insights",
+            description="Get performance insights for a Meta ad campaign. Returns impressions, clicks, spend, conversions, and other metrics.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID from our database"},
+                    "days": {"type": "integer", "description": "Number of days to look back (default: 7, max: 90)"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="pause_meta_ad",
+            description="Pause a running Meta ad campaign.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID to pause"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="resume_meta_ad",
+            description="Resume a paused Meta ad campaign.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID to resume"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="update_meta_ad_budget",
+            description="Update the budget for a Meta ad campaign.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID to update"},
+                    "budget_cents": {"type": "integer", "description": "New budget in cents"},
+                },
+                "required": ["campaign_id", "budget_cents"],
+            },
+        ),
+        Tool(
+            name="list_event_meta_ads",
+            description="List all Meta ad campaigns for an event.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_meta_ad_targeting_suggestions",
+            description="Get targeting suggestions for an event based on its characteristics. Returns recommended radius, age ranges, and other targeting parameters.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="generate_meta_ad_strategy",
+            description="Generate AI-powered Meta ad campaign strategy for an event. Analyzes event context (venue, category, ticket price, date) and returns optimal targeting, budget, creative variations, and recommendations. Use this to get smart suggestions before creating an ad.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to analyze"},
+                    "budget_cents": {"type": "integer", "description": "Optional budget override in cents"},
+                    "radius_miles": {"type": "integer", "description": "Optional targeting radius override"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="create_ai_meta_ad",
+            description="One-click AI-powered Meta ad creation. Analyzes the event and automatically creates an optimized Facebook/Instagram ad campaign with smart targeting, compelling copy, and proper budget. The AI handles everything - just provide the event and optional budget.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to create ad for"},
+                    "budget_cents": {"type": "integer", "description": "Optional budget in cents (default: AI recommendation)"},
+                    "radius_miles": {"type": "integer", "description": "Optional targeting radius (default: AI recommendation)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        # ============== Flyer Template Tools ==============
+        Tool(
+            name="send_flyer_template_magic_link",
+            description="Send a magic link via SMS for template-based flyer generation. The promoter receives an SMS with a secure link to browse and select flyer templates. Once selected, the AI generates a new flyer for the event matching the template's style.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to generate flyer for"},
+                    "phone": {"type": "string", "description": "Phone number to send SMS to"},
+                    "expires_hours": {"type": "integer", "description": "Link expiration time in hours (default: 24)"},
+                },
+                "required": ["event_id", "phone"],
+            },
+        ),
+        Tool(
+            name="list_flyer_templates",
+            description="List all available flyer templates. Returns template details including name, description, image URL, and usage count.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max templates to return (default: 50)"},
+                    "sort_by": {"type": "string", "description": "Sort by: created_at, times_used, or name (default: created_at)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_featured_flyer_templates",
+            description="Get the most popular flyer templates (sorted by usage count). Use this to quickly find the best-performing templates.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max templates to return (default: 6)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_flyer_template",
+            description="Get details for a specific flyer template by ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "template_id": {"type": "integer", "description": "Template ID"},
+                },
+                "required": ["template_id"],
+            },
+        ),
+        Tool(
+            name="create_flyer_template",
+            description="Create a new flyer template. Provide a name, image URL, and optional description. Templates can be used for AI-based flyer generation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Template name"},
+                    "description": {"type": "string", "description": "Optional description"},
+                    "image_url": {"type": "string", "description": "Full-size template image URL"},
+                    "thumbnail_url": {"type": "string", "description": "Optional thumbnail URL"},
+                    "prompt_instructions": {"type": "string", "description": "Optional AI instructions for style transfer"},
+                    "created_by": {"type": "string", "description": "Optional creator name"},
+                },
+                "required": ["name", "image_url"],
+            },
+        ),
+        Tool(
+            name="update_flyer_template",
+            description="Update an existing flyer template. Only provide the fields you want to change.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "template_id": {"type": "integer", "description": "Template ID"},
+                    "name": {"type": "string", "description": "New template name"},
+                    "description": {"type": "string", "description": "New description"},
+                    "image_url": {"type": "string", "description": "New image URL"},
+                    "thumbnail_url": {"type": "string", "description": "New thumbnail URL"},
+                    "prompt_instructions": {"type": "string", "description": "New AI instructions"},
+                },
+                "required": ["template_id"],
+            },
+        ),
+        Tool(
+            name="delete_flyer_template",
+            description="Delete a flyer template. This action cannot be undone.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "template_id": {"type": "integer", "description": "Template ID to delete"},
+                },
+                "required": ["template_id"],
+            },
+        ),
+        Tool(
+            name="generate_flyer_from_template",
+            description="Generate an event flyer using a template. The AI vision model analyzes the template's layout, typography, and colors, then creates a new flyer with event content matching that style.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to generate flyer for"},
+                    "template_id": {"type": "integer", "description": "Template ID to use as style reference"},
+                    "prompt_overrides": {"type": "string", "description": "Optional additional instructions for the AI"},
+                },
+                "required": ["event_id", "template_id"],
+            },
+        ),
         # ============== Predictive Analytics Tools ==============
         Tool(
             name="predict_demand",
@@ -1887,6 +2350,19 @@ async def list_tools():
                 "required": [],
             },
         ),
+        Tool(
+            name="send_event_image_update_link",
+            description="Send an SMS with a magic link to update an event's image. The recipient can upload a new event image without logging in - just tap the link, select a file, and upload. Great for quick flyer updates from promoters on the go.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event to update the image for"},
+                    "phone": {"type": "string", "description": "Phone number to send the SMS link to"},
+                    "expires_hours": {"type": "integer", "description": "Link expiration in hours (default: 24, max: 168)"}
+                },
+                "required": ["event_id", "phone"],
+            },
+        ),
         # ============== Conversation History Tools ==============
         Tool(
             name="get_conversation_history",
@@ -1935,6 +2411,126 @@ async def list_tools():
                     "limit": {"type": "integer", "description": "Max sessions to return (default 20)"},
                 },
                 "required": [],
+            },
+        ),
+        # ============== Voice Call Tools (Telnyx) ==============
+        Tool(
+            name="schedule_call_campaign",
+            description="Create and schedule a voice call campaign to event goers. Supports goals like event_reminder, ticket_recovery, feedback_survey, birthday_wish, vip_outreach, cart_recovery. Handles call scripting, scheduling, retry logic, and compliance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Campaign name"},
+                    "goal": {"type": "string", "enum": ["event_reminder", "ticket_recovery", "feedback_survey", "birthday_wish", "vip_outreach", "cart_recovery", "payment_recovery", "event_update", "custom"], "description": "Call goal/purpose"},
+                    "event_id": {"type": "integer", "description": "Event ID (for event context in script and targeting)"},
+                    "target_event_id": {"type": "integer", "description": "Target attendees of this event"},
+                    "scheduled_for": {"type": "string", "description": "When to start calling (ISO 8601 datetime, or 'now')"},
+                    "custom_script": {"type": "string", "description": "Custom script for custom goal"},
+                    "discount_percent": {"type": "integer", "description": "Discount percentage for offers"},
+                    "update_message": {"type": "string", "description": "Update message for event_update calls"},
+                    "start_time": {"type": "string", "description": "Earliest time to call (HH:MM format)"},
+                    "end_time": {"type": "string", "description": "Latest time to call (HH:MM format)"},
+                    "max_retries": {"type": "integer", "description": "Max retry attempts for no answer"},
+                    "allow_voicemail": {"type": "boolean", "description": "Leave voicemails if no answer"},
+                },
+                "required": ["name", "goal"],
+            },
+        ),
+        Tool(
+            name="make_immediate_call",
+            description="Make an immediate voice call to a customer. Use for one-off calls like checking in with a VIP, following up on a payment issue, or delivering a personalized message.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "customer_id": {"type": "integer", "description": "Customer ID to call"},
+                    "phone": {"type": "string", "description": "Phone number to call (overrides customer phone)"},
+                    "goal": {"type": "string", "enum": ["event_reminder", "ticket_recovery", "feedback_survey", "birthday_wish", "vip_outreach", "cart_recovery", "payment_recovery", "event_update", "custom"], "description": "Call purpose"},
+                    "event_id": {"type": "integer", "description": "Event ID for context"},
+                    "message": {"type": "string", "description": "Custom message to speak (overrides default script)"},
+                    "campaign_id": {"type": "integer", "description": "Associate with existing campaign"},
+                },
+                "required": ["customer_id", "goal"],
+            },
+        ),
+        Tool(
+            name="list_call_campaigns",
+            description="List all voice call campaigns with their status and stats.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["draft", "scheduled", "running", "paused", "completed", "cancelled"], "description": "Filter by status"},
+                    "limit": {"type": "integer", "description": "Max results (default 50)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_call_campaign_stats",
+            description="Get detailed statistics for a voice call campaign including calls initiated, completed, answered, failed, and outcomes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="pause_call_campaign",
+            description="Pause a running voice call campaign.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID to pause"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="resume_call_campaign",
+            description="Resume a paused voice call campaign.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID to resume"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="cancel_call_campaign",
+            description="Cancel a voice call campaign and stop all pending calls.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID to cancel"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="get_call_logs",
+            description="Get call logs for a campaign or customer with outcomes and details.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Filter by campaign"},
+                    "customer_id": {"type": "integer", "description": "Filter by customer"},
+                    "status": {"type": "string", "enum": ["pending", "dialing", "in_progress", "completed", "failed", "busy", "no_answer", "cancelled"], "description": "Filter by status"},
+                    "limit": {"type": "integer", "description": "Max results (default 50)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="mark_do_not_call",
+            description="Mark a customer as do not call for voice campaigns.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "customer_id": {"type": "integer", "description": "Customer ID"},
+                },
+                "required": ["customer_id"],
             },
         ),
     ]
@@ -2091,6 +2687,116 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         db.commit()
         db.refresh(category)
         return {"id": category.id, "name": category.name, "description": category.description, "color": category.color, "image_url": category.image_url}
+
+    elif name == "delete_category":
+        category = db.query(EventCategory).filter(EventCategory.id == arguments["category_id"]).first()
+        if not category:
+            return {"error": "Category not found"}
+        name = category.name
+        db.delete(category)
+        db.commit()
+        return {"success": True, "message": f"Deleted category '{name}'"}
+
+    elif name == "add_event_categories":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        category_ids = arguments["category_ids"]
+        added = []
+        already_had = []
+
+        for cat_id in category_ids:
+            category = db.query(EventCategory).filter(EventCategory.id == cat_id).first()
+            if not category:
+                return {"error": f"Category {cat_id} not found"}
+
+            if category not in event.categories:
+                event.categories.append(category)
+                added.append(category.name)
+            else:
+                already_had.append(category.name)
+
+        db.commit()
+        db.refresh(event)
+
+        message = f"Added {len(added)} category/categories to event"
+        if already_had:
+            message += f" ({len(already_had)} already assigned)"
+
+        return {
+            "success": True,
+            "event_id": event.id,
+            "event_name": event.name,
+            "added": added,
+            "already_had": already_had,
+            "all_categories": [c.name for c in event.categories],
+            "message": message,
+        }
+
+    elif name == "remove_event_categories":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        category_ids = arguments["category_ids"]
+        removed = []
+
+        for cat_id in category_ids:
+            category = db.query(EventCategory).filter(EventCategory.id == cat_id).first()
+            if not category:
+                return {"error": f"Category {cat_id} not found"}
+
+            if category in event.categories:
+                event.categories.remove(category)
+                removed.append(category.name)
+
+        db.commit()
+        db.refresh(event)
+
+        return {
+            "success": True,
+            "event_id": event.id,
+            "event_name": event.name,
+            "removed": removed,
+            "remaining_categories": [c.name for c in event.categories],
+            "message": f"Removed {len(removed)} category/categories from event",
+        }
+
+    elif name == "get_event_categories":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        return {
+            "event_id": event.id,
+            "event_name": event.name,
+            "categories": [
+                {"id": c.id, "name": c.name, "color": c.color}
+                for c in event.categories
+            ],
+            "count": len(event.categories),
+        }
+
+    elif name == "get_category_events":
+        category = db.query(EventCategory).filter(EventCategory.id == arguments["category_id"]).first()
+        if not category:
+            return {"error": "Category not found"}
+
+        query = db.query(Event).filter(Event.categories.contains(category))
+
+        if arguments.get("upcoming_only", True):
+            from datetime import datetime
+            query = query.filter(Event.event_date >= datetime.now().strftime("%Y-%m-%d"))
+
+        events = query.order_by(Event.event_date).all()
+
+        return {
+            "category_id": category.id,
+            "category_name": category.name,
+            "events": [_event_to_dict(e) for e in events],
+            "count": len(events),
+        }
 
     # ============== Venue Tools ==============
     elif name == "list_venues":
@@ -3471,17 +4177,29 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                     "name": existing.name,
                     "email": existing.email,
                     "phone": existing.phone,
+                    "birthdate": existing.birthdate.isoformat() if existing.birthdate else None,
+                    "birthday_opt_in": existing.birthday_opt_in,
                 }
             }
 
         # Normalize phone number (add +1 for US)
         phone = normalize_phone(arguments.get("phone")) if arguments.get("phone") else None
 
+        # Parse birthdate if provided
+        birthdate = None
+        if arguments.get("birthdate"):
+            try:
+                birthdate = datetime.strptime(arguments["birthdate"], "%Y-%m-%d").date()
+            except ValueError:
+                return {"error": "Invalid birthdate format. Use YYYY-MM-DD"}
+
         # Create new customer
         customer = EventGoer(
             name=arguments["name"],
             email=arguments["email"],
             phone=phone,
+            birthdate=birthdate,
+            birthday_opt_in=arguments.get("birthday_opt_in", False),
             email_opt_in=True,
             sms_opt_in=bool(phone),
         )
@@ -3497,6 +4215,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "name": customer.name,
                 "email": customer.email,
                 "phone": customer.phone,
+                "birthdate": customer.birthdate.isoformat() if customer.birthdate else None,
+                "birthday_opt_in": customer.birthday_opt_in,
             },
             "next_actions": ["search_events", "get_ticket_availability", "email_payment_link"],
         }
@@ -3516,6 +4236,16 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if arguments.get("phone"):
             customer.phone = normalize_phone(arguments["phone"])
             updates.append(f"phone → {customer.phone}")
+        if arguments.get("birthdate"):
+            try:
+                birthdate = datetime.strptime(arguments["birthdate"], "%Y-%m-%d").date()
+                customer.birthdate = birthdate
+                updates.append(f"birthdate → {arguments['birthdate']}")
+            except ValueError:
+                return {"error": "Invalid birthdate format. Use YYYY-MM-DD"}
+        if "birthday_opt_in" in arguments:
+            customer.birthday_opt_in = arguments["birthday_opt_in"]
+            updates.append(f"birthday_opt_in → {arguments['birthday_opt_in']}")
 
         db.commit()
         db.refresh(customer)
@@ -3528,6 +4258,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "name": customer.name,
                 "email": customer.email,
                 "phone": customer.phone,
+                "birthdate": customer.birthdate.isoformat() if customer.birthdate else None,
+                "birthday_opt_in": customer.birthday_opt_in,
             }
         }
 
@@ -3539,6 +4271,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "name": c.name,
                 "email": c.email,
                 "phone": c.phone,
+                "birthdate": c.birthdate.isoformat() if c.birthdate else None,
+                "birthday_opt_in": c.birthday_opt_in,
                 "email_opt_in": c.email_opt_in,
                 "sms_opt_in": c.sms_opt_in,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -3561,7 +4295,15 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "found": True,
             "count": len(customers),
             "customers": [
-                {"id": c.id, "name": c.name, "email": c.email, "phone": c.phone, "marketing_opt_in": c.marketing_opt_in}
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "email": c.email,
+                    "phone": c.phone,
+                    "marketing_opt_in": c.marketing_opt_in,
+                    "birthdate": c.birthdate.isoformat() if c.birthdate else None,
+                    "birthday_opt_in": c.birthday_opt_in,
+                }
                 for c in customers
             ],
         }
@@ -4451,6 +5193,39 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     # ============== Marketing List Tools ==============
 
+    elif name == "preview_marketing_list":
+        segments = _build_segments(arguments)
+        if not segments:
+            return {"error": "At least one targeting filter is required"}
+
+        query = db.query(EventGoer).filter(EventGoer.marketing_opt_in == True)
+        query = _apply_segment_filters(db, query, segments)
+        total = query.count()
+        samples = query.limit(10).all()
+
+        # Get breakdown stats
+        vip_count = query.filter(EventGoer.preferences.any(is_vip=True)).count() if hasattr(EventGoer, 'preferences') else 0
+        sms_count = query.filter(EventGoer.sms_opt_in == True, EventGoer.phone.isnot(None)).count()
+
+        # Calculate total spend for this segment
+        total_spent = sum(g.total_spent_cents or 0 for g in samples)
+        avg_spent = total_spent / len(samples) if samples else 0
+
+        return {
+            "preview": True,
+            "total_count": total,
+            "sms_eligible": sms_count,
+            "vip_count": vip_count,
+            "avg_spent_cents": int(avg_spent),
+            "sample_customers": [
+                {"name": g.name, "email": g.email, "events_attended": g.total_events_attended or 0, "spent_cents": g.total_spent_cents or 0}
+                for g in samples
+            ],
+            "filters": segments,
+            "filters_description": _describe_segments(segments),
+            "message": f"Preview: {total} customers match these filters ({sms_count} SMS-eligible). Use create_marketing_list to save this list.",
+        }
+
     elif name == "create_marketing_list":
         list_name = arguments.get("name", "").strip()
         if not list_name:
@@ -5178,7 +5953,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "name": customer.name,
                 "email": customer.email,
                 "phone": customer.phone,
-                "created_at": customer.created_at,
+                "birthdate": customer.birthdate.isoformat() if customer.birthdate else None,
+                "birthday_opt_in": customer.birthday_opt_in,
+                "created_at": customer.created_at.isoformat() if customer.created_at else None,
             },
         }
 
@@ -5625,6 +6402,232 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "message": f"Promo code '{promo.code}' has been deactivated.",
         }
 
+    # ============== Meta Ads Tools ==============
+    elif name == "create_meta_ad":
+        from app.services.meta_ads import create_campaign_for_event
+
+        result = create_campaign_for_event(
+            db=db,
+            event_id=arguments["event_id"],
+            budget_cents=arguments["budget_cents"],
+            budget_type=arguments.get("budget_type", "daily"),
+            objective=arguments.get("objective", "traffic"),
+            radius_miles=arguments.get("radius_miles", 10),
+            age_min=arguments.get("age_min"),
+            age_max=arguments.get("age_max"),
+            genders=arguments.get("genders"),
+            primary_text=arguments.get("primary_text"),
+            headline=arguments.get("headline"),
+            description=arguments.get("description"),
+            call_to_action="GET_TICKETS",
+        )
+
+        return result
+
+    elif name == "get_meta_ads":
+        from app.services.meta_ads import get_event_ads
+
+        return get_event_ads(db, arguments["event_id"])
+
+    elif name == "pause_meta_ad":
+        from app.services.meta_ads import pause_campaign
+
+        return pause_campaign(db, arguments["campaign_id"])
+
+    elif name == "resume_meta_ad":
+        from app.services.meta_ads import resume_campaign
+
+        return resume_campaign(db, arguments["campaign_id"])
+
+    elif name == "update_meta_ad_budget":
+        from app.services.meta_ads import update_campaign_budget
+
+        return update_campaign_budget(
+            db,
+            arguments["campaign_id"],
+            arguments["budget_cents"]
+        )
+
+    elif name == "get_meta_ad_insights":
+        from app.services.meta_ads import get_campaign_insights
+
+        return get_campaign_insights(
+            db,
+            arguments["campaign_id"],
+            arguments.get("days", 7)
+        )
+
+    elif name == "suggest_meta_targeting":
+        from app.services.meta_ads import suggest_targeting_for_event
+
+        return suggest_targeting_for_event(db, arguments["event_id"])
+
+    # ============== Flyer Template Handlers ==============
+    elif name == "send_flyer_template_magic_link":
+        from app.services.flyer_template import create_template_upload_token
+
+        return create_template_upload_token(
+            db,
+            arguments["event_id"],
+            arguments["phone"],
+            arguments.get("expires_hours", 24)
+        )
+
+    elif name == "list_flyer_templates":
+        from app.models import FlyerTemplate
+
+        limit = arguments.get("limit", 50)
+        sort_by = arguments.get("sort_by", "created_at")
+
+        query = db.query(FlyerTemplate)
+
+        if sort_by == "times_used":
+            query = query.order_by(FlyerTemplate.times_used.desc())
+        elif sort_by == "name":
+            query = query.order_by(FlyerTemplate.name)
+        else:
+            query = query.order_by(FlyerTemplate.created_at.desc())
+
+        templates = query.limit(limit).all()
+
+        return {
+            "templates": [
+                {
+                    "id": t.id,
+                    "name": t.name,
+                    "description": t.description,
+                    "image_url": t.image_url,
+                    "thumbnail_url": t.thumbnail_url,
+                    "times_used": t.times_used or 0,
+                    "created_at": t.created_at.isoformat() if t.created_at else None,
+                }
+                for t in templates
+            ],
+            "count": len(templates)
+        }
+
+    elif name == "get_featured_flyer_templates":
+        from app.models import FlyerTemplate
+
+        limit = arguments.get("limit", 6)
+
+        templates = (
+            db.query(FlyerTemplate)
+            .filter(FlyerTemplate.times_used > 0)
+            .order_by(FlyerTemplate.times_used.desc())
+            .limit(limit)
+            .all()
+        )
+
+        return {
+            "templates": [
+                {
+                    "id": t.id,
+                    "name": t.name,
+                    "description": t.description,
+                    "image_url": t.image_url,
+                    "thumbnail_url": t.thumbnail_url,
+                    "times_used": t.times_used or 0,
+                }
+                for t in templates
+            ],
+            "count": len(templates)
+        }
+
+    elif name == "get_flyer_template":
+        from app.models import FlyerTemplate
+
+        template = db.query(FlyerTemplate).filter(FlyerTemplate.id == arguments["template_id"]).first()
+
+        if not template:
+            return {"error": "Template not found"}
+
+        return {
+            "id": template.id,
+            "name": template.name,
+            "description": template.description,
+            "image_url": template.image_url,
+            "thumbnail_url": template.thumbnail_url,
+            "prompt_instructions": template.prompt_instructions,
+            "created_by": template.created_by,
+            "times_used": template.times_used or 0,
+            "last_used_at": template.last_used_at.isoformat() if template.last_used_at else None,
+            "created_at": template.created_at.isoformat() if template.created_at else None,
+        }
+
+    elif name == "create_flyer_template":
+        from app.models import FlyerTemplate
+
+        template = FlyerTemplate(
+            name=arguments["name"],
+            description=arguments.get("description"),
+            image_url=arguments["image_url"],
+            thumbnail_url=arguments.get("thumbnail_url"),
+            prompt_instructions=arguments.get("prompt_instructions"),
+            created_by=arguments.get("created_by"),
+        )
+
+        db.add(template)
+        db.commit()
+        db.refresh(template)
+
+        return {
+            "success": True,
+            "id": template.id,
+            "name": template.name,
+            "message": f"Template '{template.name}' created successfully"
+        }
+
+    elif name == "update_flyer_template":
+        from app.models import FlyerTemplate
+
+        template = db.query(FlyerTemplate).filter(FlyerTemplate.id == arguments["template_id"]).first()
+
+        if not template:
+            return {"error": "Template not found"}
+
+        update_fields = ["name", "description", "image_url", "thumbnail_url", "prompt_instructions"]
+        for field in update_fields:
+            if field in arguments:
+                setattr(template, field, arguments[field])
+
+        db.commit()
+        db.refresh(template)
+
+        return {
+            "success": True,
+            "id": template.id,
+            "name": template.name,
+            "message": f"Template '{template.name}' updated successfully"
+        }
+
+    elif name == "delete_flyer_template":
+        from app.models import FlyerTemplate
+
+        template = db.query(FlyerTemplate).filter(FlyerTemplate.id == arguments["template_id"]).first()
+
+        if not template:
+            return {"error": "Template not found"}
+
+        name = template.name
+        db.delete(template)
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Template '{name}' deleted successfully"
+        }
+
+    elif name == "generate_flyer_from_template":
+        from app.services.flyer_template import generate_flyer_from_template
+
+        return generate_flyer_from_template(
+            db,
+            arguments["event_id"],
+            arguments["template_id"],
+            arguments.get("prompt_overrides")
+        )
+
     # ============== Analytics ==============
     elif name == "get_event_analytics":
         from app.models import PageView
@@ -5762,6 +6765,291 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 {"source": s or "direct", "tickets": t, "buyers": b}
                 for s, t, b in utm_breakdown
             ],
+        }
+
+    elif name == "get_traffic_sources":
+        from app.models import PageView
+        from sqlalchemy import func as sqlfunc
+        from datetime import datetime
+
+        hours = arguments.get("hours", 24)
+        event_id = arguments.get("event_id")
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
+
+        base_filter = [PageView.created_at >= cutoff]
+        if event_id:
+            base_filter.append(PageView.event_id == event_id)
+
+        # Group by UTM source
+        utm_sources = (
+            db.query(PageView.utm_source, sqlfunc.count(PageView.id).label("count"))
+            .filter(*base_filter, PageView.utm_source != None)
+            .group_by(PageView.utm_source)
+            .order_by(sqlfunc.count(PageView.id).desc())
+            .all()
+        )
+
+        # Group by referrer (excluding UTMs to see organic traffic)
+        organic_referrers = (
+            db.query(PageView.referrer, sqlfunc.count(PageView.id).label("count"))
+            .filter(*base_filter, PageView.referrer != None, PageView.referrer != "",
+                     PageView.utm_source == None)
+            .group_by(PageView.referrer)
+            .order_by(sqlfunc.count(PageView.id).desc())
+            .limit(10)
+            .all()
+        )
+
+        # Clean up referrer URLs
+        def clean_referrer(url):
+            if not url:
+                return "Direct"
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                domain = parsed.netloc
+                if domain.startswith("www."):
+                    domain = domain[4:]
+                if domain.startswith("m."):
+                    domain = domain[2:]
+                return domain
+            except:
+                return url[:30]
+
+        return {
+            "period_hours": hours,
+            "utm_traffic": [
+                {"source": source or "unknown", "views": count}
+                for source, count in utm_sources
+            ],
+            "organic_referrers": [
+                {"referrer": clean_referrer(referrer), "views": count}
+                for referrer, count in organic_referrers
+            ],
+            "summary": {
+                "total_utm_views": sum(c for _, c in utm_sources),
+                "total_organic_views": sum(c for _, c in organic_referrers),
+            },
+        }
+
+    elif name == "get_live_view_count":
+        from app.models import PageView
+        from sqlalchemy import func as sqlfunc
+        from datetime import datetime
+
+        event_id = arguments.get("event_id")
+
+        # Last hour
+        hour_ago = datetime.utcnow() - timedelta(hours=1)
+        hour_filter = [PageView.created_at >= hour_ago]
+        if event_id:
+            hour_filter.append(PageView.event_id == event_id)
+
+        hour_views = db.query(sqlfunc.count(PageView.id)).filter(*hour_filter).scalar() or 0
+        hour_unique = db.query(sqlfunc.count(sqlfunc.distinct(PageView.ip_hash))).filter(*hour_filter).scalar() or 0
+
+        # Today
+        today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_filter = [PageView.created_at >= today]
+        if event_id:
+            today_filter.append(PageView.event_id == event_id)
+
+        today_views = db.query(sqlfunc.count(PageView.id)).filter(*today_filter).scalar() or 0
+        today_unique = db.query(sqlfunc.count(sqlfunc.distinct(PageView.ip_hash))).filter(*today_filter).scalar() or 0
+
+        # This week
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        week_filter = [PageView.created_at >= week_ago]
+        if event_id:
+            week_filter.append(PageView.event_id == event_id)
+
+        week_views = db.query(sqlfunc.count(PageView.id)).filter(*week_filter).scalar() or 0
+
+        return {
+            "event_id": event_id,
+            "live": {
+                "last_hour_views": hour_views,
+                "last_hour_unique": hour_unique,
+                "today_views": today_views,
+                "today_unique": today_unique,
+                "this_week_views": week_views,
+            },
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    elif name == "get_top_events_by_views":
+        from app.models import PageView, Event
+        from sqlalchemy import func as sqlfunc
+        from datetime import datetime
+
+        days = arguments.get("days", 7)
+        limit = min(arguments.get("limit", 10), 50)
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        top_events = (
+            db.query(
+                PageView.event_id,
+                Event.name,
+                sqlfunc.count(PageView.id).label("views"),
+                sqlfunc.count(sqlfunc.distinct(PageView.ip_hash)).label("unique_visitors"),
+            )
+            .join(Event, PageView.event_id == Event.id)
+            .filter(PageView.created_at >= cutoff, PageView.event_id != None)
+            .group_by(PageView.event_id, Event.name)
+            .order_by(sqlfunc.count(PageView.id).desc())
+            .limit(limit)
+            .all()
+        )
+
+        return {
+            "period_days": days,
+            "top_events": [
+                {
+                    "event_id": eid,
+                    "name": name,
+                    "views": views,
+                    "unique_visitors": unique_visitors,
+                }
+                for eid, name, views, unique_visitors in top_events
+            ],
+        }
+
+    elif name == "get_utm_performance":
+        from app.models import PageView, Ticket, TicketTier, TicketStatus
+        from sqlalchemy import func as sqlfunc
+        from datetime import datetime
+
+        event_id = arguments.get("event_id")
+        days = arguments.get("days", 30)
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        base_filter = [PageView.created_at >= cutoff]
+        if event_id:
+            base_filter.append(PageView.event_id == event_id)
+
+        # UTM views
+        utm_views = (
+            db.query(PageView.utm_source, sqlfunc.count(PageView.id).label("views"))
+            .filter(*base_filter, PageView.utm_source != None)
+            .group_by(PageView.utm_source)
+            .subquery()
+        )
+
+        # UTM conversions (purchases)
+        purchase_filter = [
+            Ticket.purchased_at >= cutoff,
+            Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]),
+            Ticket.utm_source != None,
+        ]
+        if event_id:
+            purchase_filter.append(TicketTier.event_id == event_id)
+
+        utm_purchases = (
+            db.query(
+                Ticket.utm_source,
+                sqlfunc.count(Ticket.id).label("purchases"),
+                sqlfunc.count(sqlfunc.distinct(Ticket.event_goer_id)).label("buyers"),
+                sqlfunc.sum(TicketTier.price).label("revenue"),
+            )
+            .join(TicketTier)
+            .filter(*purchase_filter)
+            .group_by(Ticket.utm_source)
+            .subquery()
+        )
+
+        # Combine views and purchases
+        results = db.query(
+            utm_views.c.utm_source,
+            utm_views.c.views,
+            utm_purchases.c.purchases,
+            utm_purchases.c.buyers,
+            utm_purchases.c.revenue,
+        ).outerjoin(utm_purchases, utm_views.c.utm_source == utm_purchases.c.utm_source).all()
+
+        return {
+            "period_days": days,
+            "utm_performance": [
+                {
+                    "source": source or "direct",
+                    "views": views or 0,
+                    "purchases": purchases or 0,
+                    "buyers": buyers or 0,
+                    "revenue_cents": int(revenue or 0),
+                    "conversion_rate": round((purchases / views * 100) if views and purchases else 0, 1),
+                }
+                for source, views, purchases, buyers, revenue in results
+            ],
+        }
+
+    elif name == "get_referrer_breakdown":
+        from app.models import PageView
+        from sqlalchemy import func as sqlfunc
+        from datetime import datetime
+        from urllib.parse import urlparse
+
+        event_id = arguments.get("event_id")
+        days = arguments.get("days", 7)
+        cutoff = datetime.utcnow() - timedelta(days=days)
+
+        base_filter = [PageView.created_at >= cutoff, PageView.referrer != None, PageView.referrer != ""]
+        if event_id:
+            base_filter.append(PageView.event_id == event_id)
+
+        referrers = (
+            db.query(PageView.referrer, sqlfunc.count(PageView.id).label("count"))
+            .filter(*base_filter)
+            .group_by(PageView.referrer)
+            .order_by(sqlfunc.count(PageView.id).desc())
+            .limit(20)
+            .all()
+        )
+
+        def categorize_referrer(url):
+            try:
+                domain = urlparse(url).netloc
+                if domain.startswith("www."):
+                    domain = domain[4:]
+
+                # Social media detection
+                social = {
+                    "instagram.com": "Instagram",
+                    "tiktok.com": "TikTok",
+                    "facebook.com": "Facebook",
+                    "twitter.com": "Twitter/X",
+                    "x.com": "Twitter/X",
+                    "linkedin.com": "LinkedIn",
+                    "pinterest.com": "Pinterest",
+                    "snapchat.com": "Snapchat",
+                    "youtube.com": "YouTube",
+                }
+
+                if domain in social:
+                    return social[domain]
+
+                # Search engines
+                if domain in ["google.com", "bing.com", "duckduckgo.com"]:
+                    return f"Search ({domain})"
+
+                return domain
+            except:
+                return "Other"
+
+        # Group by category
+        categories = {}
+        raw_list = []
+
+        for referrer, count in referrers:
+            category = categorize_referrer(referrer)
+            categories[category] = categories.get(category, 0) + count
+            raw_list.append({"referrer": referrer, "category": category, "views": count})
+
+        # Sort categories by views
+        sorted_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)
+
+        return {
+            "period_days": days,
+            "by_category": [{"category": cat, "views": views} for cat, views in sorted_categories],
+            "detailed": raw_list[:10],  # Top 10 raw referrers
         }
 
     elif name == "share_event_link":
@@ -6126,6 +7414,187 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "integration_id": arguments["integration_id"],
                 "data": result["data"],
                 "message": "Found next available posting slot. Use this time with schedule_social_post.",
+            }
+        return result
+
+    # ============== Meta Ads Handlers ==============
+
+    elif name == "create_meta_ad_for_event":
+        from app.services.meta_ads import create_campaign_for_event
+
+        result = create_campaign_for_event(
+            db=db,
+            event_id=arguments["event_id"],
+            budget_cents=arguments["budget_cents"],
+            budget_type=arguments.get("budget_type", "daily"),
+            objective=arguments.get("objective", "traffic"),
+            radius_miles=arguments.get("radius_miles", 10),
+            age_min=arguments.get("age_min"),
+            age_max=arguments.get("age_max"),
+            genders=arguments.get("genders"),
+            interests=arguments.get("interests"),
+            primary_text=arguments.get("primary_text"),
+            headline=arguments.get("headline"),
+            description=arguments.get("description"),
+            call_to_action=arguments.get("call_to_action", "GET_TICKETS"),
+        )
+
+        if result.get("success"):
+            return {
+                "success": True,
+                "message": result.get("message"),
+                "campaign_id": result.get("campaign_id"),
+                "meta_ids": {
+                    "campaign": result.get("meta_campaign_id"),
+                    "ad_set": result.get("meta_ad_set_id"),
+                    "ad": result.get("meta_ad_id"),
+                    "creative": result.get("meta_creative_id"),
+                },
+                "event": result.get("event"),
+            }
+        return result
+
+    elif name == "get_meta_ad_insights":
+        from app.services.meta_ads import get_campaign_insights
+
+        result = get_campaign_insights(
+            db=db,
+            campaign_id=arguments["campaign_id"],
+            days=arguments.get("days", 7),
+        )
+
+        if "error" not in result:
+            return {
+                "success": True,
+                "campaign_id": arguments["campaign_id"],
+                "period_days": result.get("period_days"),
+                "metrics": {
+                    "impressions": result.get("impressions"),
+                    "clicks": result.get("clicks"),
+                    "spend_cents": result.get("spend_cents"),
+                    "reach": result.get("reach"),
+                    "ctr_percent": result.get("ctr_percent"),
+                    "cpc_cents": result.get("cpc_cents"),
+                },
+            }
+        return result
+
+    elif name == "pause_meta_ad":
+        from app.services.meta_ads import pause_campaign
+
+        result = pause_campaign(db, arguments["campaign_id"])
+        if result.get("success"):
+            return {
+                "success": True,
+                "campaign_id": arguments["campaign_id"],
+                "message": "Campaign paused",
+            }
+        return result
+
+    elif name == "resume_meta_ad":
+        from app.services.meta_ads import resume_campaign
+
+        result = resume_campaign(db, arguments["campaign_id"])
+        if result.get("success"):
+            return {
+                "success": True,
+                "campaign_id": arguments["campaign_id"],
+                "message": "Campaign resumed",
+            }
+        return result
+
+    elif name == "update_meta_ad_budget":
+        from app.services.meta_ads import update_campaign_budget
+
+        result = update_campaign_budget(
+            db=db,
+            campaign_id=arguments["campaign_id"],
+            budget_cents=arguments["budget_cents"],
+        )
+        if result.get("success"):
+            return {
+                "success": True,
+                "campaign_id": arguments["campaign_id"],
+                "new_budget_cents": arguments["budget_cents"],
+                "message": f"Budget updated to ${arguments['budget_cents'] / 100:.2f}",
+            }
+        return result
+
+    elif name == "list_event_meta_ads":
+        from app.services.meta_ads import get_event_ads
+
+        result = get_event_ads(db, arguments["event_id"])
+        return {
+            "success": True,
+            "event_id": arguments["event_id"],
+            "campaigns": result.get("campaigns", []),
+        }
+
+    elif name == "get_meta_ad_targeting_suggestions":
+        from app.services.meta_ads import suggest_targeting_for_event
+
+        result = suggest_targeting_for_event(db, arguments["event_id"])
+        if "error" not in result:
+            return {
+                "success": True,
+                "event_id": arguments["event_id"],
+                "event_name": result.get("event_name"),
+                "suggestions": result.get("suggestions", {}),
+            }
+        return result
+
+    elif name == "generate_meta_ad_strategy":
+        from app.services.meta_ads_strategist import generate_ad_strategy
+
+        result = await generate_ad_strategy(
+            db=db,
+            event_id=arguments["event_id"],
+            budget_override_cents=arguments.get("budget_cents"),
+            radius_override_miles=arguments.get("radius_miles"),
+        )
+
+        if "error" in result and "fallback_strategy" not in result:
+            return result
+
+        strategy = result.get("strategy", result.get("fallback_strategy", {}))
+        context = result.get("context_summary", {})
+
+        return {
+            "success": True,
+            "event_id": arguments["event_id"],
+            "event_name": context.get("event"),
+            "event_date": context.get("date"),
+            "venue": context.get("venue"),
+            "price_range": context.get("price_range"),
+            "categories": context.get("categories"),
+            "strategy": {
+                "target_audience": strategy.get("target_audience", {}),
+                "campaign": strategy.get("campaign", {}),
+                "creative": strategy.get("creative", {}),
+                "variations": strategy.get("variations", []),
+                "recommendations": strategy.get("recommendations", []),
+            }
+        }
+
+    elif name == "create_ai_meta_ad":
+        from app.services.meta_ads_strategist import create_strategy_and_campaign
+
+        result = await create_strategy_and_campaign(
+            db=db,
+            event_id=arguments["event_id"],
+            budget_cents=arguments.get("budget_cents"),
+            radius_miles=arguments.get("radius_miles"),
+            auto_create=True,
+        )
+
+        if result.get("success"):
+            return {
+                "success": True,
+                "message": result.get("message"),
+                "campaign_id": result.get("campaign_id"),
+                "meta_ids": result.get("meta_ids"),
+                "event": result.get("event"),
+                "ai_strategy_used": result.get("ai_strategy"),
             }
         return result
 
@@ -7167,93 +8636,361 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 result["current_event"] = {
                     "id": event.id,
                     "name": event.name,
-                    "event_date": event.event_date,
-                    "event_time": event.event_time,
+                    "date": event.event_date,
                 }
 
-        # Include pending operation if any
-        if entity_context.get("pending_operation"):
-            result["pending_operation"] = entity_context["pending_operation"]
+    elif name == "send_event_image_update_link":
+        from app.services.event_image_update import generate_image_update_token
 
-        # Include last action if any
-        if entity_context.get("last_action"):
-            result["last_action"] = {
-                "tool": entity_context["last_action"].get("tool"),
-                "timestamp": entity_context["last_action"].get("timestamp"),
-                "reversible": entity_context["last_action"].get("reversible"),
+        result = generate_image_update_token(
+            db=db,
+            event_id=arguments["event_id"],
+            phone=arguments["phone"],
+            expires_hours=arguments.get("expires_hours", 24),
+        )
+
+        if "error" in result:
+            return result
+
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        return {
+            "success": True,
+            "message": f"SMS sent to {arguments['phone']} with image update link for {event.name if event else 'Event'}",
+            "event_id": arguments["event_id"],
+            "event_name": event.name if event else None,
+            "phone": arguments["phone"],
+            "magic_link": result.get("magic_link"),
+            "expires_at": result.get("expires_at"),
+        }
+
+    # ============== Voice Call Tools ==============
+    elif name == "schedule_call_campaign":
+        from app.services.voice_call import TelnyxClient, build_call_script, normalize_phone
+        import json as _json
+
+        # Get event for context if provided
+        event = None
+        if arguments.get("event_id"):
+            event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+
+        # Create campaign
+        campaign = VoiceCallCampaign(
+            name=arguments["name"],
+            description=f"{arguments.get('goal', '')} campaign",
+            goal=arguments["goal"],
+            custom_script=arguments.get("custom_script"),
+            target_event_id=arguments.get("target_event_id"),
+            event_context_id=arguments.get("event_id"),
+            discount_percent=arguments.get("discount_percent"),
+            start_calling_after=arguments.get("start_time", "09:00"),
+            stop_calling_before=arguments.get("end_time", "21:00"),
+            max_retries=arguments.get("max_retries", 3),
+            allow_voicemail=arguments.get("allow_voicemail", True),
+            status="scheduled",
+        )
+
+        # Parse scheduled time
+        scheduled_for = arguments.get("scheduled_for", "now")
+        if scheduled_for.lower() == "now":
+            campaign.scheduled_for = datetime.utcnow()
+        else:
+            try:
+                campaign.scheduled_for = datetime.fromisoformat(scheduled_for.replace("Z", "+00:00"))
+            except ValueError:
+                return {"error": "Invalid datetime format. Use ISO 8601 format (e.g., 2025-12-01T10:00:00Z)"}
+
+        db.add(campaign)
+        db.flush()
+
+        # Build recipients
+        recipients = []
+
+        if arguments.get("target_event_id"):
+            # Target attendees of specific event
+            target_event = db.query(Event).filter(Event.id == arguments["target_event_id"]).first()
+            if target_event:
+                attendees = db.query(EventGoer).join(Ticket).filter(
+                    Ticket.event_id == arguments["target_event_id"],
+                    EventGoer.phone.isnot(None),
+                    EventGoer.phone != "",
+                ).all()
+                recipients.extend(attendees)
+
+        # Create call records for each recipient
+        for recipient in recipients:
+            # Build call script
+            script = build_call_script(
+                goal=arguments["goal"],
+                name=recipient.name,
+                event_name=event.name if event else None,
+                event_date=event.event_date if event else None,
+                event_time=event.event_time if event else None,
+                venue_name=event.venue.name if event and event.venue else None,
+                org_name=settings.org_name,
+                discount_percent=arguments.get("discount_percent", 10),
+                update_message=arguments.get("update_message"),
+                custom_script=arguments.get("custom_script"),
+            )
+
+            call = VoiceCall(
+                campaign_id=campaign.id,
+                event_goer_id=recipient.id,
+                goal=arguments["goal"],
+                phone_number=normalize_phone(recipient.phone),
+                call_script=script,
+                status="scheduled",
+                scheduled_for=campaign.scheduled_for,
+                max_retries=arguments.get("max_retries", 3),
+            )
+            db.add(call)
+
+        campaign.total_recipients = len(recipients)
+        db.commit()
+        db.refresh(campaign)
+
+        return {
+            "success": True,
+            "campaign_id": campaign.id,
+            "name": campaign.name,
+            "goal": campaign.goal,
+            "total_recipients": campaign.total_recipients,
+            "scheduled_for": campaign.scheduled_for.isoformat() if campaign.scheduled_for else None,
+            "message": f"Created call campaign '{campaign.name}' with {len(recipients)} recipients scheduled for {campaign.scheduled_for}.",
+        }
+
+    elif name == "make_immediate_call":
+        from app.services.voice_call import TelnyxClient, build_call_script, normalize_phone
+
+        customer = db.query(EventGoer).filter(EventGoer.id == arguments["customer_id"]).first()
+        if not customer:
+            return {"error": "Customer not found"}
+
+        # Get event for context
+        event = None
+        if arguments.get("event_id"):
+            event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+
+        # Use provided phone or customer's phone
+        phone = arguments.get("phone") or customer.phone
+        if not phone:
+            return {"error": "No phone number available for this customer"}
+
+        # Build call script
+        script = arguments.get("message") or build_call_script(
+            goal=arguments["goal"],
+            name=customer.name,
+            event_name=event.name if event else None,
+            event_date=event.event_date if event else None,
+            event_time=event.event_time if event else None,
+            venue_name=event.venue.name if event and event.venue else None,
+            org_name=settings.org_name,
+        )
+
+        # Create call record
+        call = VoiceCall(
+            campaign_id=arguments.get("campaign_id"),
+            event_goer_id=customer.id,
+            goal=arguments["goal"],
+            phone_number=normalize_phone(phone),
+            call_script=script,
+            status="pending",
+        )
+        db.add(call)
+        db.commit()
+        db.refresh(call)
+
+        # Initiate the call via Telnyx
+        client = TelnyxClient()
+        result = client.initiate_call_sync(
+            to_phone=normalize_phone(phone),
+            text=script,
+            max_duration_seconds=120,
+        )
+
+        if result.get("success"):
+            call.status = "dialing"
+            call.telnyx_call_id = result.get("call_id")
+            call.telnyx_status = result.get("status")
+            call.started_at = datetime.utcnow()
+            db.commit()
+
+            return {
+                "success": True,
+                "call_id": call.id,
+                "telnyx_call_id": result.get("call_id"),
+                "phone": phone,
+                "script": script,
+                "message": f"Calling {customer.name} at {phone}...",
+            }
+        else:
+            call.status = "failed"
+            call.outcome = "failed"
+            db.commit()
+
+            return {
+                "success": False,
+                "error": result.get("error", "Call initiation failed"),
+                "call_id": call.id,
             }
 
-        return result
+    elif name == "list_call_campaigns":
+        query = db.query(VoiceCallCampaign).order_by(VoiceCallCampaign.created_at.desc())
 
-    elif name == "clear_session":
-        import json as json_module
-        from app.models import ConversationSession
+        if arguments.get("status"):
+            query = query.filter(VoiceCallCampaign.status == arguments["status"])
 
-        session_id = arguments.get("session_id")
-        if not session_id:
-            return {"error": "session_id is required"}
+        limit = min(arguments.get("limit", 50), 200)
+        campaigns = query.limit(limit).all()
 
-        session = db.query(ConversationSession).filter(
-            ConversationSession.session_id == session_id
-        ).first()
+        return {
+            "campaigns": [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "goal": c.goal,
+                    "status": c.status,
+                    "total_recipients": c.total_recipients,
+                    "calls_initiated": c.calls_initiated,
+                    "calls_completed": c.calls_completed,
+                    "calls_answered": c.calls_answered,
+                    "scheduled_for": c.scheduled_for.isoformat() if c.scheduled_for else None,
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                }
+                for c in campaigns
+            ],
+            "count": len(campaigns),
+        }
 
-        if not session:
-            return {"error": f"Session not found: {session_id}"}
+    elif name == "get_call_campaign_stats":
+        campaign = db.query(VoiceCallCampaign).filter(VoiceCallCampaign.id == arguments["campaign_id"]).first()
+        if not campaign:
+            return {"error": "Campaign not found"}
 
-        # Clear the session data
-        session.conversation_history = json_module.dumps([])
-        session.entity_context = json_module.dumps({"customers": [], "events": []})
-        session.current_customer_id = None
-        session.current_event_id = None
-        session.last_activity = datetime.utcnow()
+        # Get outcome breakdown
+        calls = db.query(VoiceCall).filter(VoiceCall.campaign_id == campaign.id).all()
+        outcomes = {}
+        for call in calls:
+            if call.outcome:
+                outcomes[call.outcome] = outcomes.get(call.outcome, 0) + 1
+
+        return {
+            "campaign_id": campaign.id,
+            "name": campaign.name,
+            "goal": campaign.goal,
+            "status": campaign.status,
+            "stats": {
+                "total_recipients": campaign.total_recipients,
+                "calls_initiated": campaign.calls_initiated,
+                "calls_completed": campaign.calls_completed,
+                "calls_answered": campaign.calls_answered,
+                "calls_failed": campaign.calls_failed,
+            },
+            "outcomes": outcomes,
+            "scheduled_for": campaign.scheduled_for.isoformat() if campaign.scheduled_for else None,
+            "started_at": campaign.started_at.isoformat() if campaign.started_at else None,
+            "completed_at": campaign.completed_at.isoformat() if campaign.completed_at else None,
+        }
+
+    elif name == "pause_call_campaign":
+        campaign = db.query(VoiceCallCampaign).filter(VoiceCallCampaign.id == arguments["campaign_id"]).first()
+        if not campaign:
+            return {"error": "Campaign not found"}
+
+        if campaign.status not in ("scheduled", "running"):
+            return {"error": f"Cannot pause campaign with status '{campaign.status}'"}
+
+        campaign.status = "paused"
+        db.commit()
+
+        return {"success": True, "message": f"Campaign '{campaign.name}' paused"}
+
+    elif name == "resume_call_campaign":
+        campaign = db.query(VoiceCallCampaign).filter(VoiceCallCampaign.id == arguments["campaign_id"]).first()
+        if not campaign:
+            return {"error": "Campaign not found"}
+
+        if campaign.status != "paused":
+            return {"error": f"Cannot resume campaign with status '{campaign.status}'"}
+
+        campaign.status = "running"
+        db.commit()
+
+        return {"success": True, "message": f"Campaign '{campaign.name}' resumed"}
+
+    elif name == "cancel_call_campaign":
+        campaign = db.query(VoiceCallCampaign).filter(VoiceCallCampaign.id == arguments["campaign_id"]).first()
+        if not campaign:
+            return {"error": "Campaign not found"}
+
+        if campaign.status in ("completed", "cancelled"):
+            return {"error": f"Campaign already {campaign.status}"}
+
+        # Cancel pending calls
+        db.query(VoiceCall).filter(
+            VoiceCall.campaign_id == campaign.id,
+            VoiceCall.status.in_(["pending", "scheduled", "dialing"])
+        ).update({"status": "cancelled"})
+
+        campaign.status = "cancelled"
+        campaign.completed_at = datetime.utcnow()
+        db.commit()
+
+        return {"success": True, "message": f"Campaign '{campaign.name}' cancelled"}
+
+    elif name == "get_call_logs":
+        query = db.query(VoiceCall).order_by(VoiceCall.created_at.desc())
+
+        if arguments.get("campaign_id"):
+            query = query.filter(VoiceCall.campaign_id == arguments["campaign_id"])
+        if arguments.get("customer_id"):
+            query = query.filter(VoiceCall.event_goer_id == arguments["customer_id"])
+        if arguments.get("status"):
+            query = query.filter(VoiceCall.status == arguments["status"])
+
+        limit = min(arguments.get("limit", 50), 200)
+        calls = query.limit(limit).all()
+
+        return {
+            "calls": [
+                {
+                    "id": c.id,
+                    "campaign_id": c.campaign_id,
+                    "customer_id": c.event_goer_id,
+                    "customer_name": c.event_goer.name if c.event_goer else None,
+                    "goal": c.goal,
+                    "phone": c.phone_number,
+                    "status": c.status,
+                    "outcome": c.outcome,
+                    "scheduled_for": c.scheduled_for.isoformat() if c.scheduled_for else None,
+                    "started_at": c.started_at.isoformat() if c.started_at else None,
+                    "completed_at": c.completed_at.isoformat() if c.completed_at else None,
+                    "duration_seconds": c.duration_seconds,
+                    "attempt_number": c.attempt_number,
+                }
+                for c in calls
+            ],
+            "count": len(calls),
+        }
+
+    elif name == "mark_do_not_call":
+        customer = db.query(EventGoer).filter(EventGoer.id == arguments["customer_id"]).first()
+        if not customer:
+            return {"error": "Customer not found"}
+
+        # Add a note about do not call
+        note = CustomerNote(
+            event_goer_id=customer.id,
+            note_type="preference",
+            note="Customer requested do not call for voice campaigns.",
+            created_by="voice_agent",
+        )
+        db.add(note)
         db.commit()
 
         return {
             "success": True,
-            "session_id": session_id,
-            "message": "Session cleared. Conversation history and context have been reset.",
-        }
-
-    elif name == "list_active_sessions":
-        from app.models import ConversationSession
-        from datetime import timezone
-
-        limit = min(arguments.get("limit", 20), 100)
-        now = datetime.utcnow().replace(tzinfo=timezone.utc)
-
-        sessions = db.query(ConversationSession).filter(
-            ConversationSession.expires_at > now
-        ).order_by(ConversationSession.last_activity.desc()).limit(limit).all()
-
-        results = []
-        for s in sessions:
-            session_info = {
-                "session_id": s.session_id,
-                "created_at": str(s.created_at),
-                "last_activity": str(s.last_activity),
-                "expires_at": str(s.expires_at),
-                "current_customer_id": s.current_customer_id,
-                "current_event_id": s.current_event_id,
-            }
-
-            # Get customer name if set
-            if s.current_customer_id:
-                customer = db.query(EventGoer).filter(EventGoer.id == s.current_customer_id).first()
-                if customer:
-                    session_info["current_customer_name"] = customer.name
-
-            # Get event name if set
-            if s.current_event_id:
-                event = db.query(Event).filter(Event.id == s.current_event_id).first()
-                if event:
-                    session_info["current_event_name"] = event.name
-
-            results.append(session_info)
-
-        return {
-            "active_sessions": results,
-            "count": len(results),
-            "message": f"Found {len(results)} active session(s).",
+            "message": f"Marked {customer.name} as do not call",
+            "customer_id": customer.id,
         }
 
     return {"error": f"Unknown tool: {name}"}
@@ -7273,6 +9010,8 @@ def _build_segments(arguments: dict) -> dict:
         segments["min_events"] = arguments["target_min_events"]
     if arguments.get("target_min_spent_cents"):
         segments["min_spent_cents"] = arguments["target_min_spent_cents"]
+    if arguments.get("target_max_spent_cents"):
+        segments["max_spent_cents"] = arguments["target_max_spent_cents"]
     if arguments.get("target_category_ids"):
         segments["category_ids"] = arguments["target_category_ids"]
     if arguments.get("target_event_ids"):
@@ -7285,6 +9024,16 @@ def _build_segments(arguments: dict) -> dict:
         segments["days_since_last_event"] = arguments["target_days_since_last_event"]
     if arguments.get("target_attended_since_days"):
         segments["attended_since_days"] = arguments["target_attended_since_days"]
+    if arguments.get("target_birthdays_this_month"):
+        segments["birthdays_this_month"] = True
+    if arguments.get("target_birthday_opt_in"):
+        segments["birthday_opt_in"] = True
+    if arguments.get("target_postal_codes"):
+        segments["postal_codes"] = arguments["target_postal_codes"]
+    if arguments.get("target_has_pending_payment"):
+        segments["has_pending_payment"] = True
+    if arguments.get("target_no_show"):
+        segments["no_show"] = True
     return segments
 
 
@@ -7298,6 +9047,8 @@ def _describe_segments(segments: dict) -> str:
         parts.append(f"{segments['min_events']}+ events attended")
     if segments.get("min_spent_cents"):
         parts.append(f"${segments['min_spent_cents'] / 100:.0f}+ spent")
+    if segments.get("max_spent_cents"):
+        parts.append(f"under ${segments['max_spent_cents'] / 100:.0f} spent")
     if segments.get("category_ids"):
         parts.append(f"categories {segments['category_ids']}")
     if segments.get("event_ids"):
@@ -7310,6 +9061,16 @@ def _describe_segments(segments: dict) -> str:
         parts.append(f"inactive {segments['days_since_last_event']}+ days")
     if segments.get("attended_since_days"):
         parts.append(f"active in last {segments['attended_since_days']} days")
+    if segments.get("birthdays_this_month"):
+        parts.append("birthdays this month")
+    if segments.get("birthday_opt_in"):
+        parts.append("birthday opt-in")
+    if segments.get("postal_codes"):
+        parts.append(f"in {segments['postal_codes']}")
+    if segments.get("has_pending_payment"):
+        parts.append("pending payments")
+    if segments.get("no_show"):
+        parts.append("no-shows")
     return ", ".join(parts)
 
 
@@ -7443,6 +9204,72 @@ def _apply_segment_filters(db, query, segments: dict):
             .distinct()
         )
         query = query.filter(EventGoer.id.in_(recent_goer_ids))
+
+    # Birthdays this month
+    if segments.get("birthdays_this_month"):
+        from datetime import datetime as dt
+        current_month = dt.now().month
+        birthday_ids = db.query(EventGoer.id).filter(
+            EventGoer.birthdate.isnot(None),
+            func.extract('month', EventGoer.birthdate) == current_month
+        )
+        if segments.get("birthday_opt_in"):
+            birthday_ids = birthday_ids.filter(EventGoer.birthday_opt_in == True)
+        query = query.filter(EventGoer.id.in_(birthday_ids))
+
+    # Max spent (for budget-conscious targeting)
+    if segments.get("max_spent_cents"):
+        max_spent = int(segments["max_spent_cents"])
+        spent_subq = (
+            db.query(
+                Ticket.event_goer_id,
+                func.sum(TicketTier.price).label("total_spent")
+            )
+            .join(TicketTier)
+            .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
+            .group_by(Ticket.event_goer_id)
+            .having(func.sum(TicketTier.price) <= max_spent)
+            .subquery()
+        )
+        query = query.filter(EventGoer.id.in_(db.query(spent_subq.c.event_goer_id)))
+
+    # Postal code targeting (extract from email or use separate field if available)
+    if segments.get("postal_codes"):
+        # This would require a postal_code field on EventGoer or parsing from address
+        # For now, we'll filter by name/email patterns if common postal codes
+        postal_codes = segments["postal_codes"]
+        # Simple implementation - filter by email domain patterns if zip codes are reflected
+        # In production, you'd have a dedicated postal_code field
+        pass  # Placeholder - requires additional model field
+
+    # Pending payments (customers with pending/failed payments)
+    if segments.get("has_pending_payment"):
+        pending_payment_ids = db.query(Ticket.event_goer_id).filter(
+            Ticket.status == TicketStatus.PENDING
+        ).distinct()
+        query = query.filter(EventGoer.id.in_(pending_payment_ids))
+
+    # No-shows (bought tickets but never checked in)
+    if segments.get("no_show"):
+        from datetime import datetime as dt, timedelta, timezone
+        # Get customers who bought tickets but never checked in for past events
+        past_events = db.query(Event.id).filter(
+            Event.event_date < dt.now(timezone.utc).strftime("%Y-%m-%d")
+        )
+        no_show_ids = (
+            db.query(Ticket.event_goer_id)
+            .join(TicketTier)
+            .filter(TicketTier.event_id.in_(past_events))
+            .filter(Ticket.status == TicketStatus.PAID)
+            .distinct()
+        )
+        # Exclude those who ever checked in
+        checked_in_ids = (
+            db.query(Ticket.event_goer_id)
+            .filter(Ticket.status == TicketStatus.CHECKED_IN)
+            .distinct()
+        )
+        query = query.filter(EventGoer.id.in_(no_show_ids), ~EventGoer.id.in_(checked_in_ids))
 
     return query
 

@@ -512,3 +512,49 @@ class FlyerStyleResponse(BaseModel):
 class GenerateFlyerRequest(BaseModel):
     style_instructions: Optional[str] = None
     style_id: Optional[int] = None
+
+
+# ============== Flyer Template Schemas ==============
+
+class FlyerTemplateBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    image_url: str
+    thumbnail_url: Optional[str] = None
+    prompt_instructions: Optional[str] = None
+    created_by: Optional[str] = None
+
+
+class FlyerTemplateCreate(FlyerTemplateBase):
+    pass
+
+
+class FlyerTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    prompt_instructions: Optional[str] = None
+
+
+class FlyerTemplateResponse(FlyerTemplateBase):
+    id: int
+    times_used: int
+    last_used_at: Optional[datetime] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FlyerTemplateMagicLinkRequest(BaseModel):
+    """Request to send a magic link for template upload/selection."""
+    event_id: int
+    phone: str
+    expires_hours: int = 24
+
+
+class GenerateFlyerFromTemplateRequest(BaseModel):
+    """Request to generate a flyer using a template."""
+    template_id: int
+    prompt_overrides: Optional[str] = None

@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,19 +10,51 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
+import uuid
 
 from app.database import init_db
 from app.config import get_settings
 from app.rate_limit import limiter
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles
+from app.logging_config import setup_logging
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates
 
-logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database and scheduler on startup, shutdown gracefully."""
+    # Setup logging first
+    setup_logging()
+    logger = logging.getLogger(__name__)
+
+    # Startup
+    logger.info("Starting application...")
+    init_db()
+    try:
+        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders
+        init_scheduler()
+        bootstrap_existing_reminders()
+        logger.info("Scheduler initialized successfully")
+    except Exception as e:
+        logger.warning(f"Scheduler init note: {e}")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down application...")
+    try:
+        from app.services.scheduler import shutdown_scheduler
+        shutdown_scheduler()
+        logger.info("Scheduler shutdown successfully")
+    except Exception as e:
+        logger.warning(f"Scheduler shutdown note: {e}")
+
 
 # Initialize FastAPI app
 app = FastAPI(
     title="Event Ticket System",
     description="REST API for managing venues, events, ticket tiers, and sales with Stripe payment processing",
     version="1.0.0",
+    lifespan=lifespan,
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -66,6 +99,16 @@ app.include_router(knowledge.router, prefix=api_prefix)
 app.include_router(webhooks.router, prefix=api_prefix)
 app.include_router(about.router, prefix=api_prefix)
 app.include_router(flyer_styles.router, prefix=api_prefix)
+app.include_router(flyer_templates.router)
+app.include_router(flyer_templates.router, prefix=api_prefix)
+app.include_router(meta_ads.router, prefix=api_prefix)
+
+# Event image update (API + public magic link page)
+app.include_router(event_image_update.router, prefix=api_prefix)
+app.include_router(event_image_update.router)  # For /update-event-image/{token} public page
+
+# Flyer templates public magic link page (already included with API prefix above)
+# No need to include again as the public route is at /flyer-templates/select/{token} which is under the prefix
 
 # Non-API routers (keep at root)
 app.include_router(payments.router)   # /webhooks/stripe
@@ -100,7 +143,8 @@ app.add_middleware(
 REST_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc",
                      "/events", "/about", "/purchase-success", "/purchase-cancelled",
                      "/unsubscribe", "/webhooks/stripe"}
-REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view", "/api/about", "/pick-style/", "/api/tickets/by-email")
+REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view", "/api/about", "/pick-style/", "/api/tickets/by-email",
+                         "/update-event-image/", "/flyer-templates/select/")
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
@@ -135,29 +179,26 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Add unique request ID to each request for distributed tracing."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Generate or extract request ID
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request.state.request_id = request_id
+
+        # Process request
+        response = await call_next(request)
+
+        # Add request ID to response headers
+        response.headers["X-Request-ID"] = request_id
+
+        return response
+
+
+# Add middlewares (order matters - first added is outermost)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(ApiKeyAuthMiddleware)
-
-
-@app.on_event("startup")
-def on_startup():
-    """Initialize database and scheduler on startup."""
-    init_db()
-    try:
-        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders
-        init_scheduler()
-        bootstrap_existing_reminders()
-    except Exception as e:
-        print(f"Scheduler init note: {e}")
-
-
-@app.on_event("shutdown")
-def on_shutdown():
-    """Shut down scheduler gracefully."""
-    try:
-        from app.services.scheduler import shutdown_scheduler
-        shutdown_scheduler()
-    except Exception:
-        pass
 
 
 @app.get("/")

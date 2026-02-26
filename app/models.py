@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Table
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Table, Date, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import enum
@@ -145,6 +145,12 @@ class EventPhoto(Base):
     media_type = Column(String(20), default="photo")  # "photo" or "video"
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
+    # Content moderation fields
+    moderation_status = Column(String(20), default="pending")  # pending, approved, rejected, flagged
+    moderation_score = Column(Float, nullable=True)  # NSFW score (0-1)
+    moderation_scores_json = Column(Text, nullable=True)  # JSON with detailed scores
+    moderated_at = Column(DateTime(timezone=True), nullable=True)
+
     event = relationship("Event", back_populates="photos")
     event_goer = relationship("EventGoer")
 
@@ -196,11 +202,13 @@ class EventGoer(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False)
     phone = Column(String(50), nullable=True)
+    birthdate = Column(Date, nullable=True)  # Customer birthdate for birthday marketing
 
     # Notification preferences
     email_opt_in = Column(Boolean, default=True)  # Transactional emails (tickets, reminders)
     sms_opt_in = Column(Boolean, default=False)   # SMS notifications
     marketing_opt_in = Column(Boolean, default=False)  # Marketing communications
+    birthday_opt_in = Column(Boolean, default=False)  # Birthday greetings/marketing (GDPR consent)
 
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
@@ -603,6 +611,100 @@ class AboutSection(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class MetaAdStatus(str, enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ARCHIVED = "archived"
+    FAILED = "failed"
+
+
+class MetaAdObjective(str, enum.Enum):
+    AWARENESS = "awareness"
+    TRAFFIC = "traffic"
+    ENGAGEMENT = "engagement"
+    LEADS = "leads"
+    APP_PROMOTION = "app_promotion"
+    MESSAGES = "messages"
+
+
+class MetaAdCampaign(Base):
+    """Meta (Facebook/Instagram) ad campaigns for events."""
+    __tablename__ = "meta_ad_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+
+    # Meta API IDs
+    meta_campaign_id = Column(String(255), nullable=True, index=True)  # Meta's campaign ID
+    meta_ad_set_id = Column(String(255), nullable=True, index=True)  # Meta's ad set ID
+    meta_ad_id = Column(String(255), nullable=True, index=True)  # Meta's ad ID
+    meta_creative_id = Column(String(255), nullable=True, index=True)  # Meta's creative ID
+
+    # Campaign settings
+    name = Column(String(255), nullable=False)
+    status = Column(Enum(MetaAdStatus), default=MetaAdStatus.DRAFT, index=True)
+    objective = Column(Enum(MetaAdObjective), default=MetaAdObjective.TRAFFIC)
+
+    # Budget
+    budget_type = Column(String(20), default="daily")  # daily or lifetime
+    budget_cents = Column(Integer, nullable=True)  # Budget in cents
+
+    # Targeting
+    targeting_radius_miles = Column(Integer, default=10)  # Geo-targeting radius from venue
+    age_min = Column(Integer, nullable=True)
+    age_max = Column(Integer, nullable=True)
+    genders = Column(String(50), nullable=True)  # male, female, all
+    interests = Column(Text, nullable=True)  # JSON array of interest IDs
+
+    # Creative
+    primary_text = Column(Text, nullable=True)
+    headline = Column(String(255), nullable=True)
+    description = Column(String(255), nullable=True)
+    call_to_action = Column(String(50), default="GET_TICKETS")  # GET_TICKETS, LEARN_MORE, etc.
+    image_url = Column(String(500), nullable=True)
+
+    # Performance tracking
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    spend_cents = Column(Integer, default=0)
+    conversions = Column(Integer, default=0)
+
+    # Error tracking
+    error_message = Column(Text, nullable=True)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    event = relationship("Event")
+
+
+class MetaAdInsight(Base):
+    """Cached insights from Meta Ads API to reduce API calls."""
+    __tablename__ = "meta_ad_insights"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("meta_ad_campaigns.id"), nullable=False, index=True)
+
+    # Metrics
+    date = Column(String(20), nullable=False)  # YYYY-MM-DD
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    spend_cents = Column(Integer, default=0)
+    conversions = Column(Integer, default=0)
+    reach = Column(Integer, default=0)
+
+    # Derived metrics
+    ctr_percent = Column(Integer, default=0)  # Click-through rate
+    cpc_cents = Column(Integer, default=0)  # Cost per click
+    cpa_cents = Column(Integer, default=0)  # Cost per action
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    campaign = relationship("MetaAdCampaign")
+
+
 class MediaShareToken(Base):
     """Token-based links for attendees to upload event photos/videos."""
     __tablename__ = "media_share_tokens"
@@ -616,3 +718,168 @@ class MediaShareToken(Base):
 
     event = relationship("Event")
     event_goer = relationship("EventGoer")
+
+
+class EventImageUpdateToken(Base):
+    """Token-based event image update links sent via SMS."""
+    __tablename__ = "event_image_update_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    phone = Column(String(50), nullable=False)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")
+
+
+class VoiceCallCampaign(Base):
+    """Voice call campaigns for outbound calling to event goers."""
+    __tablename__ = "voice_call_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    # Campaign goal and script
+    goal = Column(String(50), nullable=False)  # event_reminder, ticket_recovery, feedback_survey, birthday_wish, vip_outreach, cart_recovery, custom
+    custom_script = Column(Text, nullable=True)  # For custom goal
+
+    # Targeting
+    target_all = Column(Boolean, default=False)  # Call all opted-in users
+    target_event_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # Call attendees of specific event
+    target_segments = Column(Text, nullable=True)  # JSON: {"is_vip": true, "min_events": 3, "has_ticket_pending": true}
+    target_customer_ids = Column(Text, nullable=True)  # JSON: [1, 2, 3] - specific customers
+
+    # Event context for script
+    event_context_id = Column(Integer, ForeignKey("events.id"), nullable=True)  # Event referenced in script
+
+    # Script variables
+    discount_percent = Column(Integer, nullable=True)  # For offers
+
+    # Scheduling
+    status = Column(String(50), default="draft")  # draft, scheduled, running, paused, completed, cancelled
+    scheduled_for = Column(DateTime(timezone=True), nullable=True)  # When to start calling
+    start_calling_after = Column(String(5), nullable=True)  # HH:MM format - earliest time to call
+    stop_calling_before = Column(String(5), nullable=True)  # HH:MM format - latest time to call
+    timezone = Column(String(50), default="America/New_York")  # Timezone for calling hours
+
+    # Call settings
+    max_concurrent_calls = Column(Integer, default=1)
+    time_between_calls_seconds = Column(Integer, default=30)
+    max_retries = Column(Integer, default=3)
+    retry_delay_minutes = Column(Integer, default=60)
+    allow_voicemail = Column(Boolean, default=True)
+    record_calls = Column(Boolean, default=False)
+
+    # Compliance
+    respect_do_not_call = Column(Boolean, default=True)
+    skip_recently_called = Column(Boolean, default=True)  # Skip if called in last X days
+    skip_days_since_last_call = Column(Integer, default=7)  # Days to wait between calls
+
+    # Stats
+    total_recipients = Column(Integer, default=0)
+    calls_initiated = Column(Integer, default=0)
+    calls_completed = Column(Integer, default=0)
+    calls_answered = Column(Integer, default=0)
+    calls_failed = Column(Integer, default=0)
+
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    event = relationship("Event", foreign_keys=[event_context_id])
+    target_event = relationship("Event", foreign_keys=[target_event_id])
+
+
+class VoiceCall(Base):
+    """Individual voice call records."""
+    __tablename__ = "voice_calls"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("voice_call_campaigns.id"), nullable=True, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, index=True)
+
+    # Call details
+    goal = Column(String(50), nullable=False)
+    phone_number = Column(String(50), nullable=False)
+    call_script = Column(Text, nullable=False)
+
+    # Telnyx details
+    telnyx_call_id = Column(String(255), nullable=True, index=True)
+    telnyx_status = Column(String(50), nullable=True)  # Status from Telnyx
+
+    # Our status tracking
+    status = Column(String(50), default="pending")  # pending, dialing, in_progress, completed, failed, busy, no_answer, cancelled, scheduled
+    outcome = Column(String(50), nullable=True)  # answered, left_voicemail, no_answer, busy, failed, do_not_call, requested_callback
+
+    # Call timing
+    scheduled_for = Column(DateTime(timezone=True), nullable=True, index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+
+    # Retry tracking
+    attempt_number = Column(Integer, default=1)
+    max_retries = Column(Integer, default=3)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Results
+    recording_url = Column(Text, nullable=True)
+    transcription = Column(Text, nullable=True)  # If speech-to-text enabled
+    notes = Column(Text, nullable=True)  # Agent notes from the call
+    digits_pressed = Column(String(10), nullable=True)  # If gather was used
+
+    # Outcome metadata
+    callback_requested = Column(Boolean, default=False)
+    callback_scheduled_for = Column(DateTime(timezone=True), nullable=True)
+    do_not_call = Column(Boolean, default=False)  # Mark if customer requested to not be called
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    campaign = relationship("VoiceCallCampaign", backref="calls")
+    event_goer = relationship("EventGoer", backref="voice_calls")
+
+
+class FlyerTemplate(Base):
+    """User-uploaded flyer templates for AI-based event flyer generation.
+
+    Templates serve as style references. The AI vision model analyzes
+    the template's layout, typography, colors, and visual elements,
+    then generates a new flyer with event content matching that style.
+    """
+    __tablename__ = "flyer_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    image_url = Column(String(500), nullable=False)  # Full-size template image
+    thumbnail_url = Column(String(500), nullable=True)  # Smaller preview
+    prompt_instructions = Column(Text, nullable=True)  # Additional AI instructions
+    created_by = Column(String(255), nullable=True)  # User/organization who uploaded
+
+    # Usage tracking
+    times_used = Column(Integer, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class FlyerTemplateMagicToken(Base):
+    """Token-based flyer template selection links sent via SMS."""
+    __tablename__ = "flyer_template_magic_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    phone = Column(String(50), nullable=False)
+    token = Column(String(255), unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")
