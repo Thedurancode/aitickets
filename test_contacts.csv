@@ -1,0 +1,9 @@
+email,name,phone,birthdate,email_opt_in,sms_opt_in,marketing_opt_in
+john.doe@example.com,John Doe,+1-555-0101,1990-05-15,true,false,true
+jane.smith@example.com,Jane Smith,+1-555-0102,1985-08-22,true,false,true
+bob.wilson@example.com,Bob Wilson,+1-555-0103,,false,false,false
+alice.brown@example.com,Alice Brown,+1-555-0104,1992-12-01,true,true,true
+charlie.davis@example.com,Charlie Davis,+1-555-0105,1988-03-10,true,false,true
+duplicate@email.com,Duplicate Test,+1-555-0106,1995-07-20,true,true,true
+invalid-email,Invalid Email Guy,+1-555-0107,1990-01-01,true,false,true
+missing-name-field,test@example.com,+1-555-0108,1990-01-01,true,false,true
