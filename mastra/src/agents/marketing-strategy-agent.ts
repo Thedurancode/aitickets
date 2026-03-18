@@ -38,10 +38,8 @@ Return structured JSON with:
 - Messaging must be platform-appropriate (TikTok != LinkedIn)
 - Include contingency tactics if sales are below target at each phase
 - Reference the research and audience data to justify decisions`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
+
   tools: {
     getRevenueForecastTool,
     sendEmailCampaignTool,

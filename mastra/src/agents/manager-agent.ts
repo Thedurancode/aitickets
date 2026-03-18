@@ -1,113 +1,72 @@
 import { Agent } from "@mastra/core/agent";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { researchAgent } from "./research-agent.js";
-import { audienceAgent } from "./audience-agent.js";
-import { marketingStrategyAgent } from "./marketing-strategy-agent.js";
-import { mediaBuyerAgent } from "./media-buyer-agent.js";
-import { creativeDirectorAgent } from "./creative-director-agent.js";
-import { distributionAgent } from "./distribution-agent.js";
-import { publishingAgent } from "./publishing-agent.js";
 
-// ── Sub-agent tools (supervisor pattern) ──
+// ── Sub-agent tools using mastra.getAgent() (correct supervisor pattern) ──
+// The `mastra` parameter is automatically injected by the Mastra runtime
+// when the agent is registered in the Mastra instance.
 
-const callResearchAgent = createTool({
-  id: "call-research-agent",
-  description:
-    "Delegate to the Research Agent to analyze an artist, venue, and market. Provide event details as input.",
-  inputSchema: z.object({
-    prompt: z.string().describe("Detailed research request including artist, venue, city, date, and event type"),
-  }),
-  outputSchema: z.object({ result: z.string() }),
-  execute: async ({ context }) => {
-    const response = await researchAgent.generate(context.prompt);
-    return { result: response.text };
-  },
-});
+function createAgentDelegationTool(
+  id: string,
+  agentKey: string,
+  description: string
+) {
+  return createTool({
+    id,
+    description,
+    inputSchema: z.object({
+      prompt: z.string().describe("Detailed prompt to send to the sub-agent"),
+    }),
+    outputSchema: z.object({ result: z.string() }),
+    execute: async ({ context, mastra }) => {
+      const agent = mastra!.getAgent(agentKey);
+      const response = await agent.generate(context.prompt);
+      return { result: response.text };
+    },
+  });
+}
 
-const callAudienceAgent = createTool({
-  id: "call-audience-agent",
-  description:
-    "Delegate to the Audience Agent to define audience segments and platform targeting. Provide research context.",
-  inputSchema: z.object({
-    prompt: z.string().describe("Audience analysis request with research context"),
-  }),
-  outputSchema: z.object({ result: z.string() }),
-  execute: async ({ context }) => {
-    const response = await audienceAgent.generate(context.prompt);
-    return { result: response.text };
-  },
-});
+const callResearchAgent = createAgentDelegationTool(
+  "call-research-agent",
+  "researchAgent",
+  "Delegate to the Research Agent to analyze an artist, venue, and market. Provide event details as input."
+);
 
-const callMarketingStrategyAgent = createTool({
-  id: "call-marketing-strategy-agent",
-  description:
-    "Delegate to the Marketing Strategy Agent to build campaign plans. Provide research and audience context.",
-  inputSchema: z.object({
-    prompt: z.string().describe("Marketing strategy request with full context"),
-  }),
-  outputSchema: z.object({ result: z.string() }),
-  execute: async ({ context }) => {
-    const response = await marketingStrategyAgent.generate(context.prompt);
-    return { result: response.text };
-  },
-});
+const callAudienceAgent = createAgentDelegationTool(
+  "call-audience-agent",
+  "audienceAgent",
+  "Delegate to the Audience Agent to define audience segments and platform targeting. Provide research context."
+);
 
-const callMediaBuyerAgent = createTool({
-  id: "call-media-buyer-agent",
-  description:
-    "Delegate to the Media Buyer Agent to generate Meta Ads campaigns. Provide audience and strategy context.",
-  inputSchema: z.object({
-    prompt: z.string().describe("Media buying request with audience targeting data"),
-  }),
-  outputSchema: z.object({ result: z.string() }),
-  execute: async ({ context }) => {
-    const response = await mediaBuyerAgent.generate(context.prompt);
-    return { result: response.text };
-  },
-});
+const callMarketingStrategyAgent = createAgentDelegationTool(
+  "call-marketing-strategy-agent",
+  "marketingStrategyAgent",
+  "Delegate to the Marketing Strategy Agent to build campaign plans. Provide research and audience context."
+);
 
-const callCreativeDirectorAgent = createTool({
-  id: "call-creative-director-agent",
-  description:
-    "Delegate to the Creative Director Agent to generate visuals, ad copy, and content. Provide event and brand context.",
-  inputSchema: z.object({
-    prompt: z.string().describe("Creative brief with event details, audience, and brand guidelines"),
-  }),
-  outputSchema: z.object({ result: z.string() }),
-  execute: async ({ context }) => {
-    const response = await creativeDirectorAgent.generate(context.prompt);
-    return { result: response.text };
-  },
-});
+const callMediaBuyerAgent = createAgentDelegationTool(
+  "call-media-buyer-agent",
+  "mediaBuyerAgent",
+  "Delegate to the Media Buyer Agent to generate Meta Ads campaigns. Provide audience and strategy context."
+);
 
-const callDistributionAgent = createTool({
-  id: "call-distribution-agent",
-  description:
-    "Delegate to the Distribution Agent to normalize event data and prepare platform listings.",
-  inputSchema: z.object({
-    prompt: z.string().describe("Distribution request with complete event data"),
-  }),
-  outputSchema: z.object({ result: z.string() }),
-  execute: async ({ context }) => {
-    const response = await distributionAgent.generate(context.prompt);
-    return { result: response.text };
-  },
-});
+const callCreativeDirectorAgent = createAgentDelegationTool(
+  "call-creative-director-agent",
+  "creativeDirectorAgent",
+  "Delegate to the Creative Director Agent to generate visuals, ad copy, and content. Provide event and brand context."
+);
 
-const callPublishingAgent = createTool({
-  id: "call-publishing-agent",
-  description:
-    "Delegate to the Publishing Agent to publish event listings to external platforms. Only call after distribution is complete.",
-  inputSchema: z.object({
-    prompt: z.string().describe("Publishing request with prepared listings data"),
-  }),
-  outputSchema: z.object({ result: z.string() }),
-  execute: async ({ context }) => {
-    const response = await publishingAgent.generate(context.prompt);
-    return { result: response.text };
-  },
-});
+const callDistributionAgent = createAgentDelegationTool(
+  "call-distribution-agent",
+  "distributionAgent",
+  "Delegate to the Distribution Agent to normalize event data and prepare platform listings."
+);
+
+const callPublishingAgent = createAgentDelegationTool(
+  "call-publishing-agent",
+  "publishingAgent",
+  "Delegate to the Publishing Agent to publish event listings to external platforms. Only call after distribution is complete."
+);
 
 // ── Manager Agent (Orchestrator / Supervisor) ──
 
@@ -167,10 +126,7 @@ Return everything.
 - Aggregate all agent outputs into a single structured response.
 - Handle partial requests gracefully — if the user only wants research, just run research.
 - Track processing time and include it in the response.`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
   tools: {
     callResearchAgent,
     callAudienceAgent,

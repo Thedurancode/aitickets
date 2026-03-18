@@ -47,10 +47,8 @@ Return structured JSON with:
 - Theater: Elegant, dramatic, sophisticated
 - Sports: Dynamic, competitive, community-focused
 - Conference: Professional, clean, modern`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
+
   tools: {
     webSearchTool,
   },

@@ -34,10 +34,8 @@ Return structured JSON with:
 - Each segment must have a clear, distinct messaging angle
 - Platform recommendations must be backed by audience-platform fit logic
 - Always include a "stretch" segment — an unexpected audience that could be captured`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
+
   tools: {
     getCustomerSegmentsTool,
     webSearchTool,

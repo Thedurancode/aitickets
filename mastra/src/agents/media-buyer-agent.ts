@@ -47,10 +47,8 @@ Return structured JSON with:
 - Scale 20% every 48 hours if CPA < target
 - Kill if CPA > 3x target for 3 consecutive days
 - Allocate 60% to cold, 25% warm, 15% hot`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
+
   tools: {
     createMetaCampaignTool,
   },

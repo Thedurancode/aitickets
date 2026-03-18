@@ -38,10 +38,8 @@ Return structured JSON with:
 - Flag validation issues clearly (missing fields, character limit exceeded)
 - SEO keywords should include artist name, venue, city, genre, and event type
 - Structured data must follow Schema.org Event format`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
+
   tools: {
     createEventListingTool,
     generateSeoMetadataTool,

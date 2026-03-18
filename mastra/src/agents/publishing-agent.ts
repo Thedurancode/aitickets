@@ -37,10 +37,8 @@ Return structured JSON with:
 - If a platform fails, do NOT retry automatically — report the failure
 - Include the live URL for every successful publish
 - Log all actions for audit trail`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
+
   tools: {
     createEventListingTool,
     publishToEventbriteTool,

@@ -40,10 +40,8 @@ Your output must be a structured JSON object matching the research output schema
 - Always consider seasonality and day-of-week effects
 - Flag any red flags (market oversaturation, declining artist, venue mismatch)
 - Provide actionable recommendations, not just data`,
-  model: {
-    provider: "OPEN_AI",
-    name: "gpt-4o",
-  },
+  model: "openai/gpt-4o",
+
   tools: {
     webSearchTool,
     socialInsightsTool,
