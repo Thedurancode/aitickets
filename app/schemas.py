@@ -558,3 +558,49 @@ class GenerateFlyerFromTemplateRequest(BaseModel):
     """Request to generate a flyer using a template."""
     template_id: int
     prompt_overrides: Optional[str] = None
+
+
+# ============== Marketing List Schemas ==============
+
+class MarketingListCreate(BaseModel):
+    """Create a new marketing list."""
+    name: str
+    description: Optional[str] = None
+    segment_filters: dict  # JSON filters like {"is_vip": true, "min_events": 3}
+
+
+class MarketingListUpdate(BaseModel):
+    """Update a marketing list."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    segment_filters: Optional[dict] = None
+
+
+class MarketingListResponse(BaseModel):
+    """Marketing list response."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    segment_filters: dict
+    current_count: int
+    filter_description: str
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class MarketingListPreview(BaseModel):
+    """Preview of who's in a marketing list."""
+    list_id: int
+    list_name: str
+    filter_description: str
+    total_count: int
+    sample_customers: list
+    segment_filters: dict
+
+
+class MarketingListsResponse(BaseModel):
+    """List of marketing lists."""
+    lists: list
+    total: int
+    limit: int
+    offset: int
