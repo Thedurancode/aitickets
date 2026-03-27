@@ -46,6 +46,16 @@ class EventStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
+class MediaType(str, enum.Enum):
+    ARTIST_PHOTO = "artist_photo"      # Artist/performer headshot or photo
+    LOGO = "logo"                      # Event/brand/sponsor logo
+    VENUE_PHOTO = "venue_photo"        # Venue interior/exterior photo
+    SPONSOR_LOGO = "sponsor_logo"      # Sponsor logo
+    BACKGROUND = "background"          # Background image/texture
+    GRAPHIC = "graphic"                # Generic graphic element
+    OTHER = "other"                    # Other media type
+
+
 class DiscountType(str, enum.Enum):
     PERCENT = "percent"
     FIXED_CENTS = "fixed_cents"
@@ -134,6 +144,7 @@ class Event(Base):
     categories = relationship("EventCategory", secondary=event_category_link, back_populates="events")
     photos = relationship("EventPhoto", back_populates="event", cascade="all, delete-orphan")
     waitlist_entries = relationship("WaitlistEntry", back_populates="event", cascade="all, delete-orphan")
+    media = relationship("EventMedia", back_populates="event", cascade="all, delete-orphan")
 
 
 class EventPhoto(Base):
@@ -155,6 +166,23 @@ class EventPhoto(Base):
 
     event = relationship("Event", back_populates="photos")
     event_goer = relationship("EventGoer")
+
+
+class EventMedia(Base):
+    """Media assets for event flyer generation (artists, logos, sponsors, etc.)"""
+    __tablename__ = "event_media"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    media_type = Column(Enum(MediaType), nullable=False, index=True)
+    media_url = Column(String(500), nullable=False)
+    label = Column(String(255), nullable=True)  # e.g., "Artist Name", "Sponsor: Coca-Cola"
+    display_order = Column(Integer, default=0)  # Order for display/use in flyer
+    media_metadata = Column(Text, nullable=True)  # JSON metadata (dimensions, credits, etc.)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    event = relationship("Event", back_populates="media")
 
 
 class EventUpdate(Base):
@@ -248,6 +276,10 @@ class Ticket(Base):
     utm_source = Column(String(100), nullable=True)
     utm_medium = Column(String(100), nullable=True)
     utm_campaign = Column(String(100), nullable=True)
+
+    # Backward-compatible alias used by legacy code/tests.
+    # Not persisted; canonical source of truth is TicketTier.price.
+    price_cents = None
 
     ticket_tier = relationship("TicketTier", back_populates="tickets")
     event_goer = relationship("EventGoer", back_populates="tickets")

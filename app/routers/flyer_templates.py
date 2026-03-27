@@ -6,15 +6,12 @@ Provides endpoints for:
 - Template selection interface
 - Flyer generation using templates
 """
-import secrets
-from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import HTMLResponse
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, joinedload
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Event, FlyerTemplate
@@ -30,11 +27,11 @@ from app.services.flyer_template import (
     create_template_upload_token,
     get_templates_for_selection,
     validate_template_token,
-    mark_token_used,
 )
 from app.config import get_settings
 
 router = APIRouter(prefix="/api/flyer-templates", tags=["flyer-templates"])
+public_router = APIRouter(tags=["flyer-templates"])
 settings = get_settings()
 
 
@@ -194,6 +191,8 @@ def get_templates_for_magic_link(
     Returns all templates that can be used for flyer generation.
     """
     result = get_templates_for_selection(db, token)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
 
     # If event_id provided, include event info
     if event_id:
@@ -276,9 +275,32 @@ def generate_flyer_for_event(
     return result
 
 
+@router.post("/select/{token}/generate/{template_id}", response_model=FlyerGenerationResponse)
+def generate_flyer_from_magic_link(
+    token: str,
+    template_id: int,
+    prompt_overrides: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Generate flyer via tokenized magic-link flow."""
+    magic_token = validate_template_token(db, token)
+    if not magic_token:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    result = generate_flyer_from_template(
+        db=db,
+        event_id=magic_token.event_id,
+        template_id=template_id,
+        prompt_overrides=prompt_overrides,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
 # ============== Public HTML Pages ==============
 
-@router.get("/select/{token}", response_class=HTMLResponse, include_in_schema=False)
+@public_router.get("/flyer-templates/select/{token}", response_class=HTMLResponse, include_in_schema=False)
 async def template_selection_page(
     token: str,
     db: Session = Depends(get_db),
@@ -394,7 +416,6 @@ async def template_selection_page(
 
     <script>
         const token = "{token}";
-        const eventId = {event['id']};
         const apiBase = "{settings.base_url.rstrip('/')}/api";
         let selectedTemplateId = null;
         let selectedTemplateName = null;
@@ -425,7 +446,7 @@ async def template_selection_page(
             btn.innerHTML = 'Generating... <span id="loading-spinner" class="inline-block animate-spin ml-2">⏳</span>';
 
             try {{
-                const response = await fetch(`${{apiBase}}/flyer-templates/events/${{eventId}}/generate/${{selectedTemplateId}}`, {{
+                const response = await fetch(`${{apiBase}}/flyer-templates/select/${{token}}/generate/${{selectedTemplateId}}`, {{
                     method: 'POST',
                     headers: {{
                         'Content-Type': 'application/json',

@@ -123,13 +123,13 @@ def generate_wallet_pass(
         "labelColor": "rgb(255, 255, 255)",
         "relevantDate": relevant_date,
         "barcode": {
-            "message": f"{base_url}/tickets/validate/{qr_token}",
+            "message": f"{base_url}/api/tickets/validate/{qr_token}",
             "format": "PKBarcodeFormatQR",
             "messageEncoding": "iso-8859-1",
         },
         "barcodes": [
             {
-                "message": f"{base_url}/tickets/validate/{qr_token}",
+                "message": f"{base_url}/api/tickets/validate/{qr_token}",
                 "format": "PKBarcodeFormatQR",
                 "messageEncoding": "iso-8859-1",
             }

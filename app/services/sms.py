@@ -63,7 +63,7 @@ def send_ticket_sms(
 ) -> dict:
     """Send ticket confirmation via SMS."""
     settings = get_settings()
-    validation_url = f"{settings.base_url}/tickets/validate/{qr_code_token}"
+    validation_url = f"{settings.base_url}/api/tickets/validate/{qr_code_token}"
 
     message = (
         f"🎫 {recipient_name}, your ticket is confirmed!\n\n"

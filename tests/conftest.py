@@ -5,6 +5,7 @@ The database is recreated for every test function.
 """
 
 import os
+from datetime import datetime, timedelta, timezone
 
 # Force SQLite in-memory before any app imports
 os.environ["DATABASE_URL"] = "sqlite:///./test_tickets.db"
@@ -86,9 +87,10 @@ def create_event(client, create_venue):
     def _create(venue_id=None, **overrides):
         if venue_id is None:
             venue_id = create_venue()["id"]
+        default_event_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
         data = {
             "name": "Test Event",
-            "event_date": "2025-12-31",
+            "event_date": default_event_date,
             "event_time": "20:00",
             "venue_id": venue_id,
         }

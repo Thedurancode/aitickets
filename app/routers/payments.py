@@ -20,15 +20,23 @@ async def stripe_webhook(
 ):
     """Handle Stripe webhook events."""
     settings = get_settings()
+    env = (settings.environment or "").lower()
+    is_production = env in {"production", "prod"}
 
     if not settings.stripe_secret_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
+    # Production hardening: webhook secret must be configured and signed.
+    if is_production and not settings.stripe_webhook_secret:
+        raise HTTPException(status_code=500, detail="Stripe webhook secret required in production")
+
     stripe.api_key = settings.stripe_secret_key
     payload = await request.body()
 
-    # Verify webhook signature if secret is configured
-    if settings.stripe_webhook_secret and stripe_signature:
+    # Verify webhook signature whenever a webhook secret is configured.
+    if settings.stripe_webhook_secret:
+        if not stripe_signature:
+            raise HTTPException(status_code=400, detail="Missing Stripe signature")
         try:
             event = stripe.Webhook.construct_event(
                 payload,
@@ -42,7 +50,10 @@ async def stripe_webhook(
     else:
         # For development without webhook secret
         import json
-        event = json.loads(payload)
+        try:
+            event = json.loads(payload)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid payload")
 
     event_type = event.get("type") if isinstance(event, dict) else event.type
     event_data = event.get("data", {}).get("object", {}) if isinstance(event, dict) else event.data.object
@@ -91,7 +102,14 @@ async def handle_checkout_completed(session_data: dict, db: Session):
     if not tickets:
         return
 
+    processed_tickets = []
     for ticket in tickets:
+        # Idempotency: only transition pending tickets once.
+        if ticket.status != TicketStatus.PENDING:
+            if payment_intent_id and not ticket.stripe_payment_intent_id:
+                ticket.stripe_payment_intent_id = payment_intent_id
+            continue
+
         # Update ticket status
         ticket.status = TicketStatus.PAID
         ticket.stripe_payment_intent_id = payment_intent_id
@@ -112,15 +130,20 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         if ticket.ticket_tier.quantity_sold >= ticket.ticket_tier.quantity_available:
             from app.models import TierStatus
             ticket.ticket_tier.status = TierStatus.SOLD_OUT
+        processed_tickets.append(ticket)
+
+    if not processed_tickets:
+        db.commit()
+        return
 
     db.commit()
 
     # Check inventory thresholds
-    if tickets:
+    if processed_tickets:
         try:
             from app.routers.tickets import check_inventory_thresholds
             checked_tiers = set()
-            for ticket in tickets:
+            for ticket in processed_tickets:
                 tid = ticket.ticket_tier.id
                 if tid not in checked_tiers:
                     check_inventory_thresholds(ticket.ticket_tier, ticket.ticket_tier.event, db)
@@ -129,10 +152,10 @@ async def handle_checkout_completed(session_data: dict, db: Session):
             pass
 
     # Broadcast to real-time dashboard (best-effort, non-blocking)
-    if tickets:
+    if processed_tickets:
         try:
             import requests as http_requests
-            first = tickets[0]
+            first = processed_tickets[0]
             http_requests.post("http://localhost:3001/internal/broadcast", json={
                 "event_type": "ticket_purchased",
                 "data": {
@@ -141,8 +164,8 @@ async def handle_checkout_completed(session_data: dict, db: Session):
                     "customer_name": first.event_goer.name,
                     "tier_name": first.ticket_tier.name,
                     "price_cents": first.ticket_tier.price,
-                    "quantity": len(tickets),
-                    "total_revenue_cents": sum(t.ticket_tier.price for t in tickets),
+                    "quantity": len(processed_tickets),
+                    "total_revenue_cents": sum(t.ticket_tier.price for t in processed_tickets),
                 },
             }, timeout=2)
         except Exception:
@@ -151,7 +174,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
     # Fire webhook: ticket.purchased (paid tickets)
     try:
         from app.services.webhooks import fire_webhook_event
-        for ticket in tickets:
+        for ticket in processed_tickets:
             fire_webhook_event("ticket.purchased", {
                 "ticket_id": ticket.id,
                 "event_id": ticket.ticket_tier.event_id,
@@ -165,7 +188,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         pass
 
     # Send confirmation emails
-    for ticket in tickets:
+    for ticket in processed_tickets:
         event = ticket.ticket_tier.event
         venue = event.venue
         tier = ticket.ticket_tier

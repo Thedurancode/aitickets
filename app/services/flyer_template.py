@@ -21,6 +21,14 @@ from app.models import Event, FlyerTemplate, FlyerTemplateMagicToken
 logger = logging.getLogger(__name__)
 
 
+def _utc_now_matching(dt: datetime) -> datetime:
+    """Return UTC now with timezone-awareness matching `dt`."""
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        return now.replace(tzinfo=None)
+    return now
+
+
 def generate_flyer_from_template(
     db: Session,
     event_id: int,
@@ -119,40 +127,84 @@ Output: A high-quality event poster optimized for social media sharing."""
     if prompt_overrides:
         prompt += f"\n\nADDITIONAL REQUIREMENTS:\n{prompt_overrides}"
 
-    # Call NanoBanana API
+    # Call Image Generation API (OpenRouter or NanoBanana)
     try:
-        # Build request
-        nano_request = {
-            "prompt": prompt,
-            "model": "flux",  # Use Flux for image generation
-            "image_size": "1024x1024",  # Square for social media
-            "num_images": 1,
-        }
+        if settings.image_generation_provider == "openrouter":
+            # OpenRouter API format
+            # Build messages with prompt
+            messages = [{"role": "user", "content": prompt}]
 
-        # Add reference image if template has one
-        if template.image_url:
-            # Download and encode template image
-            template_image_data = download_image_as_base64(template.image_url)
-            if template_image_data:
-                nano_request["reference_image"] = template_image_data
+            # Note: OpenRouter doesn't support reference images in the same way
+            # For now, we'll include template info in the prompt
+            if template.image_url:
+                prompt += f"\n\nReference template: {template.image_url}"
+                messages = [{"role": "user", "content": prompt}]
 
-        # Call NanoBanana
-        response = httpx.post(
-            settings.nanobanana_api_url,
-            json=nano_request,
-            headers={"Authorization": f"Bearer {settings.nanobanana_api_key}"},
-            timeout=120.0,
-        )
+            openrouter_request = {
+                "model": settings.flux_model,  # black-forest-labs/flux.2-pro
+                "messages": messages,
+                "modalities": ["image"]  # Image-only output
+            }
 
-        if response.status_code != 200:
-            logger.error(f"NanoBanana API error: {response.status_code} - {response.text}")
-            return {"error": f"Image generation failed: {response.text}"}
+            response = httpx.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                json=openrouter_request,
+                headers={
+                    "Authorization": f"Bearer {settings.openrouter_api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=120.0,
+            )
 
-        result = response.json()
+            if response.status_code != 200:
+                logger.error(f"OpenRouter API error: {response.status_code} - {response.text}")
+                return {"error": f"Image generation failed: {response.text}"}
 
-        # Handle response
-        if result.get("images") and len(result["images"]) > 0:
-            image_url = result["images"][0]["url"]
+            result = response.json()
+
+            # Extract base64 image from OpenRouter response
+            image_url = None
+            if result.get("choices") and len(result["choices"]) > 0:
+                message = result["choices"][0].get("message", {})
+                images = message.get("images", [])
+                if images and len(images) > 0:
+                    # Get base64 data URL
+                    image_data_url = images[0].get("image_url", {}).get("url")
+                    if image_data_url:
+                        # Save base64 to file
+                        image_url = save_base64_image(image_data_url, event.id, "flyer")
+
+        else:
+            # NanoBanana API format (fallback)
+            nano_request = {
+                "prompt": prompt,
+                "model": settings.flux_model,
+                "image_size": "1024x1024",
+                "num_images": 1,
+            }
+
+            if template.image_url:
+                template_image_data = download_image_as_base64(template.image_url)
+                if template_image_data:
+                    nano_request["reference_image"] = template_image_data
+
+            response = httpx.post(
+                settings.nanobanana_api_url,
+                json=nano_request,
+                headers={"Authorization": f"Bearer {settings.nanobanana_api_key}"},
+                timeout=120.0,
+            )
+
+            if response.status_code != 200:
+                logger.error(f"NanoBanana API error: {response.status_code} - {response.text}")
+                return {"error": f"Image generation failed: {response.text}"}
+
+            result = response.json()
+            if result.get("images") and len(result["images"]) > 0:
+                image_url = result["images"][0]["url"]
+
+        # Handle generated image
+        if image_url:
 
             # Update event image
             event.image_url = image_url
@@ -197,6 +249,49 @@ def download_image_as_base64(image_url: str) -> Optional[str]:
         return None
 
 
+def save_base64_image(data_url: str, event_id: int, prefix: str = "image") -> Optional[str]:
+    """Save base64 data URL to uploads directory and return public URL."""
+    try:
+        import re
+        import uuid
+
+        settings = get_settings()
+        uploads_dir = Path(settings.uploads_dir)
+        uploads_dir.mkdir(exist_ok=True)
+
+        # Extract base64 data and content type
+        match = re.match(r'data:([^;]+);base64,(.+)', data_url)
+        if not match:
+            logger.error("Invalid base64 data URL format")
+            return None
+
+        content_type = match.group(1)
+        base64_data = match.group(2)
+
+        # Determine file extension
+        extension = ".png"
+        if "jpeg" in content_type or "jpg" in content_type:
+            extension = ".jpg"
+        elif "webp" in content_type:
+            extension = ".webp"
+
+        # Generate unique filename
+        unique_filename = f"event_{event_id}_{prefix}_{uuid.uuid4().hex[:8]}{extension}"
+        file_path = uploads_dir / unique_filename
+
+        # Decode and save
+        image_bytes = base64.b64decode(base64_data)
+        file_path.write_bytes(image_bytes)
+
+        # Generate public URL
+        base_url = settings.base_url.rstrip("/")
+        return f"{base_url}/uploads/{unique_filename}"
+
+    except Exception as e:
+        logger.error(f"Error saving base64 image: {e}", exc_info=True)
+        return None
+
+
 def create_template_upload_token(
     db: Session,
     event_id: int,
@@ -220,6 +315,7 @@ def create_template_upload_token(
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         return {"error": "Event not found"}
+    settings = get_settings()
 
     # Generate token
     token = secrets.token_urlsafe(32)
@@ -283,7 +379,7 @@ def validate_template_token(db: Session, token: str) -> Optional[FlyerTemplateMa
     if not magic_token:
         return None
 
-    if magic_token.expires_at < datetime.now(timezone.utc):
+    if magic_token.expires_at < _utc_now_matching(magic_token.expires_at):
         return None
 
     return magic_token

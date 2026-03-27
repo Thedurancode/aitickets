@@ -338,7 +338,7 @@ def create_checkout_session(
     )
 
 
-@router.get("/{ticket_id}", response_model=TicketFullResponse)
+@router.get("/{ticket_id:int}", response_model=TicketFullResponse)
 def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
     """Get ticket details."""
     ticket = (
@@ -365,7 +365,7 @@ def get_ticket(ticket_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{ticket_id}/qr")
+@router.get("/{ticket_id:int}/qr")
 def get_ticket_qr_code(ticket_id: int, db: Session = Depends(get_db)):
     """Get QR code image for a ticket."""
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
@@ -558,7 +558,7 @@ def _load_ticket_with_relations(ticket_id: int, db: Session) -> Ticket:
     return ticket
 
 
-@router.get("/{ticket_id}/pdf")
+@router.get("/{ticket_id:int}/pdf")
 def download_ticket_pdf(ticket_id: int, db: Session = Depends(get_db)):
     """Download a ticket as a branded PDF."""
     ticket = _load_ticket_with_relations(ticket_id, db)
@@ -594,7 +594,7 @@ def download_ticket_pdf(ticket_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{ticket_id}/wallet")
+@router.get("/{ticket_id:int}/wallet")
 def download_wallet_pass(ticket_id: int, db: Session = Depends(get_db)):
     """Download a ticket as an Apple Wallet .pkpass file."""
     ticket = _load_ticket_with_relations(ticket_id, db)

@@ -5,7 +5,6 @@ Event Image Update Router - Token-based image updates via SMS magic link
 from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
-from typing import Optional
 from sqlalchemy.orm import Session
 from pathlib import Path
 import uuid
@@ -14,7 +13,6 @@ import shutil
 from app.database import get_db
 from app.services.event_image_update import (
     generate_image_update_token,
-    validate_token,
     update_event_image,
     get_token_info,
 )
@@ -22,6 +20,7 @@ from app.config import get_settings
 
 
 router = APIRouter(prefix="/api/event-image-update", tags=["event-image-update"])
+public_router = APIRouter(tags=["event-image-update"])
 
 
 # ============== Schemas ==============
@@ -179,7 +178,7 @@ async def upload_image(
 # ============== Public HTML Pages ==============
 
 
-@router.get("/update-event-image/{token}", response_class=HTMLResponse)
+@public_router.get("/update-event-image/{token}", response_class=HTMLResponse, include_in_schema=False)
 async def image_update_page(
     token: str,
     db: Session = Depends(get_db)

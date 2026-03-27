@@ -18,6 +18,14 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _utc_now_matching(dt: datetime) -> datetime:
+    """Return UTC now with timezone-awareness matching `dt`."""
+    now = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        return now.replace(tzinfo=None)
+    return now
+
+
 def generate_image_update_token(
     db: Session,
     event_id: int,
@@ -106,7 +114,7 @@ def validate_token(db: Session, token: str) -> Optional[EventImageUpdateToken]:
         return None
 
     # Check if expired
-    if update_token.expires_at < datetime.now(timezone.utc):
+    if update_token.expires_at < _utc_now_matching(update_token.expires_at):
         return None
 
     # Check if already used

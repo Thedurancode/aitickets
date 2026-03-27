@@ -16,7 +16,7 @@ from app.database import init_db
 from app.config import get_settings
 from app.rate_limit import limiter
 from app.logging_config import setup_logging
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates, event_publisher, flyer_templates_enhanced, event_media
 
 # Module-level logger (must be before exception handlers which use it)
 logger = logging.getLogger(__name__)
@@ -102,16 +102,16 @@ app.include_router(knowledge.router, prefix=api_prefix)
 app.include_router(webhooks.router, prefix=api_prefix)
 app.include_router(about.router, prefix=api_prefix)
 app.include_router(flyer_styles.router, prefix=api_prefix)
-app.include_router(flyer_templates.router)
-app.include_router(flyer_templates.router, prefix=api_prefix)
-app.include_router(meta_ads.router, prefix=api_prefix)
+app.include_router(flyer_templates.router)  # Router already includes /api prefix
+app.include_router(flyer_templates_enhanced.router)  # Router already includes /api prefix
+app.include_router(meta_ads.router)  # Router already includes /api prefix
+app.include_router(event_publisher.router)  # Router already includes /api prefix
+app.include_router(event_media.router)  # Router already includes /api prefix
 
 # Event image update (API + public magic link page)
-app.include_router(event_image_update.router, prefix=api_prefix)
-app.include_router(event_image_update.router)  # For /update-event-image/{token} public page
-
-# Flyer templates public magic link page (already included with API prefix above)
-# No need to include again as the public route is at /flyer-templates/select/{token} which is under the prefix
+app.include_router(event_image_update.router)  # Router already includes /api prefix
+app.include_router(event_image_update.public_router)  # /update-event-image/{token}
+app.include_router(flyer_templates.public_router)  # /flyer-templates/select/{token}
 
 # Non-API routers (keep at root)
 app.include_router(payments.router)   # /webhooks/stripe
@@ -143,11 +143,41 @@ app.add_middleware(
 # Protects /api/* write endpoints when MCP_API_KEY is set.
 # Public pages (/events, /purchase-success, etc.) remain open.
 
-REST_PUBLIC_PATHS = {"/", "/health", "/docs", "/openapi.json", "/redoc",
-                     "/events", "/about", "/purchase-success", "/purchase-cancelled",
-                     "/unsubscribe", "/webhooks/stripe"}
-REST_PUBLIC_PREFIXES = ("/events/", "/uploads/", "/api/events/", "/api/page-view", "/api/about", "/pick-style/", "/api/tickets/by-email",
-                         "/update-event-image/", "/flyer-templates/select/")
+REST_PUBLIC_PATHS = {
+    "/",
+    "/health",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/events",
+    "/about",
+    "/purchase-success",
+    "/purchase-cancelled",
+    "/unsubscribe",
+    "/webhooks/stripe",
+}
+REST_PUBLIC_PREFIXES = (
+    "/events/",
+    "/uploads/",
+    "/pick-style/",
+    "/update-event-image/",
+    "/flyer-templates/select/",
+)
+REST_PUBLIC_API_EXACT = {
+    ("GET", "/api/events"),
+    ("GET", "/api/about"),
+    ("GET", "/api/about/"),
+    ("GET", "/api/tickets/by-email"),
+    ("GET", "/api/tickets/by-email/"),
+    ("POST", "/api/event-image-update/upload"),
+    ("POST", "/api/event-image-update/upload/"),
+}
+REST_PUBLIC_API_PREFIXES = {
+    ("GET", "/api/events/"),
+    ("GET", "/api/event-image-update/validate/"),
+    ("GET", "/api/flyer-templates/select/"),
+    ("POST", "/api/flyer-templates/select/"),
+}
 
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
@@ -160,11 +190,20 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
+        method = request.method.upper()
+
+        # Let preflight requests through (CORS middleware still applies)
+        if method == "OPTIONS":
+            return await call_next(request)
 
         # Allow public paths and prefixes
         if path in REST_PUBLIC_PATHS:
             return await call_next(request)
         if any(path.startswith(p) for p in REST_PUBLIC_PREFIXES):
+            return await call_next(request)
+        if (method, path) in REST_PUBLIC_API_EXACT:
+            return await call_next(request)
+        if any(method == m and path.startswith(p) for (m, p) in REST_PUBLIC_API_PREFIXES):
             return await call_next(request)
 
         # Check for API key — accept either x-mcp-key or x-admin-key header

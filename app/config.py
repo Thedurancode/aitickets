@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # Application
     base_url: str = "http://localhost:8000"
     uploads_dir: str = "uploads"
+    environment: str = "development"  # development, test, production
 
     # Branding
     org_name: str = "Toronto Raptors"
@@ -69,6 +70,15 @@ class Settings(BaseSettings):
 
     # Gemini (Image Generation)
     gemini_api_key: str = ""
+
+    # Image Generation via OpenRouter (Flux 2 Pro)
+    # Uses same OpenRouter key as LLM routing
+    image_generation_provider: str = "openrouter"  # Options: openrouter, nanobanana
+    flux_model: str = "black-forest-labs/flux.2-pro"  # OpenRouter model ID
+
+    # Alternative: NanoBanana (if not using OpenRouter)
+    nanobanana_api_key: str = ""
+    nanobanana_api_url: str = "https://api.nanobanana.com/v1/generate"
 
     # LLM Routing (supports OpenRouter, Zhipu, OpenAI)
     openrouter_api_key: str = ""

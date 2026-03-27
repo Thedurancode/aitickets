@@ -10,7 +10,7 @@ def generate_qr_code(token: str) -> bytes:
     Returns the image as PNG bytes.
     """
     settings = get_settings()
-    validation_url = f"{settings.base_url}/tickets/validate/{token}"
+    validation_url = f"{settings.base_url}/api/tickets/validate/{token}"
 
     qr = qrcode.QRCode(
         version=1,

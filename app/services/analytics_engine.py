@@ -606,7 +606,17 @@ def get_customer_segments(db: Session) -> dict:
         return {
             "total_customers_analyzed": 0,
             "total_customers_without_profile": total_goers,
-            "segments": {},
+            "segments": {
+                "active": {"count": 0, "percent": 0.0, "avg_spent_dollars": 0.0, "description": "Champions — highly engaged, recent, high-value customers"},
+                "at_risk": {"count": 0, "percent": 0.0, "avg_spent_dollars": 0.0, "description": "Previously valuable customers showing signs of disengagement"},
+                "lapsed": {"count": 0, "percent": 0.0, "avg_spent_dollars": 0.0, "description": "Customers who have not interacted recently with moderate prior engagement"},
+                "lost": {"count": 0, "percent": 0.0, "avg_spent_dollars": 0.0, "description": "Low engagement customers who have been inactive for a long time"},
+            },
+            "rfm_distribution": {
+                "recency_avg_days": 0.0,
+                "frequency_avg_events": 0.0,
+                "monetary_avg_dollars": 0.0,
+            },
             "message": "No customers have preference profiles yet.",
         }
 
@@ -982,7 +992,7 @@ def forecast_revenue(db: Session, time_horizon_days: int = 90) -> dict:
             "time_horizon_days": time_horizon_days,
             "total_events": 0,
             "current_revenue_dollars": 0,
-            "projected_revenue_dollars": 0,
+            "projected_revenue_dollars": {"low": 0, "mid": 0, "high": 0},
             "events": [],
             "message": f"No upcoming events in the next {time_horizon_days} days.",
         }
