@@ -623,9 +623,83 @@ async def list_tools():
                     "customer_name": {"type": "string", "description": "Find and refund tickets by customer name"},
                     "event_id": {"type": "integer", "description": "When using customer_name, limit to this event"},
                     "notify_customer": {"type": "boolean", "description": "Send refund confirmation email/SMS (default true)"},
-                    "reason": {"type": "string", "description": "Reason for refund (for internal records)"},
+                    "reason": {"type": "string", "description": "Reason for refund: customer_request, event_cancelled, duplicate, fraud, other"},
+                    "amount_cents": {"type": "integer", "description": "Partial refund amount in cents (null = full refund)"},
                 },
                 "required": [],
+            },
+        ),
+        Tool(
+            name="get_refund_stats",
+            description="Get refund statistics for an event or overall. Returns total refunds, amount refunded, and breakdown by reason.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Filter stats for specific event (optional)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_refund_history",
+            description="List recent refunds with filters. See who got refunded, when, and why.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Filter by event ID"},
+                    "event_goer_id": {"type": "integer", "description": "Filter by customer ID"},
+                    "limit": {"type": "integer", "description": "Max results (default 50)"},
+                    "offset": {"type": "integer", "description": "Pagination offset (default 0)"},
+                },
+                "required": [],
+            },
+        ),
+        # Dynamic pricing tools
+        Tool(
+            name="enable_dynamic_pricing",
+            description="Enable automatic demand-based pricing for a ticket tier. Set min/max price bounds to control price range.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                    "min_price": {"type": "integer", "description": "Minimum allowed price in cents (optional)"},
+                    "max_price": {"type": "integer", "description": "Maximum allowed price in cents (optional)"},
+                },
+                "required": ["tier_id"],
+            },
+        ),
+        Tool(
+            name="disable_dynamic_pricing",
+            description="Disable dynamic pricing for a tier and reset to base price",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                },
+                "required": ["tier_id"],
+            },
+        ),
+        Tool(
+            name="get_dynamic_price_suggestion",
+            description="Get AI-suggested price for a tier based on current demand and time pressure. Returns suggested price with reasoning.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                },
+                "required": ["tier_id"],
+            },
+        ),
+        Tool(
+            name="auto_adjust_event_pricing",
+            description="Automatically adjust pricing for all dynamic tiers in an event. Can run in dry-run mode to preview changes first.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "dry_run": {"type": "boolean", "description": "If true, only show suggestions without applying (default false)"},
+                },
+                "required": ["event_id"],
             },
         ),
         Tool(
@@ -7930,6 +8004,70 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "errors": errors,
             "reason": reason,
         }
+
+    elif name == "get_refund_stats":
+        from app.services.refunds import get_refund_stats
+
+        event_id = arguments.get("event_id")
+        result = get_refund_stats(db, event_id=event_id)
+        return result
+
+    elif name == "get_refund_history":
+        from app.services.refunds import get_refund_history
+
+        event_id = arguments.get("event_id")
+        event_goer_id = arguments.get("event_goer_id")
+        limit = arguments.get("limit", 50)
+        offset = arguments.get("offset", 0)
+
+        result = get_refund_history(
+            db,
+            event_id=event_id,
+            event_goer_id=event_goer_id,
+            limit=limit,
+            offset=offset,
+        )
+        return result
+
+    # ============== Dynamic Pricing Tools ==============
+    elif name == "enable_dynamic_pricing":
+        from app.services.dynamic_pricing import enable_dynamic_pricing
+
+        tier_id = arguments["tier_id"]
+        min_price = arguments.get("min_price")
+        max_price = arguments.get("max_price")
+
+        result = enable_dynamic_pricing(db, tier_id, min_price, max_price)
+        return result
+
+    elif name == "disable_dynamic_pricing":
+        from app.services.dynamic_pricing import disable_dynamic_pricing
+
+        tier_id = arguments["tier_id"]
+        result = disable_dynamic_pricing(db, tier_id)
+        return result
+
+    elif name == "get_dynamic_price_suggestion":
+        from app.services.dynamic_pricing import suggest_price_adjustment
+
+        tier_id = arguments["tier_id"]
+        tier = db.query(TicketTier).filter(TicketTier.id == tier_id).first()
+
+        if not tier:
+            return {"error": "Tier not found"}
+
+        event = db.query(Event).filter(Event.id == tier.event_id).first()
+        result = suggest_price_adjustment(tier, db, event)
+        return result
+
+    elif name == "auto_adjust_event_pricing":
+        from app.services.dynamic_pricing import auto_adjust_event_pricing
+
+        event_id = arguments["event_id"]
+        dry_run = arguments.get("dry_run", False)
+
+        result = auto_adjust_event_pricing(db, event_id, dry_run)
+        return result
 
     # ============== Predictive Analytics Tools ==============
     elif name == "predict_demand":

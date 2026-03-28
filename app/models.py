@@ -221,6 +221,14 @@ class TicketTier(Base):
     alert_thresholds = Column(Text, nullable=True)
     fired_thresholds = Column(Text, nullable=True)
 
+    # Dynamic pricing
+    base_price = Column(Integer, nullable=True)  # Original price before dynamic adjustments
+    dynamic_pricing_enabled = Column(Boolean, default=False)
+    min_price = Column(Integer, nullable=True)  # Minimum allowed price
+    max_price = Column(Integer, nullable=True)  # Maximum allowed price
+    last_price_update = Column(DateTime(timezone=True), nullable=True)
+    price_update_reason = Column(String(255), nullable=True)  # demand, time_based, manual, etc.
+
     event = relationship("Event", back_populates="ticket_tiers")
     tickets = relationship("Ticket", back_populates="ticket_tier", cascade="all, delete-orphan")
 
@@ -276,6 +284,12 @@ class Ticket(Base):
     utm_source = Column(String(100), nullable=True)
     utm_medium = Column(String(100), nullable=True)
     utm_campaign = Column(String(100), nullable=True)
+
+    # Refund tracking
+    refund_reason = Column(String(255), nullable=True)  # customer_request, event_cancelled, duplicate, fraud, other
+    refund_amount_cents = Column(Integer, nullable=True)  # For partial refunds
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
+    stripe_refund_id = Column(String(255), nullable=True, index=True)
 
     # Backward-compatible alias used by legacy code/tests.
     # Not persisted; canonical source of truth is TicketTier.price.
