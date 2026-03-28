@@ -123,6 +123,81 @@ def analyze_event_context(db: Session, event_id: int) -> Dict:
     }
 
 
+def research_artist_or_performer(event_name: str, event_description: Optional[str]) -> Dict:
+    """
+    Research artist/performer using web search and AI analysis.
+
+    Uses OpenRouter to search the web and extract artist information.
+    """
+    settings = get_settings()
+
+    # Build search query
+    search_query = f"{event_name} artist performer musician biography"
+
+    # Use AI to research artist
+    try:
+        import requests
+
+        # Use OpenRouter with web search capability
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {settings.openrouter_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "perplexity/llama-3.1-sonar-large-128k-online",  # Has web search
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"""Research information about this event: "{event_name}"
+
+Event description: {event_description or "Not provided"}
+
+Please find and return:
+1. Artist/Performer Name - Who is performing?
+2. Artist Bio - Brief background (2-3 sentences)
+3. Genre/Style - What type of music/performance?
+4. Notable Achievements - Awards, hit songs, famous performances
+5. Social Media - Instagram, Twitter, Spotify handles (if found)
+6. Similar Artists - 3-5 artists with similar style
+7. Fan Demographics - Typical age range and interests of fans
+8. Event Type - Concert, comedy show, sports event, etc.
+
+If this is not a performance event (e.g., sports, conference), adapt the research accordingly.
+
+Return as JSON with keys: artist_name, bio, genre, achievements, social_media, similar_artists, fan_demographics, event_type"""
+                    }
+                ],
+                "response_format": {"type": "json_object"},
+            },
+            timeout=30,
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            artist_data = result["choices"][0]["message"]["content"]
+
+            try:
+                import json
+                return json.loads(artist_data)
+            except:
+                return {"raw_data": artist_data, "parsed": False}
+        else:
+            return {"error": f"API error: {response.status_code}"}
+
+    except Exception as e:
+        # Fallback: Basic extraction from event name
+        return {
+            "artist_name": event_name.split("-")[0].strip() if "-" in event_name else event_name,
+            "bio": "Research unavailable - manual addition recommended",
+            "genre": "To be determined",
+            "event_type": "Live event",
+            "note": f"Automatic research failed: {str(e)}",
+            "fallback": True,
+        }
+
+
 def research_venue_area(venue_address: str) -> Dict:
     """
     Research the area around a venue using geocoding and local insights.
@@ -161,9 +236,44 @@ def research_venue_area(venue_address: str) -> Dict:
     }
 
 
+def _generate_event_description(
+    event_context: Dict,
+    artist_research: Dict,
+) -> str:
+    """
+    Generate engaging event description from artist research.
+    """
+    artist_name = artist_research.get("artist_name", "")
+    bio = artist_research.get("bio", "")
+    genre = artist_research.get("genre", "")
+    achievements = artist_research.get("achievements", "")
+
+    event_name = event_context['event']['name']
+    event_date = event_context['event']['date']
+    venue_name = event_context['venue']['name']
+
+    description = f"""Join us for {event_name} at {venue_name} on {event_date}!
+
+{bio}
+
+{achievements}
+
+Don't miss this {genre} experience! Get your tickets now before they sell out.
+
+Event Details:
+• Date: {event_date}
+• Time: {event_context['event']['time']}
+• Venue: {venue_name}
+• Location: {event_context['venue']['address']}
+"""
+
+    return description.strip()
+
+
 def generate_marketing_plan(
     event_context: Dict,
     area_research: Dict,
+    artist_research: Optional[Dict] = None,
 ) -> Dict:
     """
     Generate AI-powered marketing plan based on event research.
@@ -172,7 +282,19 @@ def generate_marketing_plan(
     """
     settings = get_settings()
 
-    # Build research prompt
+    # Build research prompt with artist context
+    artist_info = ""
+    if artist_research and not artist_research.get("fallback"):
+        artist_info = f"""
+ARTIST/PERFORMER:
+- Name: {artist_research.get('artist_name', 'Unknown')}
+- Genre: {artist_research.get('genre', 'Unknown')}
+- Bio: {artist_research.get('bio', 'Not available')}
+- Achievements: {artist_research.get('achievements', 'Not available')}
+- Fan Demographics: {artist_research.get('fan_demographics', 'Not available')}
+- Similar Artists: {', '.join(artist_research.get('similar_artists', []))}
+"""
+
     prompt = f"""You are an expert event marketing strategist. Analyze this event and create a comprehensive marketing plan.
 
 EVENT DETAILS:
@@ -183,7 +305,7 @@ EVENT DETAILS:
 - Days Until Event: {event_context['event']['days_until_event']}
 - Season: {event_context['event']['season']}
 - Weekend Event: {event_context['event']['is_weekend']}
-
+{artist_info}
 VENUE:
 - Name: {event_context['venue']['name']}
 - Location: {event_context['venue']['address']}
@@ -315,15 +437,18 @@ async def run_event_research_agent(
     db: Session,
     event_id: int,
     include_ai_plan: bool = True,
+    include_artist_research: bool = True,
 ) -> Dict:
     """
     Run complete research agent for an event.
 
     Steps:
     1. Analyze event context (date, venue, pricing, inventory)
-    2. Research venue area (demographics, competitors, weather)
-    3. Generate AI marketing plan
-    4. Return comprehensive research report
+    2. Research artist/performer (bio, genre, social media, fan demographics)
+    3. Research venue area (demographics, competitors, weather)
+    4. Generate AI marketing plan with artist context
+    5. Generate enhanced event description
+    6. Return comprehensive research report
     """
     # Step 1: Analyze event
     event_context = analyze_event_context(db, event_id)
@@ -331,24 +456,47 @@ async def run_event_research_agent(
     if "error" in event_context:
         return event_context
 
-    # Step 2: Research area
+    # Step 2: Research artist/performer
+    artist_research = {}
+    if include_artist_research:
+        artist_research = research_artist_or_performer(
+            event_context['event']['name'],
+            event_context['event']['description']
+        )
+
+    # Step 3: Research area
     area_research = research_venue_area(event_context['venue']['address'])
 
-    # Step 3: Generate marketing plan
+    # Step 4: Generate enhanced event description
+    enhanced_description = None
+    if artist_research and not artist_research.get("fallback"):
+        enhanced_description = _generate_event_description(
+            event_context,
+            artist_research
+        )
+
+    # Step 5: Generate marketing plan (with artist context)
     if include_ai_plan:
-        marketing_plan = generate_marketing_plan(event_context, area_research)
+        marketing_plan = generate_marketing_plan(
+            event_context,
+            area_research,
+            artist_research
+        )
     else:
         marketing_plan = {"message": "AI plan generation skipped"}
 
-    # Step 4: Compile research report
+    # Step 6: Compile research report
     return {
         "event_id": event_id,
         "event_name": event_context['event']['name'],
         "research_completed_at": datetime.utcnow().isoformat(),
         "event_context": event_context,
+        "artist_research": artist_research,
         "area_research": area_research,
+        "enhanced_description": enhanced_description,
         "marketing_plan": marketing_plan,
         "next_steps": [
+            "Review artist bio and update event description" if enhanced_description else None,
             "Review marketing plan recommendations",
             "Adjust budget allocations based on sell-through rate",
             "Create Meta ad campaigns using recommended messaging",

@@ -68,7 +68,7 @@ async def auto_onboard_event(
             from app.services.event_research_agent import run_event_research_agent
 
             research_report = await run_event_research_agent(
-                db, event_id, include_ai_plan=True
+                db, event_id, include_ai_plan=True, include_artist_research=True
             )
 
             if "error" not in research_report:
@@ -76,7 +76,23 @@ async def auto_onboard_event(
                 results["research_report"] = {
                     "completed": True,
                     "marketing_plan_generated": "marketing_plan" in research_report,
+                    "artist_researched": "artist_research" in research_report,
                 }
+
+                # Update event description if enhanced version available
+                if research_report.get("enhanced_description") and not event.description:
+                    event.description = research_report["enhanced_description"]
+                    db.commit()
+                    results["description_enhanced"] = True
+
+                # Cache artist info for reference
+                if research_report.get("artist_research"):
+                    artist_data = research_report["artist_research"]
+                    results["artist_info"] = {
+                        "name": artist_data.get("artist_name"),
+                        "genre": artist_data.get("genre"),
+                        "social_media": artist_data.get("social_media"),
+                    }
 
                 # Cache the research for other steps
                 from app.routers.event_research import research_cache
