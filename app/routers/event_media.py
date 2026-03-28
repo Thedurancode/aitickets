@@ -5,7 +5,7 @@ and automatic flyer generation using all collected media.
 """
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from pathlib import Path
 import uuid
@@ -28,6 +28,13 @@ router = APIRouter(prefix="/api/event-media", tags=["event-media"])
 # ============== Schemas ==============
 
 
+def _validate_url(v: str) -> str:
+    """Ensure the URL starts with http(s):// or /uploads/."""
+    if v and not v.startswith(("http://", "https://", "/uploads/")):
+        raise ValueError("media_url must start with http://, https://, or /uploads/")
+    return v
+
+
 class AddMediaRequest(BaseModel):
     """Request to add a media asset to an event."""
     media_type: str = Field(..., description="Type: artist_photo, logo, venue_photo, sponsor_logo, background, graphic, other")
@@ -36,6 +43,11 @@ class AddMediaRequest(BaseModel):
     display_order: Optional[int] = Field(None, description="Display order (auto if not provided)")
     metadata: Optional[dict] = Field(None, description="Optional metadata (dimensions, credits, etc.)")
 
+    @field_validator("media_url")
+    @classmethod
+    def validate_media_url(cls, v: str) -> str:
+        return _validate_url(v)
+
 
 class UpdateMediaRequest(BaseModel):
     """Request to update a media asset."""
@@ -43,6 +55,13 @@ class UpdateMediaRequest(BaseModel):
     label: Optional[str] = None
     display_order: Optional[int] = None
     metadata: Optional[dict] = None
+
+    @field_validator("media_url")
+    @classmethod
+    def validate_media_url(cls, v: str) -> str:
+        if v is not None:
+            return _validate_url(v)
+        return v
 
 
 class BulkAddMediaRequest(BaseModel):

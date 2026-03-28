@@ -28,6 +28,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.database import SessionLocal
+from app.rate_limit import limiter
 from mcp_server.server import list_tools, _execute_tool
 
 
@@ -142,16 +143,17 @@ async def get_tools_openai_format():
 
 
 @router.post("/tools/{tool_name}")
-async def call_tool(tool_name: str, request: ToolCallRequest):
+@limiter.limit("60/minute")
+async def call_tool(request: Request, tool_name: str, body: ToolCallRequest = ToolCallRequest()):
     """Call a specific MCP tool."""
     db = SessionLocal()
     try:
-        result = await _execute_tool(tool_name, request.arguments, db)
+        result = await _execute_tool(tool_name, body.arguments, db)
 
         # Broadcast event via SSE
         await sse_manager.broadcast("tool_called", {
             "tool": tool_name,
-            "arguments": request.arguments,
+            "arguments": body.arguments,
             "success": "error" not in result,
             "result": result,
         })
@@ -271,6 +273,7 @@ async def mcp_protocol_sse_stream(request: Request):
 
 
 @router.post("/message")
+@limiter.limit("60/minute")
 async def mcp_message(request: Request, session_id: Optional[str] = None):
     """
     Handle MCP JSON-RPC messages.
@@ -395,6 +398,7 @@ async def mcp_message(request: Request, session_id: Optional[str] = None):
 # ============== Voice Agent Endpoint ==============
 
 @router.post("/voice/action")
+@limiter.limit("30/minute")
 async def voice_action(request: Request):
     """
     Simplified endpoint for voice agents.
@@ -650,6 +654,17 @@ async def voice_action(request: Request):
     db = SessionLocal()
     try:
         result = await _execute_tool(tool_name, arguments, db)
+
+        # Audit log for MCP tool executions
+        from app.services.audit import log_audit
+        log_audit(
+            db=db,
+            action=f"mcp.{tool_name}",
+            actor="mcp",
+            detail={"arguments": arguments, "success": "error" not in result},
+            ip_address=request.client.host if request.client else None,
+        )
+        db.commit()
 
         if "error" in result:
             return {
@@ -1316,7 +1331,8 @@ async def refresh_dashboard(full: bool = False, message: str = None):
 
 
 @router.post("/admin/migrate")
-async def run_migrations():
+@limiter.limit("5/minute")
+async def run_migrations(request: Request):
     """Run database migrations to add new columns."""
     try:
         from app.migrations.add_stripe_columns import run_migration

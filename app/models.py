@@ -917,3 +917,17 @@ class FlyerTemplateMagicToken(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     event = relationship("Event")
+
+
+class AuditLog(Base):
+    """Immutable audit trail for sensitive operations."""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(100), nullable=False, index=True)
+    actor = Column(String(255), nullable=False, index=True)
+    resource_type = Column(String(100), nullable=True)
+    resource_id = Column(Integer, nullable=True, index=True)
+    detail = Column(Text, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)

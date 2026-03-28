@@ -65,6 +65,18 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ============== Global Error Handlers ==============
 
+from app.exceptions import AppError
+
+
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    """Convert application exceptions to consistent JSON responses."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.message},
+    )
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Return a consistent JSON format for validation errors."""
@@ -130,7 +142,7 @@ app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 
 # ============== CORS Middleware ==============
 _settings = get_settings()
-_origins = [o.strip() for o in _settings.cors_origins.split(",") if o.strip()] if _settings.cors_origins else ["*"]
+_origins = [o.strip() for o in _settings.cors_origins.split(",") if o.strip()] if _settings.cors_origins else ["http://localhost:3000"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -284,7 +296,7 @@ def root():
 
 @app.get("/health")
 def health_check():
-    """Health check endpoint — verifies DB connectivity."""
+    """Health check endpoint — verifies DB and external service connectivity."""
     from sqlalchemy import text
     from app.database import SessionLocal
 
@@ -298,6 +310,13 @@ def health_check():
     except Exception as e:
         checks["db"] = str(e)
         status = "unhealthy"
+
+    # External service config checks (not full pings — just verify keys are set)
+    _hs = get_settings()
+    checks["stripe"] = "configured" if _hs.stripe_secret_key else "not configured"
+    checks["email"] = "configured" if _hs.resend_api_key else "not configured"
+    checks["sms"] = "configured" if _hs.twilio_account_sid and _hs.twilio_auth_token else "not configured"
+    checks["voice"] = "configured" if _hs.telnyx_api_key else "not configured"
 
     code = 200 if status == "healthy" else 503
     return JSONResponse(status_code=code, content={"status": status, "checks": checks})

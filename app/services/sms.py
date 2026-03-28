@@ -1,7 +1,12 @@
+import logging
+
 from twilio.rest import Client
 from twilio.base.exceptions import TwilioRestException
 
 from app.config import get_settings
+from app.services.retry import with_retry
+
+logger = logging.getLogger(__name__)
 
 
 def get_twilio_client():
@@ -10,6 +15,12 @@ def get_twilio_client():
     if not settings.twilio_account_sid or not settings.twilio_auth_token:
         return None
     return Client(settings.twilio_account_sid, settings.twilio_auth_token)
+
+
+@with_retry(max_attempts=3, base_delay=1.0, retryable=(ConnectionError, TimeoutError, OSError))
+def _send_sms_with_retry(client, from_number: str, to_phone: str, message: str):
+    """Low-level send with retry on transient network errors."""
+    return client.messages.create(body=message, from_=from_number, to=to_phone)
 
 
 def send_sms(to_phone: str, message: str) -> dict:
@@ -32,17 +43,21 @@ def send_sms(to_phone: str, message: str) -> dict:
         to_phone = f"+1{to_phone}"  # Default to US
 
     try:
-        message_obj = client.messages.create(
-            body=message,
-            from_=settings.twilio_phone_number,
-            to=to_phone,
-        )
+        message_obj = _send_sms_with_retry(client, settings.twilio_phone_number, to_phone, message)
         return {
             "success": True,
             "sid": message_obj.sid,
             "error": None,
         }
     except TwilioRestException as e:
+        logger.error("Twilio API error sending to %s: %s", to_phone, e)
+        return {
+            "success": False,
+            "sid": None,
+            "error": str(e),
+        }
+    except Exception as e:
+        logger.exception("Unexpected error sending SMS to %s", to_phone)
         return {
             "success": False,
             "sid": None,

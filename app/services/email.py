@@ -1,3 +1,5 @@
+import logging
+
 import resend
 from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
@@ -5,33 +7,33 @@ from typing import Optional
 
 from app.config import get_settings
 from app.services.qrcode import generate_qr_code_base64
+from app.services.retry import with_retry
+
+logger = logging.getLogger(__name__)
 
 # Set up Jinja2 template environment
 templates_dir = Path(__file__).parent.parent.parent / "templates"
 env = Environment(loader=FileSystemLoader(str(templates_dir)))
 
 
+@with_retry(max_attempts=3, base_delay=1.0)
 def _send_email(to_email: str, subject: str, html_content: str) -> bool:
-    """Internal helper to send emails via Resend."""
+    """Internal helper to send emails via Resend with retry."""
     settings = get_settings()
 
     if not settings.resend_api_key:
-        print("Warning: RESEND_API_KEY not configured, skipping email")
+        logger.warning("RESEND_API_KEY not configured, skipping email to %s", to_email)
         return False
 
     resend.api_key = settings.resend_api_key
 
-    try:
-        resend.Emails.send({
-            "from": settings.from_email,
-            "to": [to_email],
-            "subject": subject,
-            "html": html_content,
-        })
-        return True
-    except Exception as e:
-        print(f"Failed to send email: {e}")
-        return False
+    resend.Emails.send({
+        "from": settings.from_email,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_content,
+    })
+    return True
 
 
 def send_ticket_email(
@@ -70,7 +72,11 @@ def send_ticket_email(
         base_url=settings.base_url,
     )
 
-    return _send_email(to_email, f"Your Ticket for {event_name}", html_content)
+    try:
+        return _send_email(to_email, f"Your Ticket for {event_name}", html_content)
+    except Exception:
+        logger.exception("Failed to send ticket email to %s for %s", to_email, event_name)
+        return False
 
 
 def send_reminder_email(
@@ -95,7 +101,11 @@ def send_reminder_email(
         hours_until=hours_until,
     )
 
-    return _send_email(to_email, f"Reminder: {event_name} is coming up!", html_content)
+    try:
+        return _send_email(to_email, f"Reminder: {event_name} is coming up!", html_content)
+    except Exception:
+        logger.exception("Failed to send reminder email to %s", to_email)
+        return False
 
 
 def send_event_update_email(
@@ -118,7 +128,11 @@ def send_event_update_email(
         update_message=update_message,
     )
 
-    return _send_email(to_email, f"Update: {event_name}", html_content)
+    try:
+        return _send_email(to_email, f"Update: {event_name}", html_content)
+    except Exception:
+        logger.exception("Failed to send update email to %s", to_email)
+        return False
 
 
 def send_event_cancelled_email(
@@ -139,7 +153,11 @@ def send_event_cancelled_email(
         cancellation_reason=cancellation_reason,
     )
 
-    return _send_email(to_email, f"Cancelled: {event_name}", html_content)
+    try:
+        return _send_email(to_email, f"Cancelled: {event_name}", html_content)
+    except Exception:
+        logger.exception("Failed to send cancellation email to %s", to_email)
+        return False
 
 
 def send_event_postponed_email(
@@ -164,7 +182,11 @@ def send_event_postponed_email(
         postponement_reason=postponement_reason,
     )
 
-    return _send_email(to_email, f"Postponed: {event_name}", html_content)
+    try:
+        return _send_email(to_email, f"Postponed: {event_name}", html_content)
+    except Exception:
+        logger.exception("Failed to send postponement email to %s", to_email)
+        return False
 
 
 def send_marketing_email(
@@ -182,7 +204,11 @@ def send_marketing_email(
         unsubscribe_url=f"{settings.base_url}/unsubscribe?email={to_email}",
     )
 
-    return _send_email(to_email, subject, html_content)
+    try:
+        return _send_email(to_email, subject, html_content)
+    except Exception:
+        logger.exception("Failed to send marketing email to %s", to_email)
+        return False
 
 
 def send_cart_recovery_email(
@@ -201,7 +227,11 @@ def send_cart_recovery_email(
         checkout_url=f"{settings.base_url}/events",
     )
 
-    return _send_email(to_email, "You left tickets in your cart!", html_content)
+    try:
+        return _send_email(to_email, "You left tickets in your cart!", html_content)
+    except Exception:
+        logger.exception("Failed to send cart recovery email to %s", to_email)
+        return False
 
 
 def send_survey_email(
@@ -220,4 +250,8 @@ def send_survey_email(
         survey_url=survey_url,
     )
 
-    return _send_email(to_email, f"How was {event_name}?", html_content)
+    try:
+        return _send_email(to_email, f"How was {event_name}?", html_content)
+    except Exception:
+        logger.exception("Failed to send survey email to %s", to_email)
+        return False

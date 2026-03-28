@@ -176,8 +176,12 @@ def _eval_low_sell_through(db: Session, trigger: AutoTrigger, now: datetime) -> 
     threshold_pct = trigger.threshold_value or 30
     threshold_days = trigger.threshold_days or 7
 
-    # Find matching events
-    events_q = db.query(Event).filter(Event.status == EventStatus.SCHEDULED)
+    # Eager-load tiers with events in a single query
+    events_q = (
+        db.query(Event)
+        .options(joinedload(Event.ticket_tiers))
+        .filter(Event.status == EventStatus.SCHEDULED)
+    )
     if trigger.event_id:
         events_q = events_q.filter(Event.id == trigger.event_id)
 
@@ -193,9 +197,8 @@ def _eval_low_sell_through(db: Session, trigger: AutoTrigger, now: datetime) -> 
         if days_until < 0 or days_until > threshold_days:
             continue
 
-        tiers = db.query(TicketTier).filter(TicketTier.event_id == event.id).all()
-        total_avail = sum(t.quantity_available for t in tiers)
-        total_sold = sum(t.quantity_sold for t in tiers)
+        total_avail = sum(t.quantity_available for t in event.ticket_tiers)
+        total_sold = sum(t.quantity_sold for t in event.ticket_tiers)
         if total_avail == 0:
             continue
 
@@ -214,7 +217,11 @@ def _eval_almost_sold_out(db: Session, trigger: AutoTrigger, now: datetime) -> d
     """Fire if sell-through exceeds threshold (e.g. 90%)."""
     threshold_pct = trigger.threshold_value or 90
 
-    events_q = db.query(Event).filter(Event.status == EventStatus.SCHEDULED)
+    events_q = (
+        db.query(Event)
+        .options(joinedload(Event.ticket_tiers))
+        .filter(Event.status == EventStatus.SCHEDULED)
+    )
     if trigger.event_id:
         events_q = events_q.filter(Event.id == trigger.event_id)
 
@@ -228,9 +235,8 @@ def _eval_almost_sold_out(db: Session, trigger: AutoTrigger, now: datetime) -> d
         except ValueError:
             continue
 
-        tiers = db.query(TicketTier).filter(TicketTier.event_id == event.id).all()
-        total_avail = sum(t.quantity_available for t in tiers)
-        total_sold = sum(t.quantity_sold for t in tiers)
+        total_avail = sum(t.quantity_available for t in event.ticket_tiers)
+        total_sold = sum(t.quantity_sold for t in event.ticket_tiers)
         if total_avail == 0:
             continue
 
