@@ -33,10 +33,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting application...")
     init_db()
     try:
-        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders
+        from app.services.scheduler import init_scheduler, bootstrap_existing_reminders, bootstrap_automation_jobs
+        from app.services.proactive_monitor import schedule_proactive_monitoring
+
         init_scheduler()
         bootstrap_existing_reminders()
-        logger.info("Scheduler initialized successfully")
+        bootstrap_automation_jobs()
+        schedule_proactive_monitoring()
+
+        logger.info("Scheduler initialized successfully with all automation jobs")
     except Exception as e:
         logger.warning(f"Scheduler init note: {e}")
 
