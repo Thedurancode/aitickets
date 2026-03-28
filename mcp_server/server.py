@@ -702,6 +702,31 @@ async def list_tools():
                 "required": ["event_id"],
             },
         ),
+        # Event research agent tools
+        Tool(
+            name="research_event",
+            description="Run autonomous research agent to analyze event context (date, venue, location, demographics) and generate AI-powered marketing plan. Returns comprehensive report with target audience, messaging strategy, channel recommendations, and budget allocation.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to research"},
+                    "include_ai_plan": {"type": "boolean", "description": "Generate AI marketing plan (default true)"},
+                    "force_refresh": {"type": "boolean", "description": "Force new research even if cached (default false)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_event_research_summary",
+            description="Get human-readable summary of event research report. Returns markdown-formatted overview of marketing plan, target audience, and recommendations.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
         Tool(
             name="list_event_goers",
             description="List attendees for an event",
@@ -8068,6 +8093,38 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         result = auto_adjust_event_pricing(db, event_id, dry_run)
         return result
+
+    # ============== Event Research Agent Tools ==============
+    elif name == "research_event":
+        from app.services.event_research_agent import run_event_research_agent
+
+        event_id = arguments["event_id"]
+        include_ai_plan = arguments.get("include_ai_plan", True)
+        force_refresh = arguments.get("force_refresh", False)
+
+        result = await run_event_research_agent(db, event_id, include_ai_plan)
+        return result
+
+    elif name == "get_event_research_summary":
+        from app.services.event_research_agent import get_research_summary
+        from app.routers.event_research import research_cache
+
+        event_id = arguments["event_id"]
+
+        if event_id not in research_cache:
+            return {
+                "error": "No research report found. Use research_event first.",
+                "suggestion": f"Call research_event with event_id={event_id}"
+            }
+
+        report = research_cache[event_id]
+        summary = get_research_summary(report)
+
+        return {
+            "event_id": event_id,
+            "event_name": report['event_name'],
+            "summary": summary,
+        }
 
     # ============== Predictive Analytics Tools ==============
     elif name == "predict_demand":
