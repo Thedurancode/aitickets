@@ -83,8 +83,25 @@ def get_event(event_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=EventResponse, status_code=201)
-def create_event(event: EventCreate, db: Session = Depends(get_db)):
-    """Create a new event."""
+async def create_event(
+    event: EventCreate,
+    background_tasks: BackgroundTasks,
+    auto_onboard: bool = Query(True, description="Automatically onboard event with research, flyer, and ads"),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new event.
+
+    **Auto-Onboarding (auto_onboard=true):**
+    When enabled, automatically triggers:
+    1. Research agent - Analyzes event and generates marketing plan
+    2. Flyer generation - Creates AI-powered event flyer
+    3. Meta ads creation - Launches ad campaigns based on marketing plan
+    4. Campaign scheduling - Sets up email/SMS campaigns
+    5. Dynamic pricing - Configures demand-based pricing (if applicable)
+
+    Set auto_onboard=false to skip automation and configure manually.
+    """
     # Verify venue exists
     venue = db.query(Venue).filter(Venue.id == event.venue_id).first()
     if not venue:
@@ -114,6 +131,14 @@ def create_event(event: EventCreate, db: Session = Depends(get_db)):
         }, db=db)
     except Exception:
         pass
+
+    # Trigger auto-onboarding in background
+    if auto_onboard:
+        background_tasks.add_task(
+            _run_auto_onboarding,
+            db_event.id,
+            db_event.name
+        )
 
     return db_event
 
@@ -375,3 +400,138 @@ def toggle_event_uploads(
         "uploads_open": event.uploads_open,
         "message": f"Uploads {'opened' if event.uploads_open else 'closed'} for {event.name}",
     }
+
+
+@router.post("/{event_id}/onboard")
+async def trigger_event_onboarding(
+    event_id: int,
+    background_tasks: BackgroundTasks,
+    skip_research: bool = Query(False, description="Skip research agent"),
+    skip_flyer: bool = Query(False, description="Skip flyer generation"),
+    skip_meta_ads: bool = Query(False, description="Skip Meta ads creation"),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually trigger auto-onboarding for an existing event.
+
+    **Use Cases:**
+    - Re-run onboarding if it failed initially
+    - Update marketing materials for an event
+    - Generate missing components (flyer, ads, etc.)
+
+    **Steps:**
+    1. Research agent - Marketing plan generation
+    2. Flyer generation - AI-powered event flyer
+    3. Meta ads - Campaign creation
+    4. Email/SMS - Campaign scheduling
+    5. Dynamic pricing - Auto-pricing setup
+
+    Use skip_* parameters to skip specific steps.
+    """
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Trigger onboarding in background
+    background_tasks.add_task(
+        _run_auto_onboarding_with_options,
+        event_id,
+        event.name,
+        skip_research,
+        skip_flyer,
+        skip_meta_ads
+    )
+
+    return {
+        "message": f"Auto-onboarding triggered for {event.name}",
+        "event_id": event_id,
+        "status": "running_in_background",
+        "note": "Use GET /api/event-research/events/{event_id}/report to check results"
+    }
+
+
+# ============== Background Tasks ==============
+
+async def _run_auto_onboarding(event_id: int, event_name: str):
+    """
+    Background task for event auto-onboarding.
+
+    Runs asynchronously after event creation to avoid blocking the API response.
+    """
+    from app.database import SessionLocal
+    from app.services.event_auto_onboarding import auto_onboard_event
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting auto-onboarding for event {event_id}: {event_name}")
+
+    db = SessionLocal()
+    try:
+        result = await auto_onboard_event(db, event_id)
+
+        if "error" in result:
+            logger.error(f"Auto-onboarding failed for event {event_id}: {result['error']}")
+        else:
+            logger.info(
+                f"Auto-onboarding completed for event {event_id}. "
+                f"Steps completed: {len(result.get('steps_completed', []))}, "
+                f"Steps failed: {len(result.get('steps_failed', []))}"
+            )
+
+            # Fire webhook with onboarding results
+            try:
+                from app.services.webhooks import fire_webhook_event
+                fire_webhook_event("event.onboarded", {
+                    "event_id": event_id,
+                    "event_name": event_name,
+                    "steps_completed": result.get('steps_completed', []),
+                    "steps_failed": result.get('steps_failed', []),
+                    "success_rate": result.get('success_rate'),
+                }, db=db)
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.exception(f"Auto-onboarding exception for event {event_id}: {str(e)}")
+    finally:
+        db.close()
+
+
+async def _run_auto_onboarding_with_options(
+    event_id: int,
+    event_name: str,
+    skip_research: bool,
+    skip_flyer: bool,
+    skip_meta_ads: bool
+):
+    """
+    Background task for event auto-onboarding with custom options.
+    """
+    from app.database import SessionLocal
+    from app.services.event_auto_onboarding import auto_onboard_event
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting custom auto-onboarding for event {event_id}: {event_name}")
+
+    db = SessionLocal()
+    try:
+        result = await auto_onboard_event(
+            db, event_id,
+            skip_research=skip_research,
+            skip_flyer=skip_flyer,
+            skip_meta_ads=skip_meta_ads
+        )
+
+        if "error" in result:
+            logger.error(f"Auto-onboarding failed for event {event_id}: {result['error']}")
+        else:
+            logger.info(
+                f"Auto-onboarding completed for event {event_id}. "
+                f"Steps completed: {result.get('steps_completed', [])}"
+            )
+
+    except Exception as e:
+        logger.exception(f"Auto-onboarding exception for event {event_id}: {str(e)}")
+    finally:
+        db.close()
