@@ -2632,6 +2632,114 @@ async def list_tools():
                 "required": ["customer_id"],
             },
         ),
+        # ============== Intelligence & Learning Tools ==============
+        Tool(
+            name="check_ad_performance",
+            description="Monitor Meta ad performance for an event. Can auto-pause underperforming campaigns.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "auto_pause": {"type": "boolean", "description": "Auto-pause bad performers (default false)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="check_inventory_pressure",
+            description="Analyze inventory and get AI recommendations for pricing/marketing actions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="detect_refund_issues",
+            description="Detect unusual refund patterns that might indicate event problems.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID (optional, checks all if not provided)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_customer_recommendations",
+            description="Get related event recommendations for a customer based on their purchase history.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "Recent ticket purchase ID"},
+                },
+                "required": ["ticket_id"],
+            },
+        ),
+        Tool(
+            name="predict_event_performance",
+            description="Predict how an event will perform based on similar past events (sales, revenue forecast).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="get_best_customers",
+            description="Identify top customers by RFM analysis (Recency, Frequency, Monetary value). Returns VIP and high-value segments.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Max customers to return (default 100)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="find_lookalike_audience",
+            description="Build lookalike audience from event attendees - find similar customers to target.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to build lookalike from"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="detect_churn_risk",
+            description="Identify customers at risk of not returning. Returns win-back recommendations.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="analyze_event_patterns",
+            description="Identify successful patterns across all events (best venues, categories, seasonal trends).",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="compare_to_similar_events",
+            description="Compare an event to similar past events to see how it's performing.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to compare"},
+                },
+                "required": ["event_id"],
+            },
+        ),
     ]
 
 
@@ -8125,6 +8233,87 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "event_name": report['event_name'],
             "summary": summary,
         }
+
+    # ============== Intelligence & Learning Tools ==============
+    elif name == "check_ad_performance":
+        from app.services.event_intelligence import monitor_ad_performance
+
+        event_id = arguments["event_id"]
+        auto_pause = arguments.get("auto_pause", False)
+
+        result = monitor_ad_performance(db, event_id, auto_pause=auto_pause)
+        return result
+
+    elif name == "check_inventory_pressure":
+        from app.services.event_intelligence import check_inventory_pressure
+
+        event_id = arguments["event_id"]
+        result = check_inventory_pressure(db, event_id)
+        return result
+
+    elif name == "detect_refund_issues":
+        from app.services.event_intelligence import detect_refund_patterns
+
+        event_id = arguments.get("event_id")
+        result = detect_refund_patterns(db, event_id)
+        return result
+
+    elif name == "get_customer_recommendations":
+        from app.services.event_intelligence import suggest_related_events
+        from app.models import Ticket
+
+        ticket_id = arguments["ticket_id"]
+        ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+
+        if not ticket:
+            return {"error": "Ticket not found"}
+
+        recommendations = suggest_related_events(db, ticket)
+        return {
+            "ticket_id": ticket_id,
+            "event_id": ticket.event_id,
+            "recommendations": recommendations,
+        }
+
+    elif name == "predict_event_performance":
+        from app.services.learning_engine import predict_event_performance
+
+        event_id = arguments["event_id"]
+        result = predict_event_performance(db, event_id)
+        return result
+
+    elif name == "get_best_customers":
+        from app.services.cross_event_intelligence import identify_best_customers
+
+        limit = arguments.get("limit", 100)
+        result = identify_best_customers(db, limit)
+        return result
+
+    elif name == "find_lookalike_audience":
+        from app.services.cross_event_intelligence import build_lookalike_audience
+
+        event_id = arguments["event_id"]
+        result = build_lookalike_audience(db, event_id)
+        return result
+
+    elif name == "detect_churn_risk":
+        from app.services.cross_event_intelligence import detect_churn_risk
+
+        result = detect_churn_risk(db)
+        return result
+
+    elif name == "analyze_event_patterns":
+        from app.services.cross_event_intelligence import find_event_patterns
+
+        result = find_event_patterns(db)
+        return result
+
+    elif name == "compare_to_similar_events":
+        from app.services.cross_event_intelligence import compare_similar_events
+
+        event_id = arguments["event_id"]
+        result = compare_similar_events(db, event_id)
+        return result
 
     # ============== Predictive Analytics Tools ==============
     elif name == "predict_demand":

@@ -16,7 +16,7 @@ from app.database import init_db
 from app.config import get_settings
 from app.rate_limit import limiter
 from app.logging_config import setup_logging
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates, event_publisher, flyer_templates_enhanced, event_media, marketing_lists, refunds, dynamic_pricing, event_research
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates, event_publisher, flyer_templates_enhanced, event_media, marketing_lists, refunds, dynamic_pricing, event_research, intelligence
 
 # Module-level logger (must be before exception handlers which use it)
 logger = logging.getLogger(__name__)
@@ -106,6 +106,7 @@ app.include_router(marketing_lists.router, prefix=api_prefix)
 app.include_router(refunds.router, prefix=api_prefix)
 app.include_router(dynamic_pricing.router, prefix=api_prefix)
 app.include_router(event_research.router, prefix=api_prefix)
+app.include_router(intelligence.router, prefix=api_prefix)
 app.include_router(flyer_templates.router)  # Router already includes /api prefix
 app.include_router(flyer_templates_enhanced.router)  # Router already includes /api prefix
 app.include_router(meta_ads.router)  # Router already includes /api prefix
