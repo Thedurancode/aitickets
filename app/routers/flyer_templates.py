@@ -373,7 +373,7 @@ async def template_selection_page(
         <!-- Current Event Image -->
         <div class="mb-8">
             <h2 class="text-lg font-semibold mb-4">Current Event Image</h2>
-            {f'<div class="bg-gray-800 rounded-lg overflow-hidden"><img src="{event['current_image_url']}" alt="Current event image" class="w-full h-auto"></div>' if event.get('current_image_url') else '<div class="bg-gray-800 rounded-lg p-8 text-center text-gray-500">No current image</div>'}
+            {('<div class="bg-gray-800 rounded-lg overflow-hidden"><img src="' + event["current_image_url"] + '" alt="Current event image" class="w-full h-auto"></div>') if event.get("current_image_url") else '<div class="bg-gray-800 rounded-lg p-8 text-center text-gray-500">No current image</div>'}
         </div>
 
         <!-- Templates Grid -->

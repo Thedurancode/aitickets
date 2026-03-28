@@ -141,8 +141,8 @@ app.add_middleware(
 
 
 # ============== API Key Auth Middleware ==============
-# Protects /api/* write endpoints when MCP_API_KEY is set.
-# Public pages (/events, /purchase-success, etc.) remain open.
+# Protects /api/* endpoints with ADMIN_API_KEY and /mcp/* endpoints with
+# MCP_API_KEY.  Public pages (/events, /purchase-success, etc.) remain open.
 
 REST_PUBLIC_PATHS = {
     "/",
@@ -180,21 +180,55 @@ REST_PUBLIC_API_PREFIXES = {
     ("POST", "/api/flyer-templates/select/"),
 }
 
+# MCP paths that are safe to expose without auth (read-only / informational)
+MCP_PUBLIC_PATHS = {
+    "/mcp",
+    "/mcp/dashboard",
+}
+MCP_PUBLIC_PREFIXES = (
+    "/mcp/sse",           # SSE streams (read-only, no mutations)
+    "/mcp/protocol/sse",  # MCP protocol SSE (read-only handshake)
+)
+
+_UNAUTHORIZED = {"error": "Unauthorized", "detail": "Invalid or missing API key."}
+
 
 class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         settings = get_settings()
-        # REST API uses admin_api_key if set, otherwise falls back to mcp_api_key
-        api_key = settings.admin_api_key or settings.mcp_api_key
-
-        if not api_key:
-            return await call_next(request)
-
         path = request.url.path
         method = request.method.upper()
 
         # Let preflight requests through (CORS middleware still applies)
         if method == "OPTIONS":
+            return await call_next(request)
+
+        # --- MCP endpoints: protected by MCP_API_KEY ---
+        if path.startswith("/mcp"):
+            mcp_key = settings.mcp_api_key
+            if not mcp_key:
+                # No MCP key configured — allow through (dev mode)
+                return await call_next(request)
+
+            # Allow read-only MCP paths without auth
+            if path in MCP_PUBLIC_PATHS:
+                return await call_next(request)
+            if any(path.startswith(p) for p in MCP_PUBLIC_PREFIXES):
+                return await call_next(request)
+
+            # MCP endpoints accept x-mcp-key header or ?mcp_key= query param
+            provided_key = (
+                request.headers.get("x-mcp-key")
+                or request.query_params.get("mcp_key")
+            )
+            if not provided_key or provided_key != mcp_key:
+                return JSONResponse(status_code=401, content=_UNAUTHORIZED)
+
+            return await call_next(request)
+
+        # --- REST API endpoints: protected by ADMIN_API_KEY ---
+        api_key = settings.admin_api_key or settings.mcp_api_key
+        if not api_key:
             return await call_next(request)
 
         # Allow public paths and prefixes
@@ -207,17 +241,14 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         if any(method == m and path.startswith(p) for (m, p) in REST_PUBLIC_API_PREFIXES):
             return await call_next(request)
 
-        # Check for API key — accept either x-mcp-key or x-admin-key header
+        # Check for API key — accept either x-admin-key or x-mcp-key header
         provided_key = (
             request.headers.get("x-admin-key")
             or request.headers.get("x-mcp-key")
         )
 
         if not provided_key or provided_key != api_key:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "Unauthorized", "detail": "Invalid or missing API key."},
-            )
+            return JSONResponse(status_code=401, content=_UNAUTHORIZED)
 
         return await call_next(request)
 

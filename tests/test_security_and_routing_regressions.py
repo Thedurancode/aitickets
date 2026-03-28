@@ -25,6 +25,15 @@ def admin_key(monkeypatch):
     get_settings.cache_clear()
 
 
+@pytest.fixture
+def mcp_key(monkeypatch):
+    monkeypatch.setenv("MCP_API_KEY", "test-mcp-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "")
+    get_settings.cache_clear()
+    yield "test-mcp-key"
+    get_settings.cache_clear()
+
+
 def test_admin_key_blocks_event_and_about_writes(client, admin_key):
     # Public reads are still allowed.
     r = client.get("/api/events")
@@ -248,4 +257,99 @@ def test_stripe_webhook_secret_required_in_production(client, monkeypatch):
 
     assert r.status_code == 500
     assert r.json()["detail"] == "Stripe webhook secret required in production"
+    get_settings.cache_clear()
+
+
+# ============== MCP Endpoint Auth ==============
+
+
+def test_mcp_tool_call_blocked_without_key(client, mcp_key):
+    """MCP tool execution requires x-mcp-key when MCP_API_KEY is set."""
+    r = client.post("/mcp/tools/list_events", json={"arguments": {}})
+    assert r.status_code == 401
+
+    r = client.post(
+        "/mcp/tools/list_events",
+        json={"arguments": {}},
+        headers={"x-mcp-key": mcp_key},
+    )
+    assert r.status_code != 401
+
+
+def test_mcp_voice_action_blocked_without_key(client, mcp_key):
+    """Voice action endpoint requires x-mcp-key when MCP_API_KEY is set."""
+    r = client.post("/mcp/voice/action", json={"action": "list_events"})
+    assert r.status_code == 401
+
+    r = client.post(
+        "/mcp/voice/action",
+        json={"action": "list_events"},
+        headers={"x-mcp-key": mcp_key},
+    )
+    assert r.status_code != 401
+
+
+def test_mcp_message_blocked_without_key(client, mcp_key):
+    """MCP JSON-RPC message endpoint requires x-mcp-key."""
+    r = client.post("/mcp/message", json={"method": "tools/list", "id": 1})
+    assert r.status_code == 401
+
+    r = client.post(
+        "/mcp/message",
+        json={"method": "tools/list", "id": 1},
+        headers={"x-mcp-key": mcp_key},
+    )
+    assert r.status_code != 401
+
+
+def test_mcp_admin_migrate_blocked_without_key(client, mcp_key):
+    """/mcp/admin/migrate requires x-mcp-key."""
+    r = client.post("/mcp/admin/migrate")
+    assert r.status_code == 401
+
+    r = client.post(
+        "/mcp/admin/migrate",
+        headers={"x-mcp-key": mcp_key},
+    )
+    assert r.status_code != 401
+
+
+def test_mcp_public_paths_allowed_without_key(client, mcp_key):
+    """MCP info and dashboard are public even when MCP_API_KEY is set."""
+    r = client.get("/mcp")
+    assert r.status_code == 200
+
+    r = client.get("/mcp/dashboard")
+    # 200 or 404 (dashboard.html may not exist in test), but not 401
+    assert r.status_code != 401
+
+
+def test_mcp_key_via_query_param(client, mcp_key):
+    """MCP endpoints accept key via ?mcp_key= query parameter."""
+    r = client.post(
+        f"/mcp/voice/action?mcp_key={mcp_key}",
+        json={"action": "list_events"},
+    )
+    assert r.status_code != 401
+
+
+def test_admin_key_does_not_grant_mcp_access(client, monkeypatch):
+    """x-admin-key should NOT authenticate MCP endpoints — they use separate keys."""
+    monkeypatch.setenv("MCP_API_KEY", "test-mcp-key")
+    monkeypatch.setenv("ADMIN_API_KEY", "test-admin-key")
+    get_settings.cache_clear()
+
+    r = client.post(
+        "/mcp/voice/action",
+        json={"action": "list_events"},
+        headers={"x-admin-key": "test-admin-key"},
+    )
+    assert r.status_code == 401
+
+    r = client.post(
+        "/mcp/voice/action",
+        json={"action": "list_events"},
+        headers={"x-mcp-key": "test-mcp-key"},
+    )
+    assert r.status_code != 401
     get_settings.cache_clear()

@@ -36,8 +36,8 @@ def _handle_error(e: MarketingListError):
 @router.post("", response_model=MarketingListResponse, status_code=201)
 @limiter.limit("20/minute")
 def create_list(
-    http_request: Request,
-    request: MarketingListCreate,
+    request: Request,
+    body: MarketingListCreate,
     db: Session = Depends(get_db),
 ):
     """
@@ -77,9 +77,9 @@ def create_list(
     try:
         return create_marketing_list(
             db=db,
-            name=request.name,
-            segment_filters=request.segment_filters,
-            description=request.description,
+            name=body.name,
+            segment_filters=body.segment_filters,
+            description=body.description,
         )
     except MarketingListError as e:
         _handle_error(e)
@@ -133,9 +133,9 @@ def preview_list(
 @router.put("/{list_id}", response_model=MarketingListResponse)
 @limiter.limit("20/minute")
 def update_list(
-    http_request: Request,
+    request: Request,
     list_id: int,
-    request: MarketingListUpdate,
+    body: MarketingListUpdate,
     db: Session = Depends(get_db),
 ):
     """Update a marketing list."""
@@ -143,9 +143,9 @@ def update_list(
         return update_marketing_list(
             db=db,
             list_id=list_id,
-            name=request.name,
-            description=request.description,
-            segment_filters=request.segment_filters,
+            name=body.name,
+            description=body.description,
+            segment_filters=body.segment_filters,
         )
     except MarketingListError as e:
         _handle_error(e)
@@ -154,7 +154,7 @@ def update_list(
 @router.delete("/{list_id}")
 @limiter.limit("20/minute")
 def delete_list(
-    http_request: Request,
+    request: Request,
     list_id: int,
     db: Session = Depends(get_db),
 ):
