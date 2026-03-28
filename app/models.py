@@ -1032,3 +1032,86 @@ class Alert(Base):
 
     # Relationships
     event = relationship("Event")
+
+
+class CampaignType(str, enum.Enum):
+    """Campaign type enum."""
+    EMAIL = "email"
+    SMS = "sms"
+    NOTIFICATION = "notification"
+
+
+class Campaign(Base):
+    """
+    Marketing campaign tracking.
+
+    Tracks email/SMS campaigns sent to customers for performance analysis.
+    """
+    __tablename__ = "campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False)
+    campaign_type = Column(Enum(CampaignType), nullable=False, index=True)
+    subject = Column(String(255), nullable=True)  # Email subject or SMS preview
+
+    # Event reference (if campaign is for a specific event)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)
+
+    # Tracking stats
+    sent_count = Column(Integer, default=0)
+    delivered_count = Column(Integer, default=0)
+    failed_count = Column(Integer, default=0)
+    opened_count = Column(Integer, default=0)  # Email opens
+    clicked_count = Column(Integer, default=0)  # Link clicks
+    converted_count = Column(Integer, default=0)  # Purchases after clicking
+
+    # Revenue tracking
+    revenue_cents = Column(Integer, default=0)  # Total revenue from this campaign
+
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    # Relationships
+    event = relationship("Event")
+    deliveries = relationship("CampaignDelivery", back_populates="campaign")
+
+
+class CampaignDelivery(Base):
+    """
+    Individual campaign delivery tracking.
+
+    Tracks each email/SMS sent as part of a campaign for detailed analytics.
+    """
+    __tablename__ = "campaign_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id"), nullable=False, index=True)
+
+    # Recipient
+    recipient_email = Column(String(255), nullable=True, index=True)
+    recipient_phone = Column(String(50), nullable=True, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=True, index=True)
+
+    # Delivery tracking
+    sent_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    failed_at = Column(DateTime(timezone=True), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+
+    # Engagement tracking
+    opened_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    clicked_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    converted_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Revenue attribution (if purchase made after click)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=True, index=True)
+    revenue_cents = Column(Integer, default=0)
+
+    # Tracking tokens
+    tracking_token = Column(String(64), unique=True, index=True, nullable=True)  # For pixel/link tracking
+
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    # Relationships
+    campaign = relationship("Campaign", back_populates="deliveries")
+    event_goer = relationship("EventGoer")
+    ticket = relationship("Ticket")

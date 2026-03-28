@@ -312,6 +312,13 @@ def _store_alert_in_db(
             db.commit()
             db.refresh(alert)
 
+            # Broadcast to SSE clients for real-time push
+            try:
+                from app.routers.alert_stream import broadcast_alert
+                broadcast_alert(alert)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast alert via SSE: {e}")
+
             logger.info(f"Alert stored in database: {title}")
             return {"status": "stored", "alert_id": alert.id}
 
