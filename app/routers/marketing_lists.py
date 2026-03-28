@@ -17,6 +17,7 @@ from app.schemas import (
     MarketingListsResponse,
 )
 from app.services.marketing_lists import (
+    MarketingListError,
     create_marketing_list,
     get_marketing_list,
     list_marketing_lists,
@@ -26,6 +27,10 @@ from app.services.marketing_lists import (
 )
 
 router = APIRouter(prefix="/marketing-lists", tags=["marketing-lists"])
+
+
+def _handle_error(e: MarketingListError):
+    raise HTTPException(status_code=e.status_code, detail=e.message)
 
 
 @router.post("", response_model=MarketingListResponse, status_code=201)
@@ -69,17 +74,15 @@ def create_list(
     }
     ```
     """
-    result = create_marketing_list(
-        db=db,
-        name=request.name,
-        segment_filters=request.segment_filters,
-        description=request.description,
-    )
-
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    return result
+    try:
+        return create_marketing_list(
+            db=db,
+            name=request.name,
+            segment_filters=request.segment_filters,
+            description=request.description,
+        )
+    except MarketingListError as e:
+        _handle_error(e)
 
 
 @router.get("", response_model=MarketingListsResponse)
@@ -98,12 +101,10 @@ def get_list(
     db: Session = Depends(get_db),
 ):
     """Get a specific marketing list by ID."""
-    result = get_marketing_list(db=db, list_id=list_id)
-
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-
-    return result
+    try:
+        return get_marketing_list(db=db, list_id=list_id)
+    except MarketingListError as e:
+        _handle_error(e)
 
 
 @router.get("/{list_id}/preview", response_model=MarketingListPreview)
@@ -123,12 +124,10 @@ def preview_list(
 
     **Use `limit=0` to get just the count without customer data.**
     """
-    result = preview_marketing_list(db=db, list_id=list_id, limit=limit)
-
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-
-    return result
+    try:
+        return preview_marketing_list(db=db, list_id=list_id, limit=limit)
+    except MarketingListError as e:
+        _handle_error(e)
 
 
 @router.put("/{list_id}", response_model=MarketingListResponse)
@@ -140,19 +139,16 @@ def update_list(
     db: Session = Depends(get_db),
 ):
     """Update a marketing list."""
-    result = update_marketing_list(
-        db=db,
-        list_id=list_id,
-        name=request.name,
-        description=request.description,
-        segment_filters=request.segment_filters,
-    )
-
-    if "error" in result:
-        status_code = 404 if "not found" in result["error"] else 400
-        raise HTTPException(status_code=status_code, detail=result["error"])
-
-    return result
+    try:
+        return update_marketing_list(
+            db=db,
+            list_id=list_id,
+            name=request.name,
+            description=request.description,
+            segment_filters=request.segment_filters,
+        )
+    except MarketingListError as e:
+        _handle_error(e)
 
 
 @router.delete("/{list_id}")
@@ -163,9 +159,7 @@ def delete_list(
     db: Session = Depends(get_db),
 ):
     """Delete a marketing list."""
-    result = delete_marketing_list(db=db, list_id=list_id)
-
-    if "error" in result:
-        raise HTTPException(status_code=404, detail=result["error"])
-
-    return result
+    try:
+        return delete_marketing_list(db=db, list_id=list_id)
+    except MarketingListError as e:
+        _handle_error(e)

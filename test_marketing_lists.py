@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app.database import SessionLocal
 from app.models import EventGoer, CustomerPreference
 from app.services.marketing_lists import (
+    MarketingListError,
     create_marketing_list,
     get_marketing_list,
     list_marketing_lists,
@@ -46,75 +47,94 @@ def test_marketing_lists():
 
     # Test 1: Create VIP List
     print("Step 2: Creating VIP Customers List...")
-    vip_list = create_marketing_list(
-        db=db,
-        name="VIP Customers",
-        description="All VIP customers for exclusive offers",
-        segment_filters={"is_vip": True, "marketing_opt_in": True},
-    )
-
-    if "error" in vip_list:
-        print(f"  ⚠️  {vip_list['error']}")
-    else:
+    try:
+        vip_list = create_marketing_list(
+            db=db,
+            name="VIP Customers",
+            description="All VIP customers for exclusive offers",
+            segment_filters={"is_vip": True, "marketing_opt_in": True},
+        )
         print(f"  ✅ Created list: {vip_list['name']}")
         print(f"     Description: {vip_list['filter_description']}")
         print(f"     Current count: {vip_list['current_count']} customers")
         print()
+    except MarketingListError as e:
+        print(f"  ⚠️  {e.message}")
+        print()
 
     # Test 2: Create High Spenders List
     print("Step 3: Creating High Spenders List...")
-    high_spenders = create_marketing_list(
-        db=db,
-        name="High Spenders",
-        description="Customers who spent $100+",
-        segment_filters={
-            "min_spent_cents": 10000,
-            "email_opt_in": True,
-        },
-    )
-
-    if "error" not in high_spenders:
+    try:
+        high_spenders = create_marketing_list(
+            db=db,
+            name="High Spenders",
+            description="Customers who spent $100+",
+            segment_filters={
+                "min_spent_cents": 10000,
+                "email_opt_in": True,
+            },
+        )
         print(f"  ✅ Created list: {high_spenders['name']}")
         print(f"     Description: {high_spenders['filter_description']}")
         print(f"     Current count: {high_spenders['current_count']} customers")
         print()
+    except MarketingListError as e:
+        print(f"  ⚠️  {e.message}")
+        print()
 
     # Test 3: Create Regular Attendees List
     print("Step 4: Creating Regular Attendees List...")
-    regulars = create_marketing_list(
-        db=db,
-        name="Regular Attendees",
-        description="Customers who attended 3+ events",
-        segment_filters={
-            "min_events": 3,
-            "sms_opt_in": True,
-        },
-    )
-
-    if "error" not in regulars:
+    try:
+        regulars = create_marketing_list(
+            db=db,
+            name="Regular Attendees",
+            description="Customers who attended 3+ events",
+            segment_filters={
+                "min_events": 3,
+                "sms_opt_in": True,
+            },
+        )
         print(f"  ✅ Created list: {regulars['name']}")
         print(f"     Description: {regulars['filter_description']}")
         print(f"     Current count: {regulars['current_count']} customers")
         print()
+    except MarketingListError as e:
+        print(f"  ⚠️  {e.message}")
+        print()
 
     # Test 4: Create Birthday List
     print("Step 5: Creating Birthday This Month List...")
-    birthday_list = create_marketing_list(
-        db=db,
-        name="Birthday This Month",
-        description="Customers with birthdays this month",
-        segment_filters={
-            "has_birthday_this_month": True,
-        },
-    )
-
-    if "error" not in birthday_list:
+    try:
+        birthday_list = create_marketing_list(
+            db=db,
+            name="Birthday This Month",
+            description="Customers with birthdays this month",
+            segment_filters={
+                "has_birthday_this_month": True,
+            },
+        )
         print(f"  ✅ Created list: {birthday_list['name']}")
         print(f"     Description: {birthday_list['filter_description']}")
         print(f"     Current count: {birthday_list['current_count']} customers")
         print()
+    except MarketingListError as e:
+        print(f"  ⚠️  {e.message}")
+        print()
 
-    # Test 5: List All Marketing Lists
+    # Test 5: Validate unknown filter keys are rejected
+    print("Step 5b: Testing filter validation (unknown key)...")
+    try:
+        create_marketing_list(
+            db=db,
+            name="Bad Filters",
+            segment_filters={"is_VIP": True},
+        )
+        print("  ❌ Should have raised an error for unknown key")
+    except MarketingListError as e:
+        print(f"  ✅ Correctly rejected: {e.message}")
+    print()
+
+    # Test 6: List All Marketing Lists
     print("Step 6: Listing All Marketing Lists...")
     all_lists = list_marketing_lists(db=db, limit=10, offset=0)
     print(f"  Found {all_lists['total']} total lists:")
@@ -123,7 +143,7 @@ def test_marketing_lists():
         print(f"      {lst['filter_description']}")
     print()
 
-    # Test 6: Preview a List
+    # Test 7: Preview a List
     if all_lists['lists']:
         first_list_id = all_lists['lists'][0]['id']
         print(f"Step 7: Previewing List #{first_list_id}...")
@@ -150,30 +170,34 @@ def test_marketing_lists():
                 print(f"      Opt-ins: {', '.join(opt_ins) if opt_ins else 'None'}")
         print()
 
-    # Test 7: Update a List
+    # Test 8: Update a List
     if all_lists['lists']:
         first_list_id = all_lists['lists'][0]['id']
         print(f"Step 8: Updating List #{first_list_id}...")
-        updated = update_marketing_list(
-            db=db,
-            list_id=first_list_id,
-            description="Updated description for testing",
-        )
-
-        if "error" not in updated:
+        try:
+            updated = update_marketing_list(
+                db=db,
+                list_id=first_list_id,
+                description="Updated description for testing",
+            )
             print(f"  ✅ Updated: {updated['name']}")
             print(f"     New description: {updated['description']}")
             print()
+        except MarketingListError as e:
+            print(f"  ⚠️  {e.message}")
+            print()
 
-    # Test 8: Delete a List
+    # Test 9: Delete a List
     if all_lists['lists'] and len(all_lists['lists']) > 1:
         last_list_id = all_lists['lists'][-1]['id']
         last_list_name = all_lists['lists'][-1]['name']
         print(f"Step 9: Deleting List #{last_list_id} ({last_list_name})...")
-        deleted = delete_marketing_list(db=db, list_id=last_list_id)
-
-        if "error" not in deleted:
+        try:
+            deleted = delete_marketing_list(db=db, list_id=last_list_id)
             print(f"  ✅ {deleted['message']}")
+            print()
+        except MarketingListError as e:
+            print(f"  ⚠️  {e.message}")
             print()
 
     # Final Summary
@@ -187,6 +211,7 @@ def test_marketing_lists():
     print(f"  ✅ {remaining_lists['total']} marketing lists created")
     print(f"  ✅ Audience segmentation working")
     print(f"  ✅ Preview functionality working")
+    print(f"  ✅ Filter validation working")
     print()
 
     print("Available Filter Options:")

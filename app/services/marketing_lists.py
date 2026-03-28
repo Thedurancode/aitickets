@@ -16,6 +16,44 @@ from app.models import (
 )
 
 
+# Valid segment filter keys — anything else is a typo / unsupported.
+VALID_FILTER_KEYS = frozenset({
+    "is_vip", "vip_tier",
+    "min_events", "max_events",
+    "min_spent_cents", "max_spent_cents",
+    "category_ids", "event_id",
+    "has_birthday_this_month",
+    "last_purchase_days_ago",
+    "first_time_buyers", "no_show",
+    "marketing_opt_in", "email_opt_in", "sms_opt_in",
+    "preferred_language",
+    "dormant_days",
+})
+
+
+class MarketingListError(Exception):
+    """Base exception for marketing list operations."""
+    def __init__(self, message: str, status_code: int = 400):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(message)
+
+
+class MarketingListNotFound(MarketingListError):
+    def __init__(self):
+        super().__init__("Marketing list not found", status_code=404)
+
+
+def validate_segment_filters(filters: Dict[str, Any]) -> None:
+    """Raise MarketingListError if any filter key is unrecognised."""
+    unknown = set(filters.keys()) - VALID_FILTER_KEYS
+    if unknown:
+        raise MarketingListError(
+            f"Unknown segment filter(s): {', '.join(sorted(unknown))}. "
+            f"Valid filters: {', '.join(sorted(VALID_FILTER_KEYS))}"
+        )
+
+
 def apply_segment_filters(query, filters: Dict[str, Any]) -> tuple:
     """
     Apply segment filters to EventGoer query.
@@ -24,44 +62,57 @@ def apply_segment_filters(query, filters: Dict[str, Any]) -> tuple:
     """
     descriptions = []
 
+    # Track whether we already joined CustomerPreference so we only join once.
+    needs_pref_join = any(
+        filters.get(k) is not None and filters.get(k) is not False
+        for k in (
+            "is_vip", "vip_tier", "min_events", "max_events",
+            "min_spent_cents", "max_spent_cents",
+            "last_purchase_days_ago", "first_time_buyers",
+            "preferred_language", "dormant_days",
+        )
+    )
+
+    if needs_pref_join:
+        query = query.join(CustomerPreference)
+
     # VIP status
     if filters.get("is_vip"):
-        query = query.join(CustomerPreference).filter(CustomerPreference.is_vip == True)
+        query = query.filter(CustomerPreference.is_vip == True)
         descriptions.append("VIP customers")
 
     # VIP tier
     if filters.get("vip_tier"):
-        query = query.join(CustomerPreference).filter(CustomerPreference.vip_tier == filters["vip_tier"])
+        query = query.filter(CustomerPreference.vip_tier == filters["vip_tier"])
         descriptions.append(f"VIP tier: {filters['vip_tier']}")
 
     # Minimum events attended
     if filters.get("min_events"):
         min_events = filters["min_events"]
-        query = query.join(CustomerPreference).filter(CustomerPreference.total_events_attended >= min_events)
+        query = query.filter(CustomerPreference.total_events_attended >= min_events)
         descriptions.append(f"Attended {min_events}+ events")
 
     # Maximum events attended
     if filters.get("max_events"):
         max_events = filters["max_events"]
-        query = query.join(CustomerPreference).filter(CustomerPreference.total_events_attended <= max_events)
-        descriptions.append(f"Attended ≤{max_events} events")
+        query = query.filter(CustomerPreference.total_events_attended <= max_events)
+        descriptions.append(f"Attended \u2264{max_events} events")
 
     # Minimum lifetime spend
     if filters.get("min_spent_cents"):
         min_spent = filters["min_spent_cents"]
-        query = query.join(CustomerPreference).filter(CustomerPreference.total_spent_cents >= min_spent)
+        query = query.filter(CustomerPreference.total_spent_cents >= min_spent)
         descriptions.append(f"Spent ${min_spent/100:.2f}+")
 
     # Maximum lifetime spend
     if filters.get("max_spent_cents"):
         max_spent = filters["max_spent_cents"]
-        query = query.join(CustomerPreference).filter(CustomerPreference.total_spent_cents <= max_spent)
-        descriptions.append(f"Spent ≤${max_spent/100:.2f}")
+        query = query.filter(CustomerPreference.total_spent_cents <= max_spent)
+        descriptions.append(f"Spent \u2264${max_spent/100:.2f}")
 
     # Event category interest
     if filters.get("category_ids"):
         category_ids = filters["category_ids"]
-        # Find event goers who attended events in these categories
         subquery = (
             query.session.query(EventGoer.id)
             .join(Ticket)
@@ -99,17 +150,16 @@ def apply_segment_filters(query, filters: Dict[str, Any]) -> tuple:
     if filters.get("last_purchase_days_ago"):
         days_ago = filters["last_purchase_days_ago"]
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_ago)
-        query = query.join(CustomerPreference).filter(CustomerPreference.last_interaction_date >= cutoff_date)
+        query = query.filter(CustomerPreference.last_interaction_date >= cutoff_date)
         descriptions.append(f"Purchased within {days_ago} days")
 
     # First-time buyers
     if filters.get("first_time_buyers"):
-        query = query.join(CustomerPreference).filter(CustomerPreference.total_events_attended == 1)
+        query = query.filter(CustomerPreference.total_events_attended == 1)
         descriptions.append("First-time buyers")
 
     # No-show customers (bought tickets but never checked in)
     if filters.get("no_show"):
-        # Has tickets but none are checked in
         has_tickets = (
             query.session.query(EventGoer.id)
             .join(Ticket)
@@ -144,19 +194,27 @@ def apply_segment_filters(query, filters: Dict[str, Any]) -> tuple:
     # Preferred language
     if filters.get("preferred_language"):
         lang = filters["preferred_language"]
-        query = query.join(CustomerPreference).filter(CustomerPreference.preferred_language == lang)
+        query = query.filter(CustomerPreference.preferred_language == lang)
         descriptions.append(f"Language: {lang}")
 
     # Dormant customers (haven't purchased in X days)
     if filters.get("dormant_days"):
         days = filters["dormant_days"]
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-        query = query.join(CustomerPreference).filter(CustomerPreference.last_interaction_date < cutoff_date)
+        query = query.filter(CustomerPreference.last_interaction_date < cutoff_date)
         descriptions.append(f"Dormant {days}+ days")
 
     filter_summary = " AND ".join(descriptions) if descriptions else "All opted-in customers"
 
     return query, filter_summary
+
+
+def _get_list_or_raise(db: Session, list_id: int) -> MarketingList:
+    """Fetch a MarketingList by ID or raise MarketingListNotFound."""
+    marketing_list = db.query(MarketingList).filter(MarketingList.id == list_id).first()
+    if not marketing_list:
+        raise MarketingListNotFound()
+    return marketing_list
 
 
 def create_marketing_list(
@@ -166,12 +224,12 @@ def create_marketing_list(
     description: Optional[str] = None,
 ) -> dict:
     """Create a new marketing list."""
-    # Check if name already exists
+    validate_segment_filters(segment_filters)
+
     existing = db.query(MarketingList).filter(MarketingList.name == name).first()
     if existing:
-        return {"error": f"Marketing list '{name}' already exists"}
+        raise MarketingListError(f"Marketing list '{name}' already exists")
 
-    # Create the list
     marketing_list = MarketingList(
         name=name,
         description=description,
@@ -181,7 +239,7 @@ def create_marketing_list(
     db.commit()
     db.refresh(marketing_list)
 
-    # Preview the list to get count
+    # Get count via a lightweight preview
     preview = preview_marketing_list(db, marketing_list.id, limit=0)
 
     return {
@@ -197,24 +255,21 @@ def create_marketing_list(
 
 def get_marketing_list(db: Session, list_id: int) -> dict:
     """Get a marketing list by ID."""
-    marketing_list = db.query(MarketingList).filter(MarketingList.id == list_id).first()
-
-    if not marketing_list:
-        return {"error": "Marketing list not found"}
-
-    # Parse filters
+    marketing_list = _get_list_or_raise(db, list_id)
     filters = json.loads(marketing_list.segment_filters)
 
     # Get current count
-    preview = preview_marketing_list(db, list_id, limit=0)
+    query = db.query(EventGoer)
+    query, filter_description = apply_segment_filters(query, filters)
+    current_count = query.count()
 
     return {
         "id": marketing_list.id,
         "name": marketing_list.name,
         "description": marketing_list.description,
         "segment_filters": filters,
-        "current_count": preview["total_count"],
-        "filter_description": preview["filter_description"],
+        "current_count": current_count,
+        "filter_description": filter_description,
         "created_at": marketing_list.created_at.isoformat(),
         "updated_at": marketing_list.updated_at.isoformat(),
     }
@@ -235,15 +290,20 @@ def list_marketing_lists(db: Session, limit: int = 50, offset: int = 0) -> dict:
     results = []
     for lst in lists:
         filters = json.loads(lst.segment_filters)
-        preview = preview_marketing_list(db, lst.id, limit=0)
+
+        # Inline count query instead of calling preview_marketing_list (avoids
+        # re-fetching the MarketingList row + building sample customers per list).
+        query = db.query(func.count(EventGoer.id))
+        query, filter_description = apply_segment_filters(query, filters)
+        current_count = query.scalar()
 
         results.append({
             "id": lst.id,
             "name": lst.name,
             "description": lst.description,
             "segment_filters": filters,
-            "current_count": preview["total_count"],
-            "filter_description": preview["filter_description"],
+            "current_count": current_count,
+            "filter_description": filter_description,
             "created_at": lst.created_at.isoformat(),
             "updated_at": lst.updated_at.isoformat(),
         })
@@ -265,15 +325,10 @@ def preview_marketing_list(
     Preview who's in a marketing list.
     Returns count + sample of customers.
     """
-    marketing_list = db.query(MarketingList).filter(MarketingList.id == list_id).first()
-
-    if not marketing_list:
-        return {"error": "Marketing list not found"}
-
-    # Parse filters
+    marketing_list = _get_list_or_raise(db, list_id)
     filters = json.loads(marketing_list.segment_filters)
 
-    # Start with base query - all event goers
+    # Start with base query — all event goers
     query = db.query(EventGoer)
 
     # Apply segment filters
@@ -282,15 +337,18 @@ def preview_marketing_list(
     # Get total count
     total_count = query.count()
 
-    # Get sample customers
+    # Get sample customers with preferences eagerly loaded
     sample_customers = []
     if limit > 0:
-        customers = query.limit(limit).all()
+        customers = (
+            query
+            .options(joinedload(EventGoer.preferences))
+            .limit(limit)
+            .all()
+        )
 
         for customer in customers:
-            # Get customer stats
-            pref = db.query(CustomerPreference).filter(CustomerPreference.event_goer_id == customer.id).first()
-
+            pref = customer.preferences
             sample_customers.append({
                 "id": customer.id,
                 "name": customer.name,
@@ -322,16 +380,16 @@ def update_marketing_list(
     segment_filters: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """Update a marketing list."""
-    marketing_list = db.query(MarketingList).filter(MarketingList.id == list_id).first()
+    marketing_list = _get_list_or_raise(db, list_id)
 
-    if not marketing_list:
-        return {"error": "Marketing list not found"}
+    if segment_filters is not None:
+        validate_segment_filters(segment_filters)
 
     # Check for name conflicts
     if name and name != marketing_list.name:
         existing = db.query(MarketingList).filter(MarketingList.name == name).first()
         if existing:
-            return {"error": f"Marketing list '{name}' already exists"}
+            raise MarketingListError(f"Marketing list '{name}' already exists")
         marketing_list.name = name
 
     if description is not None:
@@ -349,10 +407,7 @@ def update_marketing_list(
 
 def delete_marketing_list(db: Session, list_id: int) -> dict:
     """Delete a marketing list."""
-    marketing_list = db.query(MarketingList).filter(MarketingList.id == list_id).first()
-
-    if not marketing_list:
-        return {"error": "Marketing list not found"}
+    marketing_list = _get_list_or_raise(db, list_id)
 
     list_name = marketing_list.name
     db.delete(marketing_list)
@@ -381,21 +436,12 @@ def get_list_recipients(
     Returns:
         List of EventGoer objects who match the filters
     """
-    marketing_list = db.query(MarketingList).filter(MarketingList.id == list_id).first()
-
-    if not marketing_list:
-        return []
-
-    # Parse filters
+    marketing_list = _get_list_or_raise(db, list_id)
     filters = json.loads(marketing_list.segment_filters)
 
-    # Start with base query
     query = db.query(EventGoer)
-
-    # Apply segment filters
     query, _ = apply_segment_filters(query, filters)
 
-    # Filter by channel opt-in if specified
     if channel == "email":
         query = query.filter(EventGoer.email_opt_in == True)
     elif channel == "sms":

@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from app.database import SessionLocal
-from app.services.marketing_lists import create_marketing_list, preview_marketing_list
+from app.services.marketing_lists import MarketingListError, create_marketing_list, preview_marketing_list
 
 
 def test_all_customers_list():
@@ -18,12 +18,17 @@ def test_all_customers_list():
 
     # Create a list with minimal filters
     print("Creating 'All Opted-In Customers' list...")
-    all_customers_list = create_marketing_list(
-        db=db,
-        name="All Email Opt-In Customers",
-        description="All customers who opted in to email",
-        segment_filters={"email_opt_in": True},
-    )
+    try:
+        all_customers_list = create_marketing_list(
+            db=db,
+            name="All Email Opt-In Customers",
+            description="All customers who opted in to email",
+            segment_filters={"email_opt_in": True},
+        )
+    except MarketingListError as e:
+        print(f"  ⚠️  {e.message}")
+        db.close()
+        return
 
     print(f"  ✅ Created: {all_customers_list['name']}")
     print(f"     Filters: {all_customers_list['filter_description']}")
