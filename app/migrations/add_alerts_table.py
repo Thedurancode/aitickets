@@ -45,7 +45,7 @@ def upgrade():
                 event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
 
                 -- Additional context (JSON string)
-                metadata TEXT,
+                alert_metadata TEXT,
 
                 -- Read status
                 is_read BOOLEAN DEFAULT FALSE,

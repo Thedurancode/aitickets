@@ -305,7 +305,7 @@ def _store_alert_in_db(
                 message=message,
                 severity=severity,
                 event_id=event_id,
-                metadata=metadata or {},
+                alert_metadata=metadata or {},
                 is_read=False,
             )
             db.add(alert)

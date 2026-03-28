@@ -1019,7 +1019,7 @@ class Alert(Base):
     event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)
 
     # Additional context (stored as JSON)
-    metadata = Column(Text, nullable=True)  # JSON string
+    alert_metadata = Column(Text, nullable=True)  # JSON string
 
     # Read status
     is_read = Column(Boolean, default=False, index=True)

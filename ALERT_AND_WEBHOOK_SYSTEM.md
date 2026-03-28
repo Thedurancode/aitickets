@@ -149,7 +149,7 @@ SELECT * FROM alerts WHERE is_read = false ORDER BY created_at DESC;
 - `title`, `message` - Alert content
 - `severity` - low/medium/high/critical
 - `event_id` - Related event (nullable)
-- `metadata` - JSON context data
+- `alert_metadata` - JSON context data
 - `is_read`, `read_at` - Read tracking
 - `channels_sent` - Where it was delivered
 
