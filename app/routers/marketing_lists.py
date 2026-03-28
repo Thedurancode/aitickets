@@ -158,7 +158,7 @@ def update_list(
 @router.delete("/{list_id}")
 @limiter.limit("20/minute")
 def delete_list(
-    http_request: Request,
+    request: Request,
     list_id: int,
     db: Session = Depends(get_db),
 ):
