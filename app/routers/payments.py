@@ -171,6 +171,33 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         except Exception:
             pass
 
+    # Track conversions for ML and attribution analysis
+    try:
+        from app.services.learning_engine import track_conversion
+        for ticket in processed_tickets:
+            # Extract session metadata from Stripe metadata if available
+            device_type = metadata.get("device_type")
+            browser = metadata.get("browser")
+            referrer = metadata.get("referrer")
+            landing_page = metadata.get("landing_page")
+            session_id = metadata.get("session_id")
+            ab_test_variant = metadata.get("ab_test_variant")
+
+            track_conversion(
+                db=db,
+                ticket=ticket,
+                referrer_url=referrer,
+                landing_page=landing_page,
+                device_type=device_type,
+                browser=browser,
+                session_id=session_id,
+                ab_test_variant=ab_test_variant,
+            )
+    except Exception as e:
+        # Don't fail checkout if conversion tracking fails
+        import logging
+        logging.getLogger(__name__).warning(f"Conversion tracking failed: {e}")
+
     # Fire webhook: ticket.purchased (paid tickets)
     try:
         from app.services.webhooks import fire_webhook_event

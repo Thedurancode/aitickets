@@ -931,3 +931,64 @@ class FlyerTemplateMagicToken(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     event = relationship("Event")
+
+
+class ConversionTracking(Base):
+    """
+    Tracks every ticket conversion for ML training and attribution analysis.
+
+    Stores rich metadata about each purchase to enable:
+    - Channel attribution (which marketing channels drive sales)
+    - Time-based conversion analysis (best send times)
+    - Audience insights (who converts best)
+    - A/B test result tracking
+    """
+    __tablename__ = "conversion_tracking"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ticket_id = Column(Integer, ForeignKey("tickets.id"), nullable=False, index=True, unique=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    event_goer_id = Column(Integer, ForeignKey("event_goers.id"), nullable=False, index=True)
+    tier_id = Column(Integer, ForeignKey("ticket_tiers.id"), nullable=False, index=True)
+
+    # Attribution data
+    utm_source = Column(String(100), nullable=True, index=True)
+    utm_medium = Column(String(100), nullable=True, index=True)
+    utm_campaign = Column(String(100), nullable=True, index=True)
+    utm_content = Column(String(100), nullable=True)
+    utm_term = Column(String(100), nullable=True)
+
+    # Referrer info
+    referrer_url = Column(String(500), nullable=True)
+    landing_page = Column(String(500), nullable=True)
+
+    # Session data
+    session_id = Column(String(100), nullable=True)
+    device_type = Column(String(50), nullable=True)  # mobile, desktop, tablet
+    browser = Column(String(100), nullable=True)
+
+    # Purchase data
+    price_paid_cents = Column(Integer, nullable=False)
+    discount_amount_cents = Column(Integer, nullable=True)
+    promo_code_id = Column(Integer, ForeignKey("promo_codes.id"), nullable=True)
+
+    # Timing data
+    purchased_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    days_before_event = Column(Integer, nullable=True)  # How far in advance they bought
+    hour_of_day = Column(Integer, nullable=True, index=True)  # 0-23 for time-based analysis
+    day_of_week = Column(Integer, nullable=True, index=True)  # 0-6 (Monday-Sunday)
+
+    # Event metadata (denormalized for fast querying)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=True, index=True)
+    category_id = Column(Integer, ForeignKey("event_categories.id"), nullable=True, index=True)
+
+    # A/B test tracking
+    ab_test_variant = Column(String(100), nullable=True, index=True)  # Which variant they saw
+
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    # Relationships
+    ticket = relationship("Ticket")
+    event = relationship("Event")
+    event_goer = relationship("EventGoer")
+    tier = relationship("TicketTier")
