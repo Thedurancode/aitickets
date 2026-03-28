@@ -181,33 +181,49 @@ def run_daily_checks():
 
 def _send_alert_notifications(alerts: List[Dict]):
     """
-    Send alert notifications via webhook or email.
+    Send alert notifications via multiple channels.
 
-    In production, would integrate with:
-    - Email (SendGrid/SES)
-    - SMS (Twilio)
+    Integrates with alert delivery service to send via:
     - Slack webhook
-    - Custom webhook
+    - Email
+    - SMS (for critical alerts)
+    - Database (for in-app notifications)
     """
-    settings = get_settings()
+    from app.services.alerts import send_alert, AlertSeverity
 
-    # Log alerts (in production, send to notification channels)
     logger.info(f"Sending {len(alerts)} alert notifications...")
 
     for alert in alerts:
-        logger.info(f"ALERT: {alert}")
+        # Map alert severity
+        severity_map = {
+            "LOW": AlertSeverity.LOW,
+            "MEDIUM": AlertSeverity.MEDIUM,
+            "HIGH": AlertSeverity.HIGH,
+            "CRITICAL": AlertSeverity.CRITICAL,
+        }
+        severity = severity_map.get(alert.get("severity", "MEDIUM"), AlertSeverity.MEDIUM)
 
-    # TODO: Implement actual notification sending
-    # Example:
-    # if settings.slack_webhook_url:
-    #     send_slack_notification(alerts)
-    #
-    # if settings.admin_email:
-    #     send_email_alert(alerts)
+        # Send alert via multi-channel delivery
+        result = send_alert(
+            title=alert.get("message", "Alert"),
+            message=alert.get("recommendation", "") or alert.get("reason", ""),
+            severity=severity,
+            event_id=alert.get("event_id"),
+            metadata={
+                "type": alert.get("type"),
+                "event_name": alert.get("event_name"),
+                **{k: v for k, v in alert.items() if k not in ["message", "recommendation", "event_id", "event_name", "type", "severity"]}
+            },
+        )
 
-    # In production, fire webhook event
-    # from app.services.webhooks import fire_webhook_event
-    # fire_webhook_event("monitoring.alert", {"alerts": alerts})
+        logger.info(f"Alert sent: {result.get('title')} - Delivered via: {', '.join(result.get('delivery', {}).keys())}")
+
+    # Fire webhook event for external integrations
+    try:
+        from app.services.webhooks import fire_webhook_event
+        fire_webhook_event("monitoring.alerts", {"alerts": alerts, "count": len(alerts)})
+    except Exception as e:
+        logger.warning(f"Failed to fire webhook for alerts: {e}")
 
 
 def check_sales_velocity(db: Session, event_id: int) -> Dict:

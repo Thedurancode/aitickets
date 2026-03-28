@@ -96,6 +96,12 @@ class Settings(BaseSettings):
     nsfw_threshold: float = 0.5  # Threshold for blocking content (0-1)
     auto_approve_safe: bool = True  # Auto-approve content below threshold
 
+    # Alert Delivery
+    slack_webhook_url: str = ""  # Slack incoming webhook URL for alerts
+    admin_email: str = ""  # Email address for critical alerts
+    admin_phone: str = ""  # Phone number for critical SMS alerts (Twilio)
+    app_url: str = "http://localhost:3000"  # Frontend URL for alert links
+
     class Config:
         # Support environment-specific .env files
         # Usage: ENV=production python app.py
