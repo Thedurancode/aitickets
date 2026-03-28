@@ -139,55 +139,54 @@ def track_conversion(
 
 def analyze_channel_attribution(db: Session, event_id: Optional[int] = None) -> Dict:
     """
-    Analyze which marketing channels are driving ticket sales using real UTM data.
+    Analyze which marketing channels are driving ticket sales using ConversionTracking data.
 
-    Analyzes actual utm_source and utm_medium from ticket purchases.
-    Returns channel performance metrics.
+    Uses ConversionTracking table for rich attribution analysis with device, timing,
+    and campaign-level insights.
 
     Args:
         db: Database session
         event_id: Specific event, or None for all events
 
     Returns:
-        Dict with channel performance breakdown
+        Dict with channel performance breakdown including:
+        - Tickets sold and revenue per channel
+        - Device breakdown (mobile/desktop/tablet)
+        - Top 3 campaigns per channel
+        - Average purchase lead time
+        - ROAS for paid channels
     """
-    # Get tickets with their tier info for revenue calculation
-    query = (
-        db.query(Ticket, TicketTier)
-        .join(TicketTier, Ticket.ticket_tier_id == TicketTier.id)
-        .filter(Ticket.status.in_([TicketStatus.PAID, TicketStatus.CHECKED_IN]))
-    )
+    # Query ConversionTracking table
+    query = db.query(ConversionTracking)
 
     if event_id:
-        query = query.filter(TicketTier.event_id == event_id)
+        query = query.filter(ConversionTracking.event_id == event_id)
 
-    tickets_with_tiers = query.all()
+    conversions = query.all()
 
-    # Map utm_source/utm_medium combinations to channel categories
+    # If no conversion data, return empty state with guidance
+    if not conversions:
+        return {
+            "event_id": event_id,
+            "total_tickets": 0,
+            "total_revenue_cents": 0,
+            "total_revenue_usd": "$0.00",
+            "channels": {},
+            "top_channel": None,
+            "attribution_method": "Last-touch (based on UTM parameters at purchase)",
+            "tracking_status": "NO_DATA",
+            "data_source": "conversion_tracking",
+            "message": "No conversion data yet. Purchases will be tracked automatically going forward.",
+        }
+
+    # Aggregate by channel
     channel_data = {}
     total_tickets = 0
     total_revenue_cents = 0
 
-    for ticket, tier in tickets_with_tiers:
+    for conv in conversions:
         # Determine channel from UTM parameters
-        source = (ticket.utm_source or "").lower()
-        medium = (ticket.utm_medium or "").lower()
-
-        # Map to channel category
-        if source in ["meta", "facebook", "instagram"] or medium == "social_ads":
-            channel = "meta_ads"
-        elif medium == "email" or source == "email":
-            channel = "email"
-        elif medium == "sms" or source == "sms":
-            channel = "sms"
-        elif source in ["twitter", "linkedin", "tiktok", "youtube"] or medium == "social":
-            channel = "social"
-        elif source == "google" or medium == "cpc":
-            channel = "google_ads"
-        elif source == "organic" or (not source and not medium):
-            channel = "organic"
-        else:
-            channel = "other"
+        channel = _get_channel_from_conversion(conv)
 
         # Initialize channel if needed
         if channel not in channel_data:
@@ -196,17 +195,74 @@ def analyze_channel_attribution(db: Session, event_id: Optional[int] = None) -> 
                 "revenue_cents": 0,
                 "cost_cents": 0,
                 "roas": 0.0,
+                "campaigns": {},
+                "devices": {"mobile": 0, "desktop": 0, "tablet": 0, "unknown": 0},
+                "days_before_event_sum": 0,  # For calculating average
             }
 
-        # Calculate revenue (use actual price paid or tier price)
-        revenue = ticket.discount_amount_cents if hasattr(ticket, 'discount_amount_cents') and ticket.discount_amount_cents else tier.price
-
+        # Aggregate ticket and revenue
         channel_data[channel]["tickets_sold"] += 1
-        channel_data[channel]["revenue_cents"] += revenue
-        total_tickets += 1
-        total_revenue_cents += revenue
+        channel_data[channel]["revenue_cents"] += conv.price_paid_cents
 
-    # Calculate ROAS for paid channels
+        # Track campaign performance within channel
+        campaign = conv.utm_campaign or "unknown"
+        if campaign not in channel_data[channel]["campaigns"]:
+            channel_data[channel]["campaigns"][campaign] = {
+                "tickets": 0,
+                "revenue_cents": 0,
+            }
+        channel_data[channel]["campaigns"][campaign]["tickets"] += 1
+        channel_data[channel]["campaigns"][campaign]["revenue_cents"] += conv.price_paid_cents
+
+        # Track device breakdown
+        device = (conv.device_type or "unknown").lower()
+        if device in ["mobile", "desktop", "tablet"]:
+            channel_data[channel]["devices"][device] += 1
+        else:
+            channel_data[channel]["devices"]["unknown"] += 1
+
+        # Sum days before event for average calculation
+        if conv.days_before_event is not None:
+            channel_data[channel]["days_before_event_sum"] += conv.days_before_event
+
+        total_tickets += 1
+        total_revenue_cents += conv.price_paid_cents
+
+    # Calculate averages and format channel data
+    channel_breakdown = {}
+    for channel_name, data in channel_data.items():
+        # Calculate average days before event
+        avg_days = (data["days_before_event_sum"] / data["tickets_sold"]) if data["tickets_sold"] > 0 else 0
+
+        # Get top 3 campaigns
+        top_campaigns = sorted(
+            data["campaigns"].items(),
+            key=lambda x: x[1]["tickets"],
+            reverse=True
+        )[:3]
+
+        channel_breakdown[channel_name] = {
+            "tickets_sold": data["tickets_sold"],
+            "revenue_cents": data["revenue_cents"],
+            "revenue_usd": f"${data['revenue_cents']/100:.2f}",
+            "cost_cents": data["cost_cents"],
+            "roas": round(data["roas"], 2) if data["roas"] > 0 else 0.0,
+            "percentage_of_tickets": round((data["tickets_sold"] / total_tickets * 100), 1) if total_tickets > 0 else 0,
+            "percentage_of_revenue": round((data["revenue_cents"] / total_revenue_cents * 100), 1) if total_revenue_cents > 0 else 0,
+            "avg_days_before_event": round(avg_days, 1),
+            "devices": data["devices"],
+            "top_campaigns": [
+                {
+                    "name": name,
+                    "tickets": c["tickets"],
+                    "revenue_cents": c["revenue_cents"],
+                    "revenue_usd": f"${c['revenue_cents']/100:.2f}",
+                }
+                for name, c in top_campaigns
+            ],
+        }
+
+    # Calculate ROAS for paid channels if we have spend data
     if event_id:
         # Get Meta ads spend
         meta_campaigns = db.query(MetaAdCampaign).filter(
@@ -214,30 +270,19 @@ def analyze_channel_attribution(db: Session, event_id: Optional[int] = None) -> 
         ).all()
         meta_spend = sum(c.budget_cents for c in meta_campaigns)
 
-        if "meta_ads" in channel_data and meta_spend > 0:
-            channel_data["meta_ads"]["cost_cents"] = meta_spend
-            channel_data["meta_ads"]["roas"] = channel_data["meta_ads"]["revenue_cents"] / meta_spend
+        if "meta_ads" in channel_breakdown and meta_spend > 0:
+            channel_breakdown["meta_ads"]["cost_cents"] = meta_spend
+            roas = channel_breakdown["meta_ads"]["revenue_cents"] / meta_spend
+            channel_breakdown["meta_ads"]["roas"] = round(roas, 2)
+            channel_breakdown["meta_ads"]["cost_usd"] = f"${meta_spend/100:.2f}"
 
-        # TODO: Add Google Ads spend tracking when implemented
+        # TODO: Add Google Ads spend tracking
         # TODO: Add other paid channel tracking
-
-    # Calculate conversion rates (would need impression/click data)
-    for channel in channel_data.values():
-        channel["conversion_rate"] = 0.0  # Placeholder until we track impressions/clicks
 
     # Determine top channel
     top_channel = None
-    if channel_data:
-        top_channel = max(channel_data.items(), key=lambda x: x[1]["tickets_sold"])[0]
-
-    # Calculate channel breakdown percentages
-    channel_breakdown = {}
-    for channel_name, data in channel_data.items():
-        channel_breakdown[channel_name] = {
-            **data,
-            "percentage_of_tickets": (data["tickets_sold"] / total_tickets * 100) if total_tickets > 0 else 0,
-            "percentage_of_revenue": (data["revenue_cents"] / total_revenue_cents * 100) if total_revenue_cents > 0 else 0,
-        }
+    if channel_breakdown:
+        top_channel = max(channel_breakdown.items(), key=lambda x: x[1]["tickets_sold"])[0]
 
     return {
         "event_id": event_id,
@@ -246,10 +291,36 @@ def analyze_channel_attribution(db: Session, event_id: Optional[int] = None) -> 
         "total_revenue_usd": f"${total_revenue_cents/100:.2f}",
         "channels": channel_breakdown,
         "top_channel": top_channel,
-        "top_channel_tickets": channel_data[top_channel]["tickets_sold"] if top_channel else 0,
+        "top_channel_tickets": channel_breakdown[top_channel]["tickets_sold"] if top_channel else 0,
         "attribution_method": "Last-touch (based on UTM parameters at purchase)",
-        "tracking_status": "ACTIVE" if any(ticket.utm_source or ticket.utm_medium for ticket, _ in tickets_with_tiers) else "LIMITED",
+        "tracking_status": "ACTIVE",
+        "data_source": "conversion_tracking",
     }
+
+
+def _get_channel_from_conversion(conv: ConversionTracking) -> str:
+    """
+    Helper to determine channel category from conversion record.
+
+    Maps utm_source/utm_medium combinations to standard channel categories.
+    """
+    source = (conv.utm_source or "").lower()
+    medium = (conv.utm_medium or "").lower()
+
+    if source in ["meta", "facebook", "instagram"] or medium == "social_ads":
+        return "meta_ads"
+    elif medium == "email" or source == "email":
+        return "email"
+    elif medium == "sms" or source == "sms":
+        return "sms"
+    elif source in ["twitter", "linkedin", "tiktok", "youtube"] or medium == "social":
+        return "social"
+    elif source == "google" or medium == "cpc":
+        return "google_ads"
+    elif source == "organic" or (not source and not medium):
+        return "organic"
+    else:
+        return "other"
 
 
 def learn_optimal_pricing(db: Session, venue_id: Optional[int] = None, category_id: Optional[int] = None) -> Dict:
