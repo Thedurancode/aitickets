@@ -153,12 +153,47 @@ SELECT * FROM alerts WHERE is_read = false ORDER BY created_at DESC;
 - `is_read`, `read_at` - Read tracking
 - `channels_sent` - Where it was delivered
 
-### API Endpoints (Future)
+### API Endpoints
+
+**Base URL:** `https://yourdomain.com/api/alerts`
 
 ```bash
-GET /api/alerts?is_read=false              # Get unread alerts
-PATCH /api/alerts/{id}/mark-read           # Mark as read
-GET /api/alerts/stats                      # Alert statistics
+# List alerts (with filtering)
+GET /api/alerts?is_read=false&severity=high&limit=50&offset=0
+
+# Get alert statistics
+GET /api/alerts/stats
+
+# Get specific alert
+GET /api/alerts/{id}
+
+# Mark alert as read
+PATCH /api/alerts/{id}/mark-read
+
+# Mark alert as unread
+PATCH /api/alerts/{id}/mark-unread
+
+# Mark all alerts as read
+POST /api/alerts/mark-all-read
+
+# Delete alert
+DELETE /api/alerts/{id}
+```
+
+**Example Response:**
+```json
+{
+  "id": 1,
+  "title": "Ad Campaign Underperforming - Summer Sale",
+  "message": "ROAS: 0.80 (below threshold)\n\nRecommendation: Consider pausing campaign",
+  "severity": "high",
+  "event_id": 123,
+  "alert_metadata": "{\"campaign\": \"Summer Sale\", \"roas\": \"0.80\"}",
+  "is_read": false,
+  "read_at": null,
+  "channels_sent": "slack,email,database",
+  "created_at": "2026-03-28T14:32:00Z"
+}
 ```
 
 ---
