@@ -11,34 +11,24 @@ from app.database import engine
 def upgrade():
     """Create campaign tracking tables."""
     with engine.connect() as conn:
-        # Check if tables already exist
+        # Check if tables already exist (SQLite compatible)
         result = conn.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables
-                WHERE table_name = 'campaigns'
-            );
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='campaigns';
         """))
-        exists = result.scalar()
+        exists = result.fetchone() is not None
 
         if exists:
             print("✓ campaigns table already exists")
             return
 
-        # Create campaign type enum
-        conn.execute(text("""
-            DO $$ BEGIN
-                CREATE TYPE campaigntype AS ENUM ('email', 'sms', 'notification');
-            EXCEPTION
-                WHEN duplicate_object THEN null;
-            END $$;
-        """))
-
-        # Create campaigns table
+        # Create campaigns table (SQLite compatible)
         conn.execute(text("""
             CREATE TABLE campaigns (
-                id SERIAL PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name VARCHAR(255) NOT NULL,
-                campaign_type campaigntype NOT NULL,
+                campaign_type VARCHAR(20) NOT NULL
+                    CHECK(campaign_type IN ('email', 'sms', 'notification')),
                 subject VARCHAR(255),
 
                 -- Event reference
@@ -55,14 +45,14 @@ def upgrade():
                 -- Revenue tracking
                 revenue_cents INTEGER DEFAULT 0,
 
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """))
 
         # Create campaign_deliveries table
         conn.execute(text("""
             CREATE TABLE campaign_deliveries (
-                id SERIAL PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 campaign_id INTEGER NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
 
                 -- Recipient
@@ -71,15 +61,15 @@ def upgrade():
                 event_goer_id INTEGER REFERENCES event_goers(id) ON DELETE SET NULL,
 
                 -- Delivery tracking
-                sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-                delivered_at TIMESTAMP WITH TIME ZONE,
-                failed_at TIMESTAMP WITH TIME ZONE,
+                sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                delivered_at TIMESTAMP,
+                failed_at TIMESTAMP,
                 failure_reason TEXT,
 
                 -- Engagement tracking
-                opened_at TIMESTAMP WITH TIME ZONE,
-                clicked_at TIMESTAMP WITH TIME ZONE,
-                converted_at TIMESTAMP WITH TIME ZONE,
+                opened_at TIMESTAMP,
+                clicked_at TIMESTAMP,
+                converted_at TIMESTAMP,
 
                 -- Revenue attribution
                 ticket_id INTEGER REFERENCES tickets(id) ON DELETE SET NULL,
@@ -88,29 +78,25 @@ def upgrade():
                 -- Tracking tokens
                 tracking_token VARCHAR(64) UNIQUE,
 
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """))
 
         # Create indexes
-        conn.execute(text("""
-            -- campaigns indexes
-            CREATE INDEX idx_campaigns_type ON campaigns(campaign_type);
-            CREATE INDEX idx_campaigns_event_id ON campaigns(event_id);
-            CREATE INDEX idx_campaigns_created_at ON campaigns(created_at);
+        conn.execute(text("CREATE INDEX idx_campaigns_type ON campaigns(campaign_type);"))
+        conn.execute(text("CREATE INDEX idx_campaigns_event_id ON campaigns(event_id);"))
+        conn.execute(text("CREATE INDEX idx_campaigns_created_at ON campaigns(created_at);"))
 
-            -- campaign_deliveries indexes
-            CREATE INDEX idx_campaign_deliveries_campaign_id ON campaign_deliveries(campaign_id);
-            CREATE INDEX idx_campaign_deliveries_recipient_email ON campaign_deliveries(recipient_email);
-            CREATE INDEX idx_campaign_deliveries_recipient_phone ON campaign_deliveries(recipient_phone);
-            CREATE INDEX idx_campaign_deliveries_event_goer_id ON campaign_deliveries(event_goer_id);
-            CREATE INDEX idx_campaign_deliveries_sent_at ON campaign_deliveries(sent_at);
-            CREATE INDEX idx_campaign_deliveries_opened_at ON campaign_deliveries(opened_at);
-            CREATE INDEX idx_campaign_deliveries_clicked_at ON campaign_deliveries(clicked_at);
-            CREATE INDEX idx_campaign_deliveries_ticket_id ON campaign_deliveries(ticket_id);
-            CREATE INDEX idx_campaign_deliveries_tracking_token ON campaign_deliveries(tracking_token);
-            CREATE INDEX idx_campaign_deliveries_created_at ON campaign_deliveries(created_at);
-        """))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_campaign_id ON campaign_deliveries(campaign_id);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_recipient_email ON campaign_deliveries(recipient_email);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_recipient_phone ON campaign_deliveries(recipient_phone);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_event_goer_id ON campaign_deliveries(event_goer_id);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_sent_at ON campaign_deliveries(sent_at);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_opened_at ON campaign_deliveries(opened_at);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_clicked_at ON campaign_deliveries(clicked_at);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_ticket_id ON campaign_deliveries(ticket_id);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_tracking_token ON campaign_deliveries(tracking_token);"))
+        conn.execute(text("CREATE INDEX idx_campaign_deliveries_created_at ON campaign_deliveries(created_at);"))
 
         conn.commit()
         print("✓ Created campaigns and campaign_deliveries tables with indexes")
@@ -119,9 +105,8 @@ def upgrade():
 def downgrade():
     """Drop campaign tracking tables."""
     with engine.connect() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS campaign_deliveries CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS campaigns CASCADE;"))
-        conn.execute(text("DROP TYPE IF EXISTS campaigntype CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS campaign_deliveries;"))
+        conn.execute(text("DROP TABLE IF EXISTS campaigns;"))
         conn.commit()
         print("✓ Dropped campaign tracking tables")
 

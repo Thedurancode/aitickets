@@ -11,35 +11,25 @@ from app.database import engine
 def upgrade():
     """Create alerts table."""
     with engine.connect() as conn:
-        # Check if table already exists
+        # Check if table already exists (SQLite compatible)
         result = conn.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables
-                WHERE table_name = 'alerts'
-            );
+            SELECT name FROM sqlite_master
+            WHERE type='table' AND name='alerts';
         """))
-        exists = result.scalar()
+        exists = result.fetchone() is not None
 
         if exists:
             print("✓ alerts table already exists")
             return
 
-        # Create severity enum type
-        conn.execute(text("""
-            DO $$ BEGIN
-                CREATE TYPE alertseverity AS ENUM ('low', 'medium', 'high', 'critical');
-            EXCEPTION
-                WHEN duplicate_object THEN null;
-            END $$;
-        """))
-
-        # Create table
+        # Create table (SQLite doesn't support ENUMs, use CHECK constraint)
         conn.execute(text("""
             CREATE TABLE alerts (
-                id SERIAL PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title VARCHAR(255) NOT NULL,
                 message TEXT NOT NULL,
-                severity alertseverity NOT NULL DEFAULT 'medium',
+                severity VARCHAR(20) NOT NULL DEFAULT 'medium'
+                    CHECK(severity IN ('low', 'medium', 'high', 'critical')),
 
                 -- Optional event reference
                 event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
@@ -48,23 +38,21 @@ def upgrade():
                 alert_metadata TEXT,
 
                 -- Read status
-                is_read BOOLEAN DEFAULT FALSE,
-                read_at TIMESTAMP WITH TIME ZONE,
+                is_read BOOLEAN DEFAULT 0,
+                read_at TIMESTAMP,
 
                 -- Delivery tracking
                 channels_sent TEXT,
 
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """))
 
         # Create indexes
-        conn.execute(text("""
-            CREATE INDEX idx_alerts_severity ON alerts(severity);
-            CREATE INDEX idx_alerts_is_read ON alerts(is_read);
-            CREATE INDEX idx_alerts_event_id ON alerts(event_id);
-            CREATE INDEX idx_alerts_created_at ON alerts(created_at);
-        """))
+        conn.execute(text("CREATE INDEX idx_alerts_severity ON alerts(severity);"))
+        conn.execute(text("CREATE INDEX idx_alerts_is_read ON alerts(is_read);"))
+        conn.execute(text("CREATE INDEX idx_alerts_event_id ON alerts(event_id);"))
+        conn.execute(text("CREATE INDEX idx_alerts_created_at ON alerts(created_at);"))
 
         conn.commit()
         print("✓ Created alerts table with indexes")
@@ -73,8 +61,7 @@ def upgrade():
 def downgrade():
     """Drop alerts table."""
     with engine.connect() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS alerts CASCADE;"))
-        conn.execute(text("DROP TYPE IF EXISTS alertseverity CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS alerts;"))
         conn.commit()
         print("✓ Dropped alerts table")
 
