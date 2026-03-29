@@ -2740,6 +2740,145 @@ async def list_tools():
                 "required": ["event_id"],
             },
         ),
+        # ============== Alert Management Tools ==============
+        Tool(
+            name="list_alerts",
+            description="List all alerts from the intelligence system. Can filter by read status and severity.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "is_read": {"type": "boolean", "description": "Filter by read status (optional)"},
+                    "severity": {"type": "string", "description": "Filter by severity: low, medium, high, critical (optional)"},
+                    "limit": {"type": "integer", "description": "Max alerts to return (default 50)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_alert",
+            description="Get details of a specific alert by ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "alert_id": {"type": "integer", "description": "Alert ID"},
+                },
+                "required": ["alert_id"],
+            },
+        ),
+        Tool(
+            name="mark_alert_read",
+            description="Mark an alert as read.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "alert_id": {"type": "integer", "description": "Alert ID to mark as read"},
+                },
+                "required": ["alert_id"],
+            },
+        ),
+        Tool(
+            name="mark_all_alerts_read",
+            description="Mark all unread alerts as read.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_alert_stats",
+            description="Get alert statistics (total, unread, by severity).",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        # ============== Campaign Tracking Tools ==============
+        Tool(
+            name="create_campaign",
+            description="Create a new email/SMS campaign for tracking performance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Campaign name (e.g., 'Summer Sale Email Blast')"},
+                    "campaign_type": {"type": "string", "description": "Campaign type: email, sms, or notification"},
+                    "subject": {"type": "string", "description": "Email subject line or SMS preview (optional)"},
+                    "event_id": {"type": "integer", "description": "Related event ID (optional)"},
+                },
+                "required": ["name", "campaign_type"],
+            },
+        ),
+        Tool(
+            name="list_campaigns",
+            description="List all marketing campaigns with performance stats.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_type": {"type": "string", "description": "Filter by type: email, sms, notification (optional)"},
+                    "limit": {"type": "integer", "description": "Max campaigns to return (default 50)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_campaign_stats",
+            description="Get detailed performance stats for a campaign (opens, clicks, conversions, revenue).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign ID"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="get_campaign_performance",
+            description="Get top performing campaigns ranked by revenue.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Time period in days (default 30)"},
+                    "limit": {"type": "integer", "description": "Number of campaigns to return (default 10)"},
+                },
+                "required": [],
+            },
+        ),
+        # ============== Analytics Dashboard Tools ==============
+        Tool(
+            name="get_dashboard_metrics",
+            description="Get comprehensive dashboard metrics: revenue, tickets sold, alerts, conversion rate.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_revenue_trends",
+            description="Get revenue trend data for charts (daily or hourly).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "Time period: daily or hourly (default daily)"},
+                    "days": {"type": "integer", "description": "Number of days for daily (default 30)"},
+                    "hours": {"type": "integer", "description": "Number of hours for hourly (default 24)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="get_top_events",
+            description="Get top performing events by ticket sales and revenue.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Time period in days (default 30)"},
+                    "limit": {"type": "integer", "description": "Number of events to return (default 10)"},
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -9375,6 +9514,353 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "success": True,
             "message": f"Marked {customer.name} as do not call",
             "customer_id": customer.id,
+        }
+
+    # ============== Alert Management Tools ==============
+    elif name == "list_alerts":
+        from app.models import Alert, AlertSeverity
+
+        query = db.query(Alert)
+
+        # Apply filters
+        if "is_read" in arguments:
+            query = query.filter(Alert.is_read == arguments["is_read"])
+
+        if "severity" in arguments:
+            severity_enum = AlertSeverity[arguments["severity"].upper()]
+            query = query.filter(Alert.severity == severity_enum)
+
+        limit = arguments.get("limit", 50)
+        alerts = query.order_by(Alert.created_at.desc()).limit(limit).all()
+
+        return {
+            "alerts": [
+                {
+                    "id": a.id,
+                    "title": a.title,
+                    "message": a.message,
+                    "severity": a.severity.value if hasattr(a.severity, "value") else a.severity,
+                    "event_id": a.event_id,
+                    "is_read": a.is_read,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in alerts
+            ],
+            "count": len(alerts),
+        }
+
+    elif name == "get_alert":
+        from app.models import Alert
+
+        alert = db.query(Alert).filter(Alert.id == arguments["alert_id"]).first()
+        if not alert:
+            return {"error": "Alert not found"}
+
+        return {
+            "id": alert.id,
+            "title": alert.title,
+            "message": alert.message,
+            "severity": alert.severity.value if hasattr(alert.severity, "value") else alert.severity,
+            "event_id": alert.event_id,
+            "alert_metadata": alert.alert_metadata,
+            "is_read": alert.is_read,
+            "read_at": alert.read_at.isoformat() if alert.read_at else None,
+            "channels_sent": alert.channels_sent,
+            "created_at": alert.created_at.isoformat() if alert.created_at else None,
+        }
+
+    elif name == "mark_alert_read":
+        from app.models import Alert
+        from datetime import datetime, timezone
+
+        alert = db.query(Alert).filter(Alert.id == arguments["alert_id"]).first()
+        if not alert:
+            return {"error": "Alert not found"}
+
+        alert.is_read = True
+        alert.read_at = datetime.now(timezone.utc)
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Alert {alert.id} marked as read",
+            "alert_id": alert.id,
+        }
+
+    elif name == "mark_all_alerts_read":
+        from app.models import Alert
+        from datetime import datetime, timezone
+
+        unread = db.query(Alert).filter(Alert.is_read == False).all()
+        count = 0
+        for alert in unread:
+            alert.is_read = True
+            alert.read_at = datetime.now(timezone.utc)
+            count += 1
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Marked {count} alerts as read",
+            "count": count,
+        }
+
+    elif name == "get_alert_stats":
+        from app.models import Alert, AlertSeverity
+
+        total = db.query(Alert).count()
+        unread = db.query(Alert).filter(Alert.is_read == False).count()
+
+        by_severity = {}
+        for severity in AlertSeverity:
+            count = db.query(Alert).filter(Alert.severity == severity).count()
+            by_severity[severity.value] = count
+
+        return {
+            "total_alerts": total,
+            "unread_alerts": unread,
+            "by_severity": by_severity,
+        }
+
+    # ============== Campaign Tracking Tools ==============
+    elif name == "create_campaign":
+        from app.services.campaign_tracking import create_campaign
+        from app.models import CampaignType
+
+        campaign_type = CampaignType[arguments["campaign_type"].upper()]
+        campaign = create_campaign(
+            name=arguments["name"],
+            campaign_type=campaign_type,
+            subject=arguments.get("subject"),
+            event_id=arguments.get("event_id"),
+        )
+
+        return {
+            "success": True,
+            "campaign_id": campaign.id,
+            "name": campaign.name,
+            "type": campaign.campaign_type.value,
+            "message": f"Created campaign: {campaign.name}",
+        }
+
+    elif name == "list_campaigns":
+        from app.models import Campaign, CampaignType
+
+        query = db.query(Campaign)
+
+        if "campaign_type" in arguments:
+            type_enum = CampaignType[arguments["campaign_type"].upper()]
+            query = query.filter(Campaign.campaign_type == type_enum)
+
+        limit = arguments.get("limit", 50)
+        campaigns = query.order_by(Campaign.created_at.desc()).limit(limit).all()
+
+        return {
+            "campaigns": [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "type": c.campaign_type.value,
+                    "sent": c.sent_count,
+                    "opened": c.opened_count,
+                    "clicked": c.clicked_count,
+                    "converted": c.converted_count,
+                    "revenue": c.revenue_cents / 100.0,
+                }
+                for c in campaigns
+            ],
+            "count": len(campaigns),
+        }
+
+    elif name == "get_campaign_stats":
+        from app.services.campaign_tracking import get_campaign_stats
+
+        result = get_campaign_stats(arguments["campaign_id"])
+        return result
+
+    elif name == "get_campaign_performance":
+        from app.models import Campaign
+        from datetime import datetime, timedelta, timezone
+
+        days = arguments.get("days", 30)
+        limit = arguments.get("limit", 10)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        campaigns = (
+            db.query(Campaign)
+            .filter(Campaign.created_at >= since)
+            .order_by(Campaign.revenue_cents.desc())
+            .limit(limit)
+            .all()
+        )
+
+        return {
+            "campaigns": [
+                {
+                    "id": c.id,
+                    "name": c.name,
+                    "type": c.campaign_type.value,
+                    "sent": c.sent_count,
+                    "opened": c.opened_count,
+                    "clicked": c.clicked_count,
+                    "converted": c.converted_count,
+                    "revenue": c.revenue_cents / 100.0,
+                    "open_rate": (c.opened_count / c.delivered_count * 100) if c.delivered_count > 0 else 0,
+                    "click_rate": (c.clicked_count / c.opened_count * 100) if c.opened_count > 0 else 0,
+                    "conversion_rate": (c.converted_count / c.clicked_count * 100) if c.clicked_count > 0 else 0,
+                }
+                for c in campaigns
+            ],
+            "period_days": days,
+        }
+
+    # ============== Analytics Dashboard Tools ==============
+    elif name == "get_dashboard_metrics":
+        from app.models import Ticket, Campaign, Alert, ConversionTracking
+        from datetime import datetime, timedelta, timezone
+
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start - timedelta(days=today_start.weekday())
+        month_start = today_start.replace(day=1)
+
+        # Revenue
+        revenue_today = db.query(func.sum(Ticket.price_cents)).filter(
+            Ticket.created_at >= today_start
+        ).scalar() or 0
+        revenue_week = db.query(func.sum(Ticket.price_cents)).filter(
+            Ticket.created_at >= week_start
+        ).scalar() or 0
+        revenue_month = db.query(func.sum(Ticket.price_cents)).filter(
+            Ticket.created_at >= month_start
+        ).scalar() or 0
+
+        # Tickets
+        tickets_today = db.query(Ticket).filter(Ticket.created_at >= today_start).count()
+        tickets_week = db.query(Ticket).filter(Ticket.created_at >= week_start).count()
+        tickets_month = db.query(Ticket).filter(Ticket.created_at >= month_start).count()
+
+        # Campaigns
+        active_campaigns = db.query(Campaign).filter(
+            Campaign.created_at >= now - timedelta(days=30)
+        ).count()
+
+        # Alerts
+        unread_alerts = db.query(Alert).filter(Alert.is_read == False).count()
+        critical_alerts = db.query(Alert).filter(
+            Alert.is_read == False,
+            Alert.severity == "critical"
+        ).count()
+
+        return {
+            "revenue_today": revenue_today / 100.0,
+            "revenue_this_week": revenue_week / 100.0,
+            "revenue_this_month": revenue_month / 100.0,
+            "tickets_sold_today": tickets_today,
+            "tickets_sold_this_week": tickets_week,
+            "tickets_sold_this_month": tickets_month,
+            "active_campaigns": active_campaigns,
+            "unread_alerts": unread_alerts,
+            "critical_alerts": critical_alerts,
+        }
+
+    elif name == "get_revenue_trends":
+        from app.models import Ticket
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import func
+
+        period = arguments.get("period", "daily")
+
+        if period == "hourly":
+            hours = arguments.get("hours", 24)
+            since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+            hourly_data = (
+                db.query(
+                    func.strftime('%Y-%m-%d %H:00', Ticket.created_at).label('hour'),
+                    func.sum(Ticket.price_cents).label('revenue'),
+                    func.count(Ticket.id).label('tickets'),
+                )
+                .filter(Ticket.created_at >= since)
+                .group_by(func.strftime('%Y-%m-%d %H:00', Ticket.created_at))
+                .order_by('hour')
+                .all()
+            )
+
+            return {
+                "period": "hourly",
+                "data": [
+                    {
+                        "label": row.hour,
+                        "revenue": (row.revenue or 0) / 100.0,
+                        "tickets": row.tickets or 0,
+                    }
+                    for row in hourly_data
+                ],
+            }
+        else:
+            days = arguments.get("days", 30)
+            since = datetime.now(timezone.utc) - timedelta(days=days)
+
+            daily_data = (
+                db.query(
+                    func.date(Ticket.created_at).label('date'),
+                    func.sum(Ticket.price_cents).label('revenue'),
+                    func.count(Ticket.id).label('tickets'),
+                )
+                .filter(Ticket.created_at >= since)
+                .group_by(func.date(Ticket.created_at))
+                .order_by('date')
+                .all()
+            )
+
+            return {
+                "period": "daily",
+                "data": [
+                    {
+                        "label": str(row.date),
+                        "revenue": (row.revenue or 0) / 100.0,
+                        "tickets": row.tickets or 0,
+                    }
+                    for row in daily_data
+                ],
+            }
+
+    elif name == "get_top_events":
+        from app.models import Event, Ticket
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import func
+
+        days = arguments.get("days", 30)
+        limit = arguments.get("limit", 10)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        top_events = (
+            db.query(
+                Event.id,
+                Event.name,
+                func.count(Ticket.id).label('tickets_sold'),
+                func.sum(Ticket.price_cents).label('revenue'),
+            )
+            .join(Ticket, Ticket.event_id == Event.id)
+            .filter(Ticket.created_at >= since)
+            .group_by(Event.id, Event.name)
+            .order_by(func.sum(Ticket.price_cents).desc())
+            .limit(limit)
+            .all()
+        )
+
+        return {
+            "events": [
+                {
+                    "event_id": row.id,
+                    "event_name": row.name,
+                    "tickets_sold": row.tickets_sold,
+                    "revenue": (row.revenue or 0) / 100.0,
+                }
+                for row in top_events
+            ],
+            "period_days": days,
         }
 
     return {"error": f"Unknown tool: {name}"}
