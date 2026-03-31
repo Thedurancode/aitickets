@@ -62,15 +62,23 @@ def process_refund(
     if ticket.discount_amount_cents:
         ticket_price -= ticket.discount_amount_cents
 
+    # Check for already refunded amount (prevent over-refunding)
+    already_refunded = ticket.refund_amount_cents or 0
+    remaining_refundable = ticket_price - already_refunded
+
+    if remaining_refundable <= 0:
+        return {"error": "Ticket has already been fully refunded"}
+
     if amount_cents is None:
-        refund_amount = ticket_price  # Full refund
+        refund_amount = remaining_refundable  # Full refund of remaining amount
     else:
-        if amount_cents > ticket_price:
-            return {"error": f"Refund amount (${amount_cents/100:.2f}) exceeds ticket price (${ticket_price/100:.2f})"}
+        if amount_cents > remaining_refundable:
+            return {"error": f"Refund amount (${amount_cents/100:.2f}) exceeds remaining refundable amount (${remaining_refundable/100:.2f})"}
         refund_amount = amount_cents
 
-    # Process refund with Stripe
+    # Process refund with Stripe (with idempotency key to prevent duplicates)
     try:
+        idempotency_key = f"refund_{ticket_id}_{int(datetime.now(timezone.utc).timestamp())}"
         refund = stripe.Refund.create(
             payment_intent=ticket.stripe_payment_intent_id,
             amount=refund_amount,
@@ -80,17 +88,23 @@ def process_refund(
                 "event_goer_id": str(ticket.event_goer_id),
                 "refund_reason": reason,
             },
+            idempotency_key=idempotency_key,
         )
 
-        # Update ticket
-        ticket.status = TicketStatus.REFUNDED
+        # Update ticket (accumulate refund amount for partial refunds)
+        previous_refunds = ticket.refund_amount_cents or 0
+        total_refunded = previous_refunds + refund_amount
+
+        ticket.refund_amount_cents = total_refunded
         ticket.refund_reason = reason
-        ticket.refund_amount_cents = refund_amount
         ticket.refunded_at = datetime.now(timezone.utc)
         ticket.stripe_refund_id = refund.id
 
-        # Update tier inventory
-        tier.quantity_sold = max(0, tier.quantity_sold - 1)
+        # Only mark as REFUNDED and restore inventory if fully refunded
+        if total_refunded >= ticket_price:
+            ticket.status = TicketStatus.REFUNDED
+            # Restore tier inventory only when fully refunded
+            tier.quantity_sold = max(0, tier.quantity_sold - 1)
 
         db.commit()
         db.refresh(ticket)

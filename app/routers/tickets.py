@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session, joinedload
 import stripe
 import uuid
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
+import re
 
 from app.database import get_db
 from app.rate_limit import limiter
@@ -27,6 +28,8 @@ from app.services.stripe_sync import get_stripe_checkout_line_item
 router = APIRouter(prefix="/tickets", tags=["tickets"])
 
 DEFAULT_ALERT_THRESHOLDS = [90, 95, 100]
+MAX_TICKETS_PER_ORDER = 20  # Maximum tickets allowed per single purchase
+EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
 
 import logging
 _alert_logger = logging.getLogger(__name__)
@@ -99,8 +102,8 @@ def check_inventory_thresholds(tier: TicketTier, event: Event, db: Session):
         try:
             from app.services.webhooks import fire_webhook_event
             fire_webhook_event("tier.threshold_reached", alert_data, db=db)
-        except Exception:
-            pass
+        except Exception as e:
+            _alert_logger.error(f"Failed to fire tier.threshold_reached webhook: {e}", exc_info=True)
 
         # Broadcast to SSE dashboard
         try:
@@ -109,8 +112,8 @@ def check_inventory_thresholds(tier: TicketTier, event: Event, db: Session):
                 "event_type": "inventory_alert",
                 "data": alert_data,
             }, timeout=2)
-        except Exception:
-            pass
+        except Exception as e:
+            _alert_logger.debug(f"Failed to broadcast inventory alert to dashboard: {e}")
 
         # Notify organizer via SMS
         if event and getattr(event, "promoter_phone", None):
@@ -121,8 +124,8 @@ def check_inventory_thresholds(tier: TicketTier, event: Event, db: Session):
                 else:
                     msg = f'Inventory Alert: "{event_name}" — {tier.name} is {pct_sold}% sold ({remaining} remaining)'
                 send_sms(event.promoter_phone, msg)
-            except Exception:
-                pass
+            except Exception as e:
+                _alert_logger.warning(f"Failed to send SMS alert to promoter: {e}")
 
         # Notify organizer via email
         if event and getattr(event, "promoter_email", None):
@@ -143,8 +146,8 @@ def check_inventory_thresholds(tier: TicketTier, event: Event, db: Session):
                         f"{tier.quantity_available} sold. <strong>{remaining} remaining.</strong></p>"
                     )
                 _send_email(event.promoter_email, subject, html)
-            except Exception:
-                pass
+            except Exception as e:
+                _alert_logger.warning(f"Failed to send email alert to promoter: {e}")
 
 
 @router.post("/events/{event_id}/purchase", response_model=CheckoutSessionResponse)
@@ -168,8 +171,18 @@ def create_checkout_session(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    # Verify tier exists and has availability
-    tier = db.query(TicketTier).filter(TicketTier.id == purchase.ticket_tier_id).first()
+    # Validate purchase quantity
+    if purchase.quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    if purchase.quantity > MAX_TICKETS_PER_ORDER:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_TICKETS_PER_ORDER} tickets per order")
+
+    # Validate email format
+    if not EMAIL_REGEX.match(purchase.email):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+
+    # Verify tier exists and has availability (with row-level lock to prevent race conditions)
+    tier = db.query(TicketTier).filter(TicketTier.id == purchase.ticket_tier_id).with_for_update().first()
     if not tier:
         raise HTTPException(status_code=404, detail="Ticket tier not found")
     if tier.event_id != event_id:
@@ -182,11 +195,12 @@ def create_checkout_session(
             detail=f"Only {available} tickets available",
         )
 
-    # Get or create event goer
-    event_goer = db.query(EventGoer).filter(EventGoer.email == purchase.email).first()
+    # Get or create event goer (normalize email to lowercase)
+    normalized_email = purchase.email.lower().strip()
+    event_goer = db.query(EventGoer).filter(EventGoer.email == normalized_email).first()
     if not event_goer:
         event_goer = EventGoer(
-            email=purchase.email,
+            email=normalized_email,
             name=purchase.name,
             phone=purchase.phone,
         )
@@ -194,13 +208,13 @@ def create_checkout_session(
         db.commit()
         db.refresh(event_goer)
 
-    # Promo code validation
+    # Promo code validation (lock promo code row to prevent race conditions)
     promo = None
     discounted_price = tier.price
     discount_amount = 0
     if purchase.promo_code:
         promo, discounted_price, discount_amount = _validate_promo(
-            db, purchase.promo_code, tier, event_id
+            db, purchase.promo_code, tier, event_id, quantity=purchase.quantity
         )
 
     # Free ticket flow — skip Stripe for $0 tiers or 100% discount
@@ -212,7 +226,7 @@ def create_checkout_session(
                 event_goer_id=event_goer.id,
                 qr_code_token=secrets.token_urlsafe(16),
                 status=TicketStatus.PAID,
-                purchased_at=datetime.utcnow(),
+                purchased_at=datetime.now(timezone.utc),
                 promo_code_id=promo.id if promo else None,
                 discount_amount_cents=discount_amount if promo else None,
                 utm_source=purchase.utm_source,
@@ -222,12 +236,14 @@ def create_checkout_session(
             db.add(ticket)
             tickets.append(ticket)
 
+        # Update tier sold count (atomic update, tier already locked with with_for_update)
         tier.quantity_sold += purchase.quantity
         # Auto sold-out check
         if tier.quantity_sold >= tier.quantity_available:
             from app.models import TierStatus
             tier.status = TierStatus.SOLD_OUT
         if promo:
+            # Promo code increment (will be atomic in separate fix)
             promo.uses_count += purchase.quantity
         db.commit()
         for t in tickets:
@@ -236,8 +252,9 @@ def create_checkout_session(
         # Check inventory thresholds
         try:
             check_inventory_thresholds(tier, event, db)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to check inventory thresholds: {e}", exc_info=True)
 
         # Fire webhook: ticket.purchased (free tickets)
         try:
@@ -252,8 +269,9 @@ def create_checkout_session(
                     "customer_email": purchase.email,
                     "customer_name": purchase.name,
                 }, db=db)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to fire ticket.purchased webhook: {e}", exc_info=True)
 
         msg = f"{purchase.quantity} free ticket(s) confirmed for {event.name}!"
         if promo:
@@ -328,8 +346,11 @@ def create_checkout_session(
         db.add(ticket)
         tickets.append(ticket)
 
+    # Lock promo code again before incrementing to prevent race condition
     if promo:
-        promo.uses_count += purchase.quantity
+        promo = db.query(PromoCode).filter(PromoCode.id == promo.id).with_for_update().first()
+        if promo:
+            promo.uses_count += purchase.quantity
     db.commit()
 
     return CheckoutSessionResponse(
@@ -448,8 +469,9 @@ def validate_ticket(qr_token: str, db: Session = Depends(get_db)):
             event=ticket.ticket_tier.event,
             token=media_token.token,
         )
-    except Exception:
-        pass  # Never fail check-in due to media share
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to send media share link: {e}")
 
     # Fire webhook: ticket.checked_in
     try:
@@ -461,8 +483,9 @@ def validate_ticket(qr_token: str, db: Session = Depends(get_db)):
             "customer_email": ticket.event_goer.email,
             "customer_name": ticket.event_goer.name,
         }, db=db)
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to fire ticket.checked_in webhook: {e}", exc_info=True)
 
     return TicketValidationResponse(
         valid=True,
@@ -471,9 +494,13 @@ def validate_ticket(qr_token: str, db: Session = Depends(get_db)):
     )
 
 
-def _validate_promo(db: Session, code_str: str, tier: TicketTier, event_id: int):
-    """Validate promo code and return (promo, discounted_price, discount_amount)."""
-    promo = db.query(PromoCode).filter(PromoCode.code == code_str.upper()).first()
+def _validate_promo(db: Session, code_str: str, tier: TicketTier, event_id: int, quantity: int = 1):
+    """Validate promo code and return (promo, discounted_price, discount_amount).
+
+    Uses row-level locking to prevent race conditions on promo code usage.
+    """
+    # Lock the promo code row to prevent concurrent usage beyond max_uses
+    promo = db.query(PromoCode).filter(PromoCode.code == code_str.upper()).with_for_update().first()
     if not promo:
         raise HTTPException(status_code=400, detail="Invalid promo code")
     if not promo.is_active:
@@ -481,13 +508,23 @@ def _validate_promo(db: Session, code_str: str, tier: TicketTier, event_id: int)
     if promo.event_id and promo.event_id != event_id:
         raise HTTPException(status_code=400, detail="Promo code is not valid for this event")
 
-    now = datetime.utcnow()
-    if promo.valid_from and now < promo.valid_from.replace(tzinfo=None):
-        raise HTTPException(status_code=400, detail="Promo code is not yet valid")
-    if promo.valid_until and now > promo.valid_until.replace(tzinfo=None):
-        raise HTTPException(status_code=400, detail="Promo code has expired")
-    if promo.max_uses and promo.uses_count >= promo.max_uses:
-        raise HTTPException(status_code=400, detail="Promo code has reached its usage limit")
+    now = datetime.now(timezone.utc)
+    # Ensure promo dates are timezone-aware for proper comparison
+    if promo.valid_from:
+        valid_from_aware = promo.valid_from if promo.valid_from.tzinfo else promo.valid_from.replace(tzinfo=timezone.utc)
+        if now < valid_from_aware:
+            raise HTTPException(status_code=400, detail="Promo code is not yet valid")
+    if promo.valid_until:
+        valid_until_aware = promo.valid_until if promo.valid_until.tzinfo else promo.valid_until.replace(tzinfo=timezone.utc)
+        if now > valid_until_aware:
+            raise HTTPException(status_code=400, detail="Promo code has expired")
+    # Check if adding this quantity would exceed max_uses
+    if promo.max_uses and (promo.uses_count + quantity) > promo.max_uses:
+        remaining = promo.max_uses - promo.uses_count
+        if remaining <= 0:
+            raise HTTPException(status_code=400, detail="Promo code has reached its usage limit")
+        else:
+            raise HTTPException(status_code=400, detail=f"Promo code only has {remaining} uses remaining, but {quantity} tickets requested")
 
     original = tier.price
     if promo.discount_type == DiscountType.PERCENT:

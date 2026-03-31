@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Header
 from sqlalchemy.orm import Session, joinedload
 import stripe
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_db
 from app.models import Ticket, TicketTier, Event, TicketStatus, WaitlistEntry, WaitlistStatus
@@ -73,6 +73,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
     metadata = session_data.get("metadata", {})
 
     # Find tickets by checkout session ID (primary) or legacy ticket_ids metadata
+    # Use row-level locking to prevent duplicate webhook processing
     tickets = (
         db.query(Ticket)
         .options(
@@ -80,6 +81,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
             joinedload(Ticket.event_goer),
         )
         .filter(Ticket.stripe_checkout_session_id == session_id)
+        .with_for_update()
         .all()
     )
 
@@ -88,7 +90,19 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         ticket_ids_str = metadata.get("ticket_ids", "")
         if not ticket_ids_str:
             return
-        ticket_ids = [int(tid) for tid in ticket_ids_str.split(",")]
+
+        # Validate and parse ticket IDs safely
+        try:
+            ticket_ids = [int(tid.strip()) for tid in ticket_ids_str.split(",") if tid.strip().isdigit()]
+            if not ticket_ids:
+                import logging
+                logging.getLogger(__name__).warning(f"Invalid ticket_ids in metadata: {ticket_ids_str}")
+                return
+        except (ValueError, AttributeError) as e:
+            import logging
+            logging.getLogger(__name__).error(f"Error parsing ticket_ids from metadata: {e}")
+            return
+
         tickets = (
             db.query(Ticket)
             .options(
@@ -96,6 +110,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
                 joinedload(Ticket.event_goer),
             )
             .filter(Ticket.id.in_(ticket_ids))
+            .with_for_update()
             .all()
         )
 
@@ -113,7 +128,7 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         # Update ticket status
         ticket.status = TicketStatus.PAID
         ticket.stripe_payment_intent_id = payment_intent_id
-        ticket.purchased_at = datetime.utcnow()
+        ticket.purchased_at = datetime.now(timezone.utc)
         ticket.qr_code_token = uuid.uuid4().hex
 
         # Copy UTM from metadata if not already on ticket
@@ -124,8 +139,14 @@ async def handle_checkout_completed(session_data: dict, db: Session):
         if not ticket.utm_campaign and metadata.get("utm_campaign"):
             ticket.utm_campaign = metadata["utm_campaign"]
 
-        # Update tier sold count
-        ticket.ticket_tier.quantity_sold += 1
+        # Update tier sold count (row is already locked via ticket relation)
+        # Use atomic update to prevent race conditions
+        db.query(TicketTier).filter(TicketTier.id == ticket.ticket_tier_id).update(
+            {"quantity_sold": TicketTier.quantity_sold + 1},
+            synchronize_session=False
+        )
+        db.refresh(ticket.ticket_tier)
+
         # Auto sold-out check
         if ticket.ticket_tier.quantity_sold >= ticket.ticket_tier.quantity_available:
             from app.models import TierStatus
@@ -148,8 +169,9 @@ async def handle_checkout_completed(session_data: dict, db: Session):
                 if tid not in checked_tiers:
                     check_inventory_thresholds(ticket.ticket_tier, ticket.ticket_tier.event, db)
                     checked_tiers.add(tid)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to check inventory thresholds after purchase: {e}", exc_info=True)
 
     # Broadcast to real-time dashboard (best-effort, non-blocking)
     if processed_tickets:
@@ -168,8 +190,9 @@ async def handle_checkout_completed(session_data: dict, db: Session):
                     "total_revenue_cents": sum(t.ticket_tier.price for t in processed_tickets),
                 },
             }, timeout=2)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Failed to broadcast ticket purchase to dashboard: {e}")
 
     # Track conversions for ML and attribution analysis
     try:
@@ -211,8 +234,9 @@ async def handle_checkout_completed(session_data: dict, db: Session):
                 "customer_email": ticket.event_goer.email,
                 "customer_name": ticket.event_goer.name,
             })
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to fire ticket.purchased webhook: {e}", exc_info=True)
 
     # Send confirmation emails
     for ticket in processed_tickets:
@@ -253,8 +277,11 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
     for ticket in tickets:
         if ticket.status == TicketStatus.PAID:
             ticket.status = TicketStatus.REFUNDED
-            # Restore tier availability
-            ticket.ticket_tier.quantity_sold -= 1
+            # Restore tier availability (atomic decrement)
+            db.query(TicketTier).filter(TicketTier.id == ticket.ticket_tier_id).update(
+                {"quantity_sold": TicketTier.quantity_sold - 1},
+                synchronize_session=False
+            )
             refunded_count += 1
             if not event_id and ticket.ticket_tier:
                 event_id = ticket.ticket_tier.event_id
@@ -270,8 +297,9 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
                 if ticket.status == TicketStatus.REFUNDED and ticket.ticket_tier.id not in checked_tiers:
                     check_inventory_thresholds(ticket.ticket_tier, ticket.ticket_tier.event, db)
                     checked_tiers.add(ticket.ticket_tier.id)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to check inventory thresholds after refund: {e}", exc_info=True)
 
     # Broadcast refund to real-time dashboard
     if refunded_count > 0:
@@ -284,8 +312,9 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
                     "refunded_count": refunded_count,
                 },
             }, timeout=2)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"Failed to broadcast refund to dashboard: {e}")
 
     # Fire webhook: ticket.refunded
     if refunded_count > 0:
@@ -298,8 +327,9 @@ async def handle_charge_refunded(charge_data: dict, db: Session):
                         "event_id": event_id,
                         "payment_intent_id": payment_intent_id,
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to fire ticket.refunded webhook: {e}", exc_info=True)
 
     # Auto-notify waitlisted people when tickets freed up
     if refunded_count > 0 and event_id:
@@ -332,6 +362,6 @@ def _auto_notify_waitlist(event_id: int, count: int, db: Session):
             msg = f"Great news! Tickets are now available for \"{event.name}\"! Grab yours: {ticket_url}"
             send_sms(entry.phone, msg)
         entry.status = WaitlistStatus.NOTIFIED
-        entry.notified_at = datetime.utcnow()
+        entry.notified_at = datetime.now(timezone.utc)
 
     db.commit()

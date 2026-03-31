@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_db
 from app.models import PromoCode, DiscountType, TicketTier, Event
@@ -75,11 +75,16 @@ def validate_promo_code(
     if promo.event_id and promo.event_id != tier.event_id:
         return {"valid": False, "message": "Promo code is not valid for this event"}
 
-    now = datetime.utcnow()
-    if promo.valid_from and now < promo.valid_from.replace(tzinfo=None):
-        return {"valid": False, "message": "Promo code is not yet valid"}
-    if promo.valid_until and now > promo.valid_until.replace(tzinfo=None):
-        return {"valid": False, "message": "Promo code has expired"}
+    now = datetime.now(timezone.utc)
+    # Ensure promo dates are timezone-aware for proper comparison
+    if promo.valid_from:
+        valid_from_aware = promo.valid_from if promo.valid_from.tzinfo else promo.valid_from.replace(tzinfo=timezone.utc)
+        if now < valid_from_aware:
+            return {"valid": False, "message": "Promo code is not yet valid"}
+    if promo.valid_until:
+        valid_until_aware = promo.valid_until if promo.valid_until.tzinfo else promo.valid_until.replace(tzinfo=timezone.utc)
+        if now > valid_until_aware:
+            return {"valid": False, "message": "Promo code has expired"}
     if promo.max_uses and promo.uses_count >= promo.max_uses:
         return {"valid": False, "message": "Promo code has reached its usage limit"}
 

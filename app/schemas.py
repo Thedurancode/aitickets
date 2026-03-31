@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, validator, field_validator
 from datetime import datetime
 from typing import Optional
 from app.models import TicketStatus, NotificationType, NotificationChannel, NotificationStatus, EventStatus, TierStatus
@@ -123,6 +123,20 @@ class TicketTierBase(BaseModel):
     description: Optional[str] = None
     price: int  # Price in cents
     quantity_available: int
+
+    @validator('price')
+    def price_must_be_non_negative(cls, v):
+        if v < 0:
+            raise ValueError('Price must be non-negative')
+        if v > 100_000_000:  # $1M max
+            raise ValueError('Price exceeds maximum allowed ($1,000,000)')
+        return v
+
+    @validator('quantity_available')
+    def quantity_must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError('Quantity must be non-negative')
+        return v
 
 
 class TicketTierCreate(TicketTierBase):
@@ -387,6 +401,20 @@ class PromoCodeBase(BaseModel):
     valid_until: Optional[datetime] = None
     max_uses: Optional[int] = None
     event_id: Optional[int] = None
+
+    @validator('discount_value')
+    def discount_must_be_positive(cls, v):
+        if v < 0:
+            raise ValueError('Discount value must be non-negative')
+        if v > 100_000_000:  # $1M max
+            raise ValueError('Discount value exceeds maximum allowed')
+        return v
+
+    @validator('max_uses')
+    def max_uses_must_be_positive(cls, v):
+        if v is not None and v < 0:
+            raise ValueError('Max uses must be non-negative')
+        return v
 
 
 class PromoCodeCreate(PromoCodeBase):
