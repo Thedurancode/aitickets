@@ -33,9 +33,11 @@ class Settings(BaseSettings):
     # Meta Ads (Facebook/Instagram)
     meta_app_id: str = ""
     meta_app_secret: str = ""
-    meta_access_token: str = ""
+    meta_access_token: str = ""  # Long-lived access token with ads_management permission
     meta_ad_account_id: str = ""  # Format: act_xxxxx
     meta_business_id: str = ""
+    facebook_page_id: str = ""  # Required for publishing ads
+    instagram_account_id: str = ""  # Instagram Business Account ID (optional)
 
     # Apple Wallet
     apple_wallet_team_id: str = ""
@@ -101,6 +103,24 @@ class Settings(BaseSettings):
     admin_email: str = ""  # Email address for critical alerts
     admin_phone: str = ""  # Phone number for critical SMS alerts (Twilio)
     app_url: str = "http://localhost:3000"  # Frontend URL for alert links
+
+    # External Research APIs
+    google_places_api_key: str = ""  # Google Places API for venue research
+
+    # Google Ads API
+    google_ads_developer_token: str = ""  # Developer token from Google Ads API
+    google_ads_client_id: str = ""  # OAuth2 client ID
+    google_ads_client_secret: str = ""  # OAuth2 client secret
+    google_ads_refresh_token: str = ""  # OAuth2 refresh token
+    google_ads_customer_id: str = ""  # Google Ads account ID (e.g., "1234567890")
+    google_ads_login_customer_id: str = ""  # MCC account ID (optional)
+    openweather_api_key: str = ""  # OpenWeather API for weather forecasts
+    census_api_key: str = ""  # US Census API for demographics
+    youtube_api_key: str = ""  # YouTube Data API v3 for artist video research
+
+    # Spotify API (for artist research)
+    spotify_client_id: str = ""  # Spotify Client ID
+    spotify_client_secret: str = ""  # Spotify Client Secret
 
     class Config:
         # Support environment-specific .env files

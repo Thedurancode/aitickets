@@ -2740,45 +2740,77 @@ async def list_tools():
                 "required": ["event_id"],
             },
         ),
-        # ============== Alert Management Tools ==============
+        # ============== Alert Management Tools (Voice-Optimized) ==============
         Tool(
             name="list_alerts",
-            description="List all alerts from the intelligence system. Can filter by read status and severity.",
+            description="Show me alerts from the system. Say 'show unread alerts' or 'show critical alerts' to filter. Defaults to unread alerts only for voice commands.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "is_read": {"type": "boolean", "description": "Filter by read status (optional)"},
-                    "severity": {"type": "string", "description": "Filter by severity: low, medium, high, critical (optional)"},
-                    "limit": {"type": "integer", "description": "Max alerts to return (default 50)"},
+                    "is_read": {"type": "boolean", "description": "True to show only read alerts, false for unread only, omit for all"},
+                    "severity": {"type": "string", "description": "Show only: low, medium, high, or critical alerts"},
+                    "limit": {"type": "integer", "description": "How many alerts to show (default 50)"},
+                    "voice_mode": {"type": "boolean", "description": "Auto-set true for voice queries - shows unread only and formats for speech"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="show_alerts",
+            description="Quick voice command: 'show alerts' or 'what alerts do I have?' Shows unread alerts with speech-friendly formatting. Alias for list_alerts with voice_mode=true.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "severity": {"type": "string", "description": "Optional: only show critical, high, medium, or low severity"},
                 },
                 "required": [],
             },
         ),
         Tool(
             name="get_alert",
-            description="Get details of a specific alert by ID.",
+            description="Tell me more about alert number X. Gives full details about a specific alert.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "alert_id": {"type": "integer", "description": "Alert ID"},
+                    "alert_id": {"type": "integer", "description": "Which alert number to look up"},
                 },
                 "required": ["alert_id"],
             },
         ),
         Tool(
             name="mark_alert_read",
-            description="Mark an alert as read.",
+            description="Mark alert number X as read. Say 'dismiss alert 5' or 'mark alert 5 as read'.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "alert_id": {"type": "integer", "description": "Alert ID to mark as read"},
+                    "alert_id": {"type": "integer", "description": "Which alert to mark as read"},
+                },
+                "required": ["alert_id"],
+            },
+        ),
+        Tool(
+            name="dismiss_alert",
+            description="Quick voice command: 'dismiss alert X'. Alias for mark_alert_read.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "alert_id": {"type": "integer", "description": "Alert number to dismiss"},
                 },
                 "required": ["alert_id"],
             },
         ),
         Tool(
             name="mark_all_alerts_read",
-            description="Mark all unread alerts as read.",
+            description="Clear all alerts. Say 'clear all alerts' or 'dismiss all alerts' to mark everything as read.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="clear_alerts",
+            description="Quick voice command: 'clear alerts' or 'dismiss all alerts'. Alias for mark_all_alerts_read.",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -2787,67 +2819,129 @@ async def list_tools():
         ),
         Tool(
             name="get_alert_stats",
-            description="Get alert statistics (total, unread, by severity).",
+            description="How many alerts do I have? Tells you total alerts, unread count, and breakdown by severity (critical, high, medium, low).",
             inputSchema={
                 "type": "object",
                 "properties": {},
                 "required": [],
             },
         ),
-        # ============== Campaign Tracking Tools ==============
+        Tool(
+            name="check_critical_alerts",
+            description="Quick status check: 'any critical alerts?' Shows only critical and high severity unread alerts. Perfect for voice check-ins.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        # ============== Campaign Tracking Tools (Voice-Optimized) ==============
         Tool(
             name="create_campaign",
-            description="Create a new email/SMS campaign for tracking performance.",
+            description="Start a new email or SMS campaign. Say 'create email campaign for event X' or 'start SMS campaign called Y'.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Campaign name (e.g., 'Summer Sale Email Blast')"},
-                    "campaign_type": {"type": "string", "description": "Campaign type: email, sms, or notification"},
-                    "subject": {"type": "string", "description": "Email subject line or SMS preview (optional)"},
-                    "event_id": {"type": "integer", "description": "Related event ID (optional)"},
+                    "name": {"type": "string", "description": "What to call this campaign (e.g., 'Summer Sale Email')"},
+                    "campaign_type": {"type": "string", "description": "Type: email, sms, or notification"},
+                    "subject": {"type": "string", "description": "Email subject or SMS preview text"},
+                    "event_id": {"type": "integer", "description": "Link to which event (optional)"},
                 },
                 "required": ["name", "campaign_type"],
             },
         ),
         Tool(
             name="list_campaigns",
-            description="List all marketing campaigns with performance stats.",
+            description="Show me all campaigns. Say 'show email campaigns' or 'list my SMS campaigns' to filter by type.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "campaign_type": {"type": "string", "description": "Filter by type: email, sms, notification (optional)"},
-                    "limit": {"type": "integer", "description": "Max campaigns to return (default 50)"},
+                    "campaign_type": {"type": "string", "description": "Show only: email, sms, or notification campaigns"},
+                    "limit": {"type": "integer", "description": "How many to show (default 50)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="show_campaigns",
+            description="Quick voice command: 'show campaigns' or 'what campaigns are running?' Shows recent campaigns with performance stats.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "description": "Optional: email, sms, or notification"},
                 },
                 "required": [],
             },
         ),
         Tool(
             name="get_campaign_stats",
-            description="Get detailed performance stats for a campaign (opens, clicks, conversions, revenue).",
+            description="How did campaign X perform? Tells you opens, clicks, conversions, and revenue. Say 'how did campaign 5 do?' or 'stats for campaign 5'.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "campaign_id": {"type": "integer", "description": "Campaign ID"},
+                    "campaign_id": {"type": "integer", "description": "Which campaign to check"},
+                },
+                "required": ["campaign_id"],
+            },
+        ),
+        Tool(
+            name="campaign_performance",
+            description="Quick voice command: 'campaign performance for campaign X'. Alias for get_campaign_stats with speech-friendly output.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "campaign_id": {"type": "integer", "description": "Campaign number"},
                 },
                 "required": ["campaign_id"],
             },
         ),
         Tool(
             name="get_campaign_performance",
-            description="Get top performing campaigns ranked by revenue.",
+            description="Show me top campaigns. Say 'what are my best campaigns?' or 'top 5 campaigns this month' to see highest revenue campaigns.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "days": {"type": "integer", "description": "Time period in days (default 30)"},
-                    "limit": {"type": "integer", "description": "Number of campaigns to return (default 10)"},
+                    "days": {"type": "integer", "description": "Look back how many days (default 30)"},
+                    "limit": {"type": "integer", "description": "Show top X campaigns (default 10)"},
                 },
                 "required": [],
             },
         ),
-        # ============== Analytics Dashboard Tools ==============
+        Tool(
+            name="top_campaigns",
+            description="Quick voice command: 'top campaigns' or 'best performing campaigns'. Shows top 5 campaigns by revenue with speech-friendly stats.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Optional: time period in days (default 30)"},
+                },
+                "required": [],
+            },
+        ),
+        # ============== Analytics Dashboard Tools (Voice-Optimized) ==============
         Tool(
             name="get_dashboard_metrics",
-            description="Get comprehensive dashboard metrics: revenue, tickets sold, alerts, conversion rate.",
+            description="Give me the dashboard overview. Shows revenue today/this week/this month, tickets sold, alerts, and conversion rate. Say 'how's business?' or 'show me today's stats'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "voice_mode": {"type": "boolean", "description": "Auto-set for voice queries - formats output for speech (highlights key numbers)"},
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="quick_status",
+            description="Quick voice command: 'status' or 'how are we doing?' Gives speech-optimized summary with today's key metrics and any critical alerts.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
+            name="todays_revenue",
+            description="Quick voice command: 'what's today's revenue?' or 'how much did we make today?' Returns just today's revenue and ticket count.",
             inputSchema={
                 "type": "object",
                 "properties": {},
@@ -2856,26 +2950,44 @@ async def list_tools():
         ),
         Tool(
             name="get_revenue_trends",
-            description="Get revenue trend data for charts (daily or hourly).",
+            description="Show me revenue over time. Say 'revenue this week' or 'hourly revenue today' to see trends.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "period": {"type": "string", "description": "Time period: daily or hourly (default daily)"},
-                    "days": {"type": "integer", "description": "Number of days for daily (default 30)"},
-                    "hours": {"type": "integer", "description": "Number of hours for hourly (default 24)"},
+                    "period": {"type": "string", "description": "Show: daily or hourly trends (default daily)"},
+                    "days": {"type": "integer", "description": "How many days back for daily (default 30)"},
+                    "hours": {"type": "integer", "description": "How many hours back for hourly (default 24)"},
                 },
                 "required": [],
             },
         ),
         Tool(
+            name="revenue_today",
+            description="Quick voice command: 'revenue today' or 'today's sales'. Shows hourly breakdown for today with total.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        ),
+        Tool(
             name="get_top_events",
-            description="Get top performing events by ticket sales and revenue.",
+            description="Show me top events. Say 'what are my best selling events?' or 'top events this month' to see highest revenue events.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "days": {"type": "integer", "description": "Time period in days (default 30)"},
-                    "limit": {"type": "integer", "description": "Number of events to return (default 10)"},
+                    "days": {"type": "integer", "description": "Look back how many days (default 30)"},
+                    "limit": {"type": "integer", "description": "Show top X events (default 10)"},
                 },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="top_events",
+            description="Quick voice command: 'top events' or 'best events'. Shows top 5 events by revenue with speech-friendly output.",
+            inputSchema={
+                "type": "object",
+                "properties": {},
                 "required": [],
             },
         ),
@@ -9230,10 +9342,11 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         if arguments.get("target_event_id"):
             # Target attendees of specific event
+            from app.models import TicketTier
             target_event = db.query(Event).filter(Event.id == arguments["target_event_id"]).first()
             if target_event:
-                attendees = db.query(EventGoer).join(Ticket).filter(
-                    Ticket.event_id == arguments["target_event_id"],
+                attendees = db.query(EventGoer).join(Ticket).join(TicketTier).filter(
+                    TicketTier.event_id == arguments["target_event_id"],
                     EventGoer.phone.isnot(None),
                     EventGoer.phone != "",
                 ).all()
@@ -9622,6 +9735,98 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "by_severity": by_severity,
         }
 
+    # ============== Voice-Optimized Alert Aliases ==============
+    elif name == "show_alerts":
+        from app.models import Alert, AlertSeverity
+
+        query = db.query(Alert).filter(Alert.is_read == False)  # Voice mode: unread only by default
+
+        if "severity" in arguments:
+            severity_enum = AlertSeverity[arguments["severity"].upper()]
+            query = query.filter(Alert.severity == severity_enum)
+
+        alerts = query.order_by(Alert.created_at.desc()).limit(10).all()  # Voice: show top 10
+
+        if not alerts:
+            return {"voice_response": "You have no unread alerts. Everything looks good!"}
+
+        # Speech-optimized response
+        alert_list = []
+        for a in alerts:
+            severity_prefix = "Critical" if a.severity.value == "critical" else "High priority" if a.severity.value == "high" else ""
+            alert_list.append(f"{severity_prefix} Alert {a.id}: {a.title}")
+
+        return {
+            "voice_response": f"You have {len(alerts)} unread alert{'s' if len(alerts) != 1 else ''}. " + ". ".join(alert_list),
+            "alerts": [{"id": a.id, "title": a.title, "severity": a.severity.value} for a in alerts],
+            "count": len(alerts),
+        }
+
+    elif name == "dismiss_alert":
+        # Alias for mark_alert_read with voice response
+        from app.models import Alert
+        from datetime import datetime, timezone
+
+        alert = db.query(Alert).filter(Alert.id == arguments["alert_id"]).first()
+        if not alert:
+            return {"voice_response": f"I couldn't find alert {arguments['alert_id']}."}
+
+        alert.is_read = True
+        alert.read_at = datetime.now(timezone.utc)
+        db.commit()
+
+        return {
+            "success": True,
+            "voice_response": f"Alert {alert.id} dismissed.",
+            "alert_id": alert.id,
+        }
+
+    elif name == "clear_alerts":
+        # Alias for mark_all_alerts_read with voice response
+        from app.models import Alert
+        from datetime import datetime, timezone
+
+        unread = db.query(Alert).filter(Alert.is_read == False).all()
+        count = len(unread)
+
+        if count == 0:
+            return {"voice_response": "You don't have any unread alerts to clear."}
+
+        for alert in unread:
+            alert.is_read = True
+            alert.read_at = datetime.now(timezone.utc)
+        db.commit()
+
+        return {
+            "success": True,
+            "voice_response": f"Cleared {count} alert{'s' if count != 1 else ''}.",
+            "count": count,
+        }
+
+    elif name == "check_critical_alerts":
+        from app.models import Alert, AlertSeverity
+
+        critical = db.query(Alert).filter(
+            Alert.is_read == False,
+            Alert.severity.in_([AlertSeverity.CRITICAL, AlertSeverity.HIGH])
+        ).order_by(Alert.created_at.desc()).all()
+
+        if not critical:
+            return {"voice_response": "No critical or high priority alerts. You're all clear!"}
+
+        alert_summary = []
+        for a in critical:
+            alert_summary.append(f"{a.severity.value} alert: {a.title}")
+
+        return {
+            "voice_response": f"You have {len(critical)} urgent alert{'s' if len(critical) != 1 else ''}: " + ", ".join(alert_summary),
+            "critical_alerts": [
+                {"id": a.id, "title": a.title, "severity": a.severity.value, "message": a.message}
+                for a in critical
+            ],
+            "count": len(critical),
+        }
+
     # ============== Campaign Tracking Tools ==============
     elif name == "create_campaign":
         from app.services.campaign_tracking import create_campaign
@@ -9714,9 +9919,90 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "period_days": days,
         }
 
+    # ============== Voice-Optimized Campaign Aliases ==============
+    elif name == "show_campaigns":
+        from app.models import Campaign, CampaignType
+
+        query = db.query(Campaign)
+
+        if "type" in arguments:
+            type_enum = CampaignType[arguments["type"].upper()]
+            query = query.filter(Campaign.campaign_type == type_enum)
+
+        campaigns = query.order_by(Campaign.created_at.desc()).limit(10).all()
+
+        if not campaigns:
+            return {"voice_response": "You don't have any campaigns yet."}
+
+        # Speech-optimized response
+        campaign_summary = []
+        for c in campaigns:
+            revenue = c.revenue_cents / 100.0
+            campaign_summary.append(f"{c.name}: ${revenue:.0f} revenue, {c.converted_count} conversions")
+
+        return {
+            "voice_response": f"You have {len(campaigns)} recent campaigns. " + ". ".join(campaign_summary[:5]),  # Top 5 for voice
+            "campaigns": [
+                {"id": c.id, "name": c.name, "revenue": c.revenue_cents / 100.0, "conversions": c.converted_count}
+                for c in campaigns
+            ],
+        }
+
+    elif name == "campaign_performance":
+        # Alias for get_campaign_stats with voice response
+        from app.services.campaign_tracking import get_campaign_stats
+
+        result = get_campaign_stats(arguments["campaign_id"])
+
+        # Add voice-friendly summary
+        stats = result.get("stats", {})
+        rates = result.get("rates", {})
+        revenue = result.get("revenue", {})
+
+        voice_summary = f"Campaign {arguments['campaign_id']}: "
+        voice_summary += f"Sent to {stats.get('sent', 0)} people. "
+        voice_summary += f"{stats.get('opened', 0)} opened it, that's {rates.get('open_rate', 0):.0f} percent. "
+        voice_summary += f"{stats.get('clicked', 0)} clicked, {stats.get('converted', 0)} purchased. "
+        voice_summary += f"Total revenue: ${revenue.get('total_dollars', 0):.2f}."
+
+        result["voice_response"] = voice_summary
+        return result
+
+    elif name == "top_campaigns":
+        from app.models import Campaign
+        from datetime import datetime, timedelta, timezone
+
+        days = arguments.get("days", 30)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+
+        campaigns = (
+            db.query(Campaign)
+            .filter(Campaign.created_at >= since)
+            .order_by(Campaign.revenue_cents.desc())
+            .limit(5)  # Voice: show top 5
+            .all()
+        )
+
+        if not campaigns:
+            return {"voice_response": "No campaigns found in this time period."}
+
+        # Speech-optimized response
+        campaign_list = []
+        for i, c in enumerate(campaigns, 1):
+            revenue = c.revenue_cents / 100.0
+            campaign_list.append(f"Number {i}: {c.name} with ${revenue:.0f} in revenue")
+
+        return {
+            "voice_response": f"Your top {len(campaigns)} campaigns: " + ". ".join(campaign_list),
+            "top_campaigns": [
+                {"rank": i+1, "name": c.name, "revenue": c.revenue_cents / 100.0, "conversions": c.converted_count}
+                for i, c in enumerate(campaigns)
+            ],
+        }
+
     # ============== Analytics Dashboard Tools ==============
     elif name == "get_dashboard_metrics":
-        from app.models import Ticket, Campaign, Alert, ConversionTracking
+        from app.models import Ticket, Campaign, Alert, ConversionTracking, TicketTier
         from datetime import datetime, timedelta, timezone
 
         now = datetime.now(timezone.utc)
@@ -9724,14 +10010,14 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         week_start = today_start - timedelta(days=today_start.weekday())
         month_start = today_start.replace(day=1)
 
-        # Revenue
-        revenue_today = db.query(func.sum(Ticket.price_cents)).filter(
+        # Revenue (join through TicketTier to get price)
+        revenue_today = db.query(func.sum(TicketTier.price)).join(Ticket, Ticket.ticket_tier_id == TicketTier.id).filter(
             Ticket.created_at >= today_start
         ).scalar() or 0
-        revenue_week = db.query(func.sum(Ticket.price_cents)).filter(
+        revenue_week = db.query(func.sum(TicketTier.price)).join(Ticket, Ticket.ticket_tier_id == TicketTier.id).filter(
             Ticket.created_at >= week_start
         ).scalar() or 0
-        revenue_month = db.query(func.sum(Ticket.price_cents)).filter(
+        revenue_month = db.query(func.sum(TicketTier.price)).join(Ticket, Ticket.ticket_tier_id == TicketTier.id).filter(
             Ticket.created_at >= month_start
         ).scalar() or 0
 
@@ -9765,7 +10051,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_revenue_trends":
-        from app.models import Ticket
+        from app.models import Ticket, TicketTier
         from datetime import datetime, timedelta, timezone
         from sqlalchemy import func
 
@@ -9778,9 +10064,10 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             hourly_data = (
                 db.query(
                     func.strftime('%Y-%m-%d %H:00', Ticket.created_at).label('hour'),
-                    func.sum(Ticket.price_cents).label('revenue'),
+                    func.sum(TicketTier.price).label('revenue'),
                     func.count(Ticket.id).label('tickets'),
                 )
+                .join(TicketTier, TicketTier.id == Ticket.ticket_tier_id)
                 .filter(Ticket.created_at >= since)
                 .group_by(func.strftime('%Y-%m-%d %H:00', Ticket.created_at))
                 .order_by('hour')
@@ -9805,9 +10092,10 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             daily_data = (
                 db.query(
                     func.date(Ticket.created_at).label('date'),
-                    func.sum(Ticket.price_cents).label('revenue'),
+                    func.sum(TicketTier.price).label('revenue'),
                     func.count(Ticket.id).label('tickets'),
                 )
+                .join(TicketTier, TicketTier.id == Ticket.ticket_tier_id)
                 .filter(Ticket.created_at >= since)
                 .group_by(func.date(Ticket.created_at))
                 .order_by('date')
@@ -9827,7 +10115,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             }
 
     elif name == "get_top_events":
-        from app.models import Event, Ticket
+        from app.models import Event, Ticket, TicketTier
         from datetime import datetime, timedelta, timezone
         from sqlalchemy import func
 
@@ -9840,12 +10128,13 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 Event.id,
                 Event.name,
                 func.count(Ticket.id).label('tickets_sold'),
-                func.sum(Ticket.price_cents).label('revenue'),
+                func.sum(TicketTier.price).label('revenue'),
             )
-            .join(Ticket, Ticket.event_id == Event.id)
+            .join(TicketTier, TicketTier.event_id == Event.id)
+            .join(Ticket, Ticket.ticket_tier_id == TicketTier.id)
             .filter(Ticket.created_at >= since)
             .group_by(Event.id, Event.name)
-            .order_by(func.sum(Ticket.price_cents).desc())
+            .order_by(func.sum(TicketTier.price).desc())
             .limit(limit)
             .all()
         )
@@ -9861,6 +10150,140 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 for row in top_events
             ],
             "period_days": days,
+        }
+
+    # ============== Voice-Optimized Dashboard Aliases ==============
+    elif name == "quick_status":
+        from app.models import Ticket, Alert, AlertSeverity, TicketTier
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Today's key metrics
+        revenue_today = db.query(func.sum(TicketTier.price)).join(Ticket, Ticket.ticket_tier_id == TicketTier.id).filter(
+            Ticket.created_at >= today_start
+        ).scalar() or 0
+        tickets_today = db.query(Ticket).filter(Ticket.created_at >= today_start).count()
+
+        # Critical alerts
+        critical_alerts = db.query(Alert).filter(
+            Alert.is_read == False,
+            Alert.severity.in_([AlertSeverity.CRITICAL, AlertSeverity.HIGH])
+        ).count()
+
+        # Build voice response
+        voice_response = f"Today's status: ${revenue_today / 100.0:.2f} in revenue from {tickets_today} ticket{'s' if tickets_today != 1 else ''}. "
+
+        if critical_alerts > 0:
+            voice_response += f"You have {critical_alerts} urgent alert{'s' if critical_alerts != 1 else ''} that need attention."
+        else:
+            voice_response += "No urgent alerts. Everything looks good!"
+
+        return {
+            "voice_response": voice_response,
+            "revenue_today": revenue_today / 100.0,
+            "tickets_today": tickets_today,
+            "critical_alerts": critical_alerts,
+        }
+
+    elif name == "todays_revenue":
+        from app.models import Ticket, TicketTier
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        revenue_today = db.query(func.sum(TicketTier.price)).join(Ticket, Ticket.ticket_tier_id == TicketTier.id).filter(
+            Ticket.created_at >= today_start
+        ).scalar() or 0
+        tickets_today = db.query(Ticket).filter(Ticket.created_at >= today_start).count()
+
+        return {
+            "voice_response": f"Today's revenue is ${revenue_today / 100.0:.2f} from {tickets_today} ticket{'s' if tickets_today != 1 else ''}.",
+            "revenue": revenue_today / 100.0,
+            "tickets": tickets_today,
+        }
+
+    elif name == "revenue_today":
+        # Alias for get_revenue_trends with hourly period for today
+        from app.models import Ticket, TicketTier
+        from datetime import datetime, timezone
+        from sqlalchemy import func
+
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        hourly_data = (
+            db.query(
+                func.strftime('%H:00', Ticket.created_at).label('hour'),
+                func.sum(TicketTier.price).label('revenue'),
+                func.count(Ticket.id).label('tickets'),
+            )
+            .join(TicketTier, TicketTier.id == Ticket.ticket_tier_id)
+            .filter(Ticket.created_at >= today_start)
+            .group_by(func.strftime('%H:00', Ticket.created_at))
+            .order_by('hour')
+            .all()
+        )
+
+        total_revenue = sum((row.revenue or 0) for row in hourly_data) / 100.0
+        total_tickets = sum((row.tickets or 0) for row in hourly_data)
+
+        return {
+            "voice_response": f"Today's revenue is ${total_revenue:.2f} from {total_tickets} tickets.",
+            "total_revenue": total_revenue,
+            "total_tickets": total_tickets,
+            "hourly_breakdown": [
+                {"hour": row.hour, "revenue": (row.revenue or 0) / 100.0, "tickets": row.tickets or 0}
+                for row in hourly_data
+            ],
+        }
+
+    elif name == "top_events":
+        from app.models import Event, Ticket, TicketTier
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import func
+
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+
+        top_events = (
+            db.query(
+                Event.id,
+                Event.name,
+                func.count(Ticket.id).label('tickets_sold'),
+                func.sum(TicketTier.price).label('revenue'),
+            )
+            .join(TicketTier, TicketTier.event_id == Event.id)
+            .join(Ticket, Ticket.ticket_tier_id == TicketTier.id)
+            .filter(Ticket.created_at >= since)
+            .group_by(Event.id, Event.name)
+            .order_by(func.sum(TicketTier.price).desc())
+            .limit(5)  # Voice: top 5
+            .all()
+        )
+
+        if not top_events:
+            return {"voice_response": "No events found with ticket sales in the last 30 days."}
+
+        # Speech-optimized response
+        event_list = []
+        for i, row in enumerate(top_events, 1):
+            revenue = (row.revenue or 0) / 100.0
+            event_list.append(f"Number {i}: {row.name} with ${revenue:.0f}")
+
+        return {
+            "voice_response": f"Your top {len(top_events)} events: " + ". ".join(event_list),
+            "top_events": [
+                {
+                    "rank": i+1,
+                    "event_id": row.id,
+                    "event_name": row.name,
+                    "tickets_sold": row.tickets_sold,
+                    "revenue": (row.revenue or 0) / 100.0,
+                }
+                for i, row in enumerate(top_events)
+            ],
         }
 
     return {"error": f"Unknown tool: {name}"}
@@ -10104,13 +10527,12 @@ def _apply_segment_filters(db, query, segments: dict):
         query = query.filter(EventGoer.id.in_(db.query(spent_subq.c.event_goer_id)))
 
     # Postal code targeting (extract from email or use separate field if available)
+    # Postal codes (geographic targeting)
     if segments.get("postal_codes"):
-        # This would require a postal_code field on EventGoer or parsing from address
-        # For now, we'll filter by name/email patterns if common postal codes
         postal_codes = segments["postal_codes"]
-        # Simple implementation - filter by email domain patterns if zip codes are reflected
-        # In production, you'd have a dedicated postal_code field
-        pass  # Placeholder - requires additional model field
+        # Query EventGoer directly by postal_code field
+        query = query.join(CustomerPreference, CustomerPreference.event_goer_id == EventGoer.id, isouter=True)
+        query = query.filter(CustomerPreference.postal_code.in_(postal_codes))
 
     # Pending payments (customers with pending/failed payments)
     if segments.get("has_pending_payment"):

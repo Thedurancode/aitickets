@@ -409,6 +409,12 @@ class CustomerPreference(Base):
     first_purchase_date = Column(DateTime(timezone=True), nullable=True)
     last_interaction_date = Column(DateTime(timezone=True), nullable=True)
 
+    # Geographic info (copied from EventGoer for convenience)
+    postal_code = Column(String(20), nullable=True, index=True)
+    city = Column(String(100), nullable=True)
+    state = Column(String(50), nullable=True)
+    country = Column(String(50), nullable=True, default="US")
+
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -1115,3 +1121,180 @@ class CampaignDelivery(Base):
     campaign = relationship("Campaign", back_populates="deliveries")
     event_goer = relationship("EventGoer")
     ticket = relationship("Ticket")
+
+
+# ============================================================================
+# AD CAMPAIGN & CREATIVE MODELS
+# Auto-generated ad campaigns (Meta, Google, Email, Social Media)
+# ============================================================================
+
+class AdCampaign(Base):
+    """
+    Auto-generated advertising campaign for events
+    Supports Meta Ads, Google Ads, Email, and Social Media
+    """
+    __tablename__ = "ad_campaigns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+
+    # Campaign details
+    platform = Column(String(50), nullable=False)  # "meta", "google", "email", "social_organic"
+    campaign_type = Column(String(50), nullable=False)  # "awareness", "conversion", "retargeting"
+    name = Column(String(255), nullable=False)
+    objective = Column(String(50))  # "REACH", "CONVERSIONS", "VIDEO_VIEWS"
+
+    # Status
+    status = Column(String(20), default="draft")  # "draft", "approved", "scheduled", "active", "paused", "completed"
+
+    # Budget (in cents)
+    budget_total = Column(Integer, default=0)
+    budget_daily = Column(Integer, default=0)
+    spend_total = Column(Integer, default=0)
+
+    # Schedule
+    start_date = Column(DateTime(timezone=True), nullable=True)
+    end_date = Column(DateTime(timezone=True), nullable=True)
+
+    # Platform-specific
+    platform_campaign_id = Column(String(255), nullable=True)  # ID from Meta/Google API
+    settings = Column(Text, nullable=True)  # JSON settings
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    event = relationship("Event")
+    ad_creatives = relationship("AdCreative", back_populates="ad_campaign", cascade="all, delete-orphan")
+    performance = relationship("AdCampaignPerformance", back_populates="ad_campaign", cascade="all, delete-orphan")
+
+
+class AdCreative(Base):
+    """
+    Individual ad creative (image ad, video ad, email, social post)
+    """
+    __tablename__ = "ad_creatives"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ad_campaign_id = Column(Integer, ForeignKey("ad_campaigns.id"), nullable=False)
+
+    # Ad details
+    platform = Column(String(50), nullable=False)  # "facebook", "instagram", "google_search"
+    format = Column(String(50), nullable=False)  # "image", "video", "carousel", "story"
+    name = Column(String(255), nullable=True)
+
+    # Creative content
+    headline = Column(String(255), nullable=True)
+    body = Column(Text, nullable=True)
+    cta = Column(String(100), nullable=True)  # "Buy Tickets", "Learn More"
+
+    # Media
+    image_url = Column(String(500), nullable=True)
+    video_url = Column(String(500), nullable=True)
+    link_url = Column(String(500), nullable=True)
+
+    # Targeting (JSON)
+    target_audience = Column(Text, nullable=True)  # JSON: age, location, interests
+    placements = Column(Text, nullable=True)  # JSON: ["facebook_feed", "instagram_stories"]
+
+    # Status
+    status = Column(String(20), default="draft")  # "draft", "approved", "active", "paused"
+
+    # A/B Testing
+    is_test_variant = Column(Boolean, default=False)
+    test_group = Column(String(50), nullable=True)  # "A", "B", "C"
+
+    # Platform-specific
+    platform_ad_id = Column(String(255), nullable=True)
+
+    # Budget allocation
+    budget_allocation = Column(Integer, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    ad_campaign = relationship("AdCampaign", back_populates="ad_creatives")
+    performance = relationship("AdPerformance", back_populates="ad_creative", cascade="all, delete-orphan")
+
+
+class AdCampaignPerformance(Base):
+    """
+    Campaign-level performance metrics (daily rollup)
+    """
+    __tablename__ = "ad_campaign_performance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ad_campaign_id = Column(Integer, ForeignKey("ad_campaigns.id"), nullable=False)
+    date = Column(Date, nullable=False)
+
+    # Metrics
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    conversions = Column(Integer, default=0)
+
+    # Financial (in cents)
+    spend = Column(Integer, default=0)
+    revenue = Column(Integer, default=0)
+
+    # Calculated
+    ctr = Column(Float, default=0.0)
+    cpc = Column(Float, default=0.0)
+    cpa = Column(Float, default=0.0)
+    roas = Column(Float, default=0.0)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Relationships
+    ad_campaign = relationship("AdCampaign", back_populates="performance")
+
+
+class AdPerformance(Base):
+    """
+    Ad-level performance metrics (daily rollup)
+    """
+    __tablename__ = "ad_performance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ad_creative_id = Column(Integer, ForeignKey("ad_creatives.id"), nullable=False)
+    date = Column(Date, nullable=False)
+
+    # Metrics
+    impressions = Column(Integer, default=0)
+    clicks = Column(Integer, default=0)
+    conversions = Column(Integer, default=0)
+
+    # Engagement
+    likes = Column(Integer, default=0)
+    shares = Column(Integer, default=0)
+    comments = Column(Integer, default=0)
+    saves = Column(Integer, default=0)
+
+    # Video
+    video_views = Column(Integer, default=0)
+    video_view_duration_avg = Column(Float, default=0.0)
+
+    # Financial (in cents)
+    spend = Column(Integer, default=0)
+    revenue = Column(Integer, default=0)
+
+    # Calculated
+    ctr = Column(Float, default=0.0)
+    cpc = Column(Float, default=0.0)
+    cpa = Column(Float, default=0.0)
+    roas = Column(Float, default=0.0)
+    engagement_rate = Column(Float, default=0.0)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Relationships
+    ad_creative = relationship("AdCreative", back_populates="performance")

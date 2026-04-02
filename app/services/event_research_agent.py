@@ -12,6 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.models import Event, Venue, EventCategory, TicketTier
 from app.config import get_settings
+from app.services.youtube_research import research_artist_youtube
+from app.services.artist_social_research import (
+    research_spotify,
+    research_wikipedia,
+    research_social_media_links,
+    research_comprehensive_web_search,
+)
 
 
 def analyze_event_context(db: Session, event_id: int) -> Dict:
@@ -198,42 +205,116 @@ Return as JSON with keys: artist_name, bio, genre, achievements, social_media, s
         }
 
 
-def research_venue_area(venue_address: str) -> Dict:
+def research_venue_area(venue_address: str, event_date: Optional[str] = None) -> Dict:
     """
-    Research the area around a venue using geocoding and local insights.
+    Research the area around a venue using geocoding and real APIs.
 
-    In production, this would use:
+    Uses:
     - Google Places API for nearby venues/competitors
-    - Census data for demographics
-    - Weather API for event date forecast
+    - OpenWeather API for event date forecast
+    - Geopy for geocoding
     """
+    from app.config import get_settings
+
+    settings = get_settings()
+
     # Parse city and state from address
     parts = venue_address.split(",")
     city = parts[-2].strip() if len(parts) >= 2 else "Unknown"
     state = parts[-1].strip() if len(parts) >= 1 else "Unknown"
 
-    # Mock demographic data (replace with real API calls)
-    return {
+    result = {
         "location": {
             "city": city,
             "state": state,
             "full_address": venue_address,
         },
-        "demographics": {
-            "population": "Estimated from census data",
-            "median_age": "Research via census API",
-            "median_income": "Research via census API",
-        },
-        "nearby_venues": [
-            "Research via Google Places API",
-            "Find competing venues within 5 miles",
-        ],
-        "local_events": [
-            "Research via Eventbrite/Ticketmaster APIs",
-            "Identify competing events on same date",
-        ],
-        "weather_forecast": "Use OpenWeather API for event date",
+        "demographics": {},
+        "nearby_venues": [],
+        "local_events": [],
+        "weather_forecast": None,
     }
+
+    # Geocode the address to get coordinates
+    try:
+        from geopy.geocoders import Nominatim
+        geolocator = Nominatim(user_agent="ai-tickets-research")
+        location = geolocator.geocode(venue_address)
+
+        if location:
+            result["location"]["latitude"] = location.latitude
+            result["location"]["longitude"] = location.longitude
+
+            # Research nearby venues using Google Places API
+            if settings.google_places_api_key:
+                import requests
+                places_url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+                places_params = {
+                    "location": f"{location.latitude},{location.longitude}",
+                    "radius": 8047,  # 5 miles in meters
+                    "type": "night_club|bar|stadium|amusement_park|art_gallery",
+                    "key": settings.google_places_api_key,
+                }
+
+                try:
+                    places_resp = requests.get(places_url, params=places_params, timeout=10)
+                    if places_resp.status_code == 200:
+                        places_data = places_resp.json()
+                        result["nearby_venues"] = [
+                            {
+                                "name": p["name"],
+                                "address": p.get("vicinity", ""),
+                                "rating": p.get("rating"),
+                                "types": p.get("types", []),
+                            }
+                            for p in places_data.get("results", [])[:10]
+                        ]
+                except Exception:
+                    result["nearby_venues"] = ["Google Places API unavailable"]
+            else:
+                result["nearby_venues"] = ["Google Places API key not configured"]
+
+            # Get weather forecast if event date provided
+            if event_date and settings.openweather_api_key:
+                try:
+                    from datetime import datetime
+                    event_dt = datetime.strptime(event_date, "%Y-%m-%d")
+                    days_away = (event_dt - datetime.now()).days
+
+                    if 0 <= days_away <= 7:
+                        # Use 7-day forecast
+                        weather_url = "https://api.openweathermap.org/data/2.5/forecast"
+                        weather_params = {
+                            "lat": location.latitude,
+                            "lon": location.longitude,
+                            "appid": settings.openweather_api_key,
+                            "units": "imperial",
+                        }
+
+                        weather_resp = requests.get(weather_url, params=weather_params, timeout=10)
+                        if weather_resp.status_code == 200:
+                            forecast_data = weather_resp.json()
+                            # Find forecast closest to event date
+                            for forecast in forecast_data.get("list", []):
+                                forecast_date = forecast["dt_txt"].split()[0]
+                                if forecast_date == event_date:
+                                    result["weather_forecast"] = {
+                                        "temp_f": forecast["main"]["temp"],
+                                        "description": forecast["weather"][0]["description"],
+                                        "humidity": forecast["main"]["humidity"],
+                                        "wind_speed_mph": forecast["wind"]["speed"],
+                                    }
+                                    break
+                except Exception:
+                    result["weather_forecast"] = "Weather API unavailable"
+            elif not settings.openweather_api_key:
+                result["weather_forecast"] = "OpenWeather API key not configured"
+
+    except Exception:
+        # Geocoding failed, return basic data
+        result["demographics"] = {"note": "Geocoding service unavailable"}
+
+    return result
 
 
 def _generate_event_description(
@@ -445,6 +526,11 @@ async def run_event_research_agent(
     Steps:
     1. Analyze event context (date, venue, pricing, inventory)
     2. Research artist/performer (bio, genre, social media, fan demographics)
+    2.5. Research artist YouTube videos (most viewed, subscriber count)
+    2.6. Research artist on Spotify (followers, top tracks, popularity)
+    2.7. Research artist on Wikipedia (biography, summary, image)
+    2.8. Research artist social media links (Instagram, TikTok, Twitter, etc.)
+    2.9. Comprehensive web search (news, tours, awards, collaborations)
     3. Research venue area (demographics, competitors, weather)
     4. Generate AI marketing plan with artist context
     5. Generate enhanced event description
@@ -463,6 +549,36 @@ async def run_event_research_agent(
             event_context['event']['name'],
             event_context['event']['description']
         )
+
+    # Step 2.5: Research artist YouTube videos
+    youtube_research = {}
+    if include_artist_research and artist_research:
+        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        youtube_research = research_artist_youtube(artist_name, max_results=5)
+
+    # Step 2.6: Research artist on Spotify
+    spotify_research = {}
+    if include_artist_research and artist_research:
+        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        spotify_research = research_spotify(artist_name)
+
+    # Step 2.7: Research artist on Wikipedia
+    wikipedia_research = {}
+    if include_artist_research and artist_research:
+        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        wikipedia_research = research_wikipedia(artist_name)
+
+    # Step 2.8: Research artist social media links
+    social_media_research = {}
+    if include_artist_research and artist_research:
+        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        social_media_research = research_social_media_links(artist_name)
+
+    # Step 2.9: Comprehensive web search (news, tours, awards)
+    web_search_research = {}
+    if include_artist_research and artist_research:
+        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        web_search_research = research_comprehensive_web_search(artist_name)
 
     # Step 3: Research area
     area_research = research_venue_area(event_context['venue']['address'])
@@ -492,11 +608,21 @@ async def run_event_research_agent(
         "research_completed_at": datetime.utcnow().isoformat(),
         "event_context": event_context,
         "artist_research": artist_research,
+        "youtube_research": youtube_research,
+        "spotify_research": spotify_research,
+        "wikipedia_research": wikipedia_research,
+        "social_media_research": social_media_research,
+        "web_search_research": web_search_research,
         "area_research": area_research,
         "enhanced_description": enhanced_description,
         "marketing_plan": marketing_plan,
         "next_steps": [
             "Review artist bio and update event description" if enhanced_description else None,
+            "Embed top YouTube videos on event page" if youtube_research and not youtube_research.get("error") else None,
+            "Add Spotify player widget to event page" if spotify_research and not spotify_research.get("error") else None,
+            "Link to artist's Wikipedia page" if wikipedia_research and not wikipedia_research.get("error") else None,
+            "Add social media follow buttons" if social_media_research and not social_media_research.get("error") else None,
+            "Promote upcoming tour dates from web search" if web_search_research and not web_search_research.get("error") else None,
             "Review marketing plan recommendations",
             "Adjust budget allocations based on sell-through rate",
             "Create Meta ad campaigns using recommended messaging",

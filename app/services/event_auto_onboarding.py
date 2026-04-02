@@ -319,20 +319,87 @@ async def _schedule_marketing_campaigns(
     if not research_report:
         return {"success": False, "reason": "No marketing plan available"}
 
+    from app.models import MarketingCampaign
+    from datetime import datetime, timedelta
+
     marketing_plan = research_report.get("marketing_plan", {})
     timing = marketing_plan.get("timing_strategy", {})
+    key_messaging = marketing_plan.get("key_messaging", {})
 
-    # Parse timing recommendations
-    # This would integrate with your existing marketing campaign scheduler
-    # For now, return placeholder
+    campaigns_created = []
 
-    return {
-        "success": True,
-        "email_scheduled": True,
-        "sms_scheduled": True,
-        "timing_recommendations": timing,
-        "note": "Use /api/marketing-campaigns to view/edit schedules"
-    }
+    # Parse event date to calculate send times
+    try:
+        event_datetime = datetime.strptime(f"{event.event_date} {event.event_time}", "%Y-%m-%d %H:%M")
+        days_until = (event_datetime - datetime.now()).days
+
+        # Create early bird campaign (2 weeks before or immediately if < 14 days)
+        if days_until > 7:
+            early_bird_date = event_datetime - timedelta(days=min(14, days_until - 7))
+            early_campaign = MarketingCampaign(
+                name=f"{event.name} - Early Bird Announcement",
+                campaign_type="email",
+                subject=key_messaging.get("headline", f"Don't Miss {event.name}!"),
+                content=f"{key_messaging.get('value_proposition', '')} Get your tickets early!",
+                target_event_id=event_id,
+                target_all=True,
+                scheduled_send_time=early_bird_date,
+                status="scheduled",
+            )
+            db.add(early_campaign)
+            campaigns_created.append("early_bird_email")
+
+        # Create final push campaign (3-7 days before)
+        if days_until > 3:
+            final_push_date = event_datetime - timedelta(days=min(5, days_until - 1))
+            final_campaign = MarketingCampaign(
+                name=f"{event.name} - Final Push",
+                campaign_type="email",
+                subject=key_messaging.get("urgency_message", "Last Chance to Get Tickets!"),
+                content=f"{key_messaging.get('emotional_hook', '')} Don't miss out - tickets are selling fast!",
+                target_event_id=event_id,
+                target_all=True,
+                scheduled_send_time=final_push_date,
+                status="scheduled",
+            )
+            db.add(final_campaign)
+            campaigns_created.append("final_push_email")
+
+        # Create SMS reminder (24-48 hours before if high priority)
+        channel_strategy = marketing_plan.get("channel_strategy", {})
+        sms_config = channel_strategy.get("sms", {})
+
+        if sms_config.get("priority") in ["HIGH", "MEDIUM"] and days_until > 1:
+            sms_date = event_datetime - timedelta(days=1)
+            sms_campaign = MarketingCampaign(
+                name=f"{event.name} - SMS Reminder",
+                campaign_type="sms",
+                subject="Event Reminder",
+                content=f"Reminder: {event.name} tomorrow at {event.event_time}! See you there!",
+                target_event_id=event_id,
+                target_all=False,  # Only ticket holders
+                scheduled_send_time=sms_date,
+                status="scheduled",
+            )
+            db.add(sms_campaign)
+            campaigns_created.append("reminder_sms")
+
+        db.commit()
+
+        return {
+            "success": True,
+            "campaigns_created": len(campaigns_created),
+            "campaign_types": campaigns_created,
+            "timing_strategy": timing,
+            "note": f"Created {len(campaigns_created)} scheduled campaigns. View at /api/marketing-campaigns"
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "note": "Failed to schedule campaigns"
+        }
 
 
 async def _configure_dynamic_pricing(

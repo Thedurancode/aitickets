@@ -175,15 +175,52 @@ class EventPublisher:
             eventbrite_id = data.get("id")
             eventbrite_url = data.get("url")
 
-            # TODO: Create ticket classes on Eventbrite
-            # TODO: Save eventbrite_id to event record
+            # Save eventbrite_id to event record
+            if not hasattr(self.event, 'eventbrite_id'):
+                # Column doesn't exist yet, skip saving (backward compatibility)
+                pass
+            else:
+                self.event.eventbrite_id = eventbrite_id
+                self.event.eventbrite_url = eventbrite_url
+                self.db.commit()
+
+            # Create ticket classes on Eventbrite for each tier
+            ticket_tiers_created = []
+            for tier in self.event.ticket_tiers:
+                ticket_class_payload = {
+                    "ticket_class": {
+                        "name": tier.name,
+                        "description": tier.description or "",
+                        "quantity_total": tier.quantity_available,
+                        "cost": f"USD,{tier.price / 100:.2f}" if tier.price > 0 else "free",
+                        "free": tier.price == 0,
+                        "sales_start": self.event.sale_start_date.isoformat() if self.event.sale_start_date else None,
+                        "sales_end": self.event.event_date.isoformat() if self.event.event_date else None,
+                    }
+                }
+
+                tier_response = requests.post(
+                    f"https://www.eventbriteapi.com/v3/events/{eventbrite_id}/ticket_classes/",
+                    headers={"Authorization": f"Bearer {eventbrite_token}"},
+                    json=ticket_class_payload,
+                    timeout=30
+                )
+
+                if tier_response.status_code in [200, 201]:
+                    tier_data = tier_response.json()
+                    ticket_tiers_created.append({
+                        "tier_name": tier.name,
+                        "eventbrite_ticket_class_id": tier_data.get("id"),
+                    })
 
             return {
                 "success": True,
                 "platform": "eventbrite",
                 "event_id": eventbrite_id,
                 "event_url": eventbrite_url,
-                "message": f"Published to Eventbrite: {eventbrite_url}"
+                "ticket_tiers_created": len(ticket_tiers_created),
+                "tiers": ticket_tiers_created,
+                "message": f"Published to Eventbrite with {len(ticket_tiers_created)} ticket tiers: {eventbrite_url}"
             }
 
         except Exception as e:
