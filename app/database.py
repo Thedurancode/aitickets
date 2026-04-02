@@ -58,6 +58,7 @@ MIGRATIONS = [
     "add_style_picker_sessions",
     "add_media_sharing",
     "add_inventory_alerts",
+    "add_ad_campaign_tables",
 ]
 
 

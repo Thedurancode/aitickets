@@ -90,15 +90,17 @@ The system uses **LLM-powered routing** to understand natural language, extract 
 - **Speech-to-Text** — Optional transcription of call responses
 - **Gather Input** — Collect keypress responses during calls
 
-### Meta Ads Integration
-- **Facebook & Instagram Ads** — Create ad campaigns directly from event data
-- **Geo-Targeting** — Automatic radius targeting around event venue
-- **Auto-Generated Copy** — AI-written ad headlines and descriptions
-- **Image Upload** — Use event images for ad creatives
-- **Performance Tracking** — Get insights on spend, impressions, clicks, conversions
-- **Campaign Management** — Pause, resume, update budgets for existing campaigns
-- **Targeting Suggestions** — AI-recommended targeting parameters based on event characteristics
-- **Strategy Generator** — One-click AI-powered ad strategy creation
+### Automated Ad Campaign System
+- **Auto-Generate 9+ Ads Per Event** — Create Meta, Google, and Email campaigns from research data
+- **Multi-Platform Publishing** — Publish to Facebook, Instagram (Meta) and Google Search/Display
+- **Image Discovery** — Auto-discover artist images from Spotify, YouTube, Wikipedia APIs
+- **Cultural Intelligence** — Genre-aware ad copy (Spanish + English for Latin events)
+- **Full Customization UI** — Live preview, edit headlines/body/targeting before publishing
+- **One-Click Publishing** — Publish to Meta Ads API and Google Ads API with approval workflow
+- **Performance Tracking** — Daily sync of impressions, clicks, conversions, ROAS from platforms
+- **Smart Budget Allocation** — Auto-allocate $1,900/event across awareness, conversion, search
+- **Geo-Targeting** — 25-mile radius targeting around event venue with demographic filters
+- **A/B Testing Ready** — Generate multiple ad variations per campaign for testing
 
 ### Template-Based Flyer Generation
 - **AI Flyer Generation** — Generate event flyers using reference templates via NanoBanana AI
@@ -320,7 +322,8 @@ ENV=test pytest tests/ -v
 | **About** | `GET/PUT /about`, `POST/DELETE /about/team-member` | About page CMS |
 | **Flyer Templates** | `GET/POST /flyer-templates`, `GET/PUT/DELETE /flyer-templates/{id}` | Template management |
 | **Flyer Generation** | `POST /flyer-templates/generate`, `POST /flyer-templates/events/{id}/generate/{templateId}` | AI flyer generation |
-| **Meta Ads** | `POST /meta-ads/campaigns`, `GET /meta-ads/campaigns/{id}/insights` | Facebook/Instagram ads |
+| **Meta Ads** | `POST /meta-ads/campaigns`, `GET /meta-ads/campaigns/{id}/insights` | Facebook/Instagram ads (legacy) |
+| **Ad Campaigns** | `POST /ad-campaigns/generate/{event_id}`, `PATCH /ad-campaigns/ads/{id}`, `POST /ad-campaigns/ads/{id}/publish` | Automated campaigns (Meta + Google) |
 | **Event Image Update** | `POST /event-image-update/generate-token`, `POST /event-image-update/upload` | SMS image upload |
 
 ### Public Pages
