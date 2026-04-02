@@ -16,7 +16,7 @@ from app.database import init_db
 from app.config import get_settings
 from app.rate_limit import limiter
 from app.logging_config import setup_logging
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates, event_publisher, flyer_templates_enhanced, event_media, marketing_lists, refunds, dynamic_pricing, event_research, intelligence, webhooks_admin, alerts, alert_stream, campaign_tracking, analytics_dashboard, ad_campaigns, social_proof
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates, event_publisher, flyer_templates_enhanced, event_media, marketing_lists, refunds, dynamic_pricing, event_research, intelligence, webhooks_admin, alerts, alert_stream, campaign_tracking, analytics_dashboard, ad_campaigns, social_proof, group_buying, affiliates, loyalty, stripe_webhooks
 
 # Module-level logger (must be before exception handlers which use it)
 logger = logging.getLogger(__name__)
@@ -119,6 +119,10 @@ app.include_router(campaign_tracking.router, prefix=api_prefix)
 app.include_router(analytics_dashboard.router, prefix=api_prefix)
 app.include_router(ad_campaigns.router, prefix=api_prefix)
 app.include_router(social_proof.router)  # Social proof & FOMO engine
+app.include_router(group_buying.router)  # Group buying with split payments
+app.include_router(affiliates.router)  # Affiliate/influencer program
+app.include_router(loyalty.router)  # Loyalty points & gamification
+app.include_router(stripe_webhooks.router)  # Stripe payment webhooks
 app.include_router(flyer_templates.router)  # Router already includes /api prefix
 app.include_router(flyer_templates_enhanced.router)  # Router already includes /api prefix
 app.include_router(meta_ads.router)  # Router already includes /api prefix

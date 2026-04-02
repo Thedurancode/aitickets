@@ -59,6 +59,8 @@ MIGRATIONS = [
     "add_media_sharing",
     "add_inventory_alerts",
     "add_ad_campaign_tables",
+    "add_new_feature_tables",
+    "add_performance_indexes",
 ]
 
 

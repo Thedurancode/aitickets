@@ -34,9 +34,8 @@ class SocialProofEngine:
             )
         ).scalar() or 0
 
-        # Add some randomness for realism (10-30% boost)
-        boost = random.uniform(1.1, 1.3)
-        return max(1, int(count * boost))
+        # Return actual count - no artificial inflation
+        return count
 
     def get_recent_purchases(self, event_id: int, limit: int = 5) -> List[Dict]:
         """Get recent ticket purchases for social proof."""
@@ -58,10 +57,9 @@ class SocialProofEngine:
             # Anonymize for privacy
             first_name = goer.name.split()[0] if goer.name else "Someone"
 
-            # Generate fake location (in production, use IP geolocation)
-            locations = ["Brooklyn", "Manhattan", "Queens", "Bronx", "Staten Island",
-                        "Jersey City", "Newark", "Hoboken", "Long Island City"]
-            location = random.choice(locations)
+            # Location removed - was generating fake data
+            # In production, use IP geolocation with user consent
+            location = None
 
             # Time ago
             time_ago = self._format_time_ago(ticket.purchased_at)

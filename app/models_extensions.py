@@ -7,7 +7,7 @@ Additional models for:
 - Gamification & loyalty
 - Enhanced post-event engagement
 """
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Numeric, Enum as SQLEnum, JSON
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Numeric, Enum, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.models import utcnow
