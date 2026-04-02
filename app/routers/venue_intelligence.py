@@ -748,3 +748,160 @@ def generate_radius_targeting(optimal: Dict) -> Dict:
         "estimated_cpm": "$8-12",
         "estimated_total_cost": "$2,500-$3,500 for full campaign"
     }
+
+
+# ==================== MARKETING PLAN PDF EXPORT ====================
+
+@router.post("/marketing-plan/{event_id}/pdf")
+async def generate_marketing_plan_pdf(
+    event_id: int,
+    current_user: EventGoer = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate a comprehensive marketing plan PDF for an event.
+
+    This creates a professional, multi-page PDF document including:
+    - Executive summary with key metrics
+    - Event overview and ticket tiers
+    - Demographic analysis of venue location
+    - Target audience personas
+    - Multi-channel marketing strategy
+    - Budget allocation by channel and segment
+    - Marketing timeline with milestones
+    - ROI projections and success metrics
+    - KPI tracking plan
+
+    Returns:
+        PDF file download
+    """
+    from fastapi.responses import Response
+    from app.services.marketing_plan_pdf import generate_marketing_plan_pdf, create_sample_marketing_timeline
+    from app.models import TicketTier
+
+    # Get event
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    # Get venue
+    venue = db.query(Venue).filter(Venue.id == event.venue_id).first()
+    if not venue:
+        raise HTTPException(status_code=404, detail="Venue not found for this event")
+
+    # Get ticket tiers
+    tiers = db.query(TicketTier).filter(TicketTier.event_id == event_id).all()
+
+    # Get demographics for venue
+    location = extract_coordinates(venue.address, venue.city, venue.state)
+    demographics = await fetch_venue_demographics(location)
+
+    # Generate personas
+    personas = await generate_audience_personas(demographics, {})
+
+    # Create ad campaigns
+    ad_campaigns = []
+    for persona in personas[:3]:  # Top 3 personas
+        segment = {"name": persona["name"], "percentage": persona["percentage"]}
+
+        meta_ads = await compose_meta_ads(event, venue, segment, demographics)
+        google_ads = await compose_google_ads(event, venue, segment, demographics)
+        email = await compose_email_campaign(event, venue, segment, demographics)
+
+        ad_campaigns.append({
+            "segment": segment,
+            "meta_ads": meta_ads,
+            "google_ads": google_ads,
+            "email_marketing": email,
+            "expected_reach": calculate_reach(segment, demographics),
+            "estimated_ctr": estimate_ctr(segment, event.category if hasattr(event, 'category') else 'general'),
+            "suggested_budget": suggest_budget(segment, event),
+            "suggested_budget_formatted": f"${suggest_budget(segment, event) / 100:,.2f}"
+        })
+
+    # Budget allocation
+    total_budget = 300000  # $3,000 in cents
+    budget_allocation = {
+        "total_budget": total_budget,
+        "total_budget_formatted": f"${total_budget / 100:,.2f}",
+        "by_channel": [
+            {"channel": "Meta Ads (Facebook/Instagram)", "budget": 120000, "budget_formatted": "$1,200", "percentage": 40, "expected_roi": "4.5x"},
+            {"channel": "Google Ads (Search/Display)", "budget": 90000, "budget_formatted": "$900", "percentage": 30, "expected_roi": "3.8x"},
+            {"channel": "Email Marketing", "budget": 30000, "budget_formatted": "$300", "percentage": 10, "expected_roi": "8.0x"},
+            {"channel": "Social Media (Organic)", "budget": 30000, "budget_formatted": "$300", "percentage": 10, "expected_roi": "5.2x"},
+            {"channel": "Affiliates/Influencers", "budget": 30000, "budget_formatted": "$300", "percentage": 10, "expected_roi": "6.5x"}
+        ],
+        "by_persona": [
+            {"segment": personas[0]["name"], "budget": 150000, "budget_formatted": "$1,500", "percentage": 50},
+            {"segment": personas[1]["name"], "budget": 75000, "budget_formatted": "$750", "percentage": 25},
+            {"segment": personas[2]["name"], "budget": 75000, "budget_formatted": "$750", "percentage": 25}
+        ]
+    }
+
+    # Marketing timeline
+    timeline = create_sample_marketing_timeline(event.date)
+
+    # ROI projections
+    expected_tickets = int(event.capacity * 0.75)  # 75% capacity goal
+    avg_ticket_price = sum(tier.price * tier.quantity for tier in tiers) / sum(tier.quantity for tier in tiers) if tiers else 10000
+    expected_revenue = expected_tickets * avg_ticket_price
+
+    roi_projections = {
+        "expected_impressions": 250000,
+        "expected_clicks": 5000,
+        "expected_conversions": 300,
+        "expected_tickets": expected_tickets,
+        "expected_revenue": int(expected_revenue),
+        "expected_revenue_formatted": f"${expected_revenue / 100:,.2f}",
+        "marketing_cost": total_budget,
+        "net_profit": int(expected_revenue - total_budget),
+        "net_profit_formatted": f"${(expected_revenue - total_budget) / 100:,.2f}",
+        "roi_multiplier": round(expected_revenue / total_budget, 2)
+    }
+
+    # Prepare event data
+    event_data = {
+        "name": event.name,
+        "date": event.date,
+        "description": event.description,
+        "capacity": event.capacity,
+        "category": event.category if hasattr(event, 'category') else 'general',
+        "ticket_tiers": [
+            {
+                "name": tier.name,
+                "price": tier.price,
+                "quantity": tier.quantity
+            }
+            for tier in tiers
+        ]
+    }
+
+    venue_data = {
+        "name": venue.name,
+        "address": venue.address,
+        "city": venue.city,
+        "state": venue.state
+    }
+
+    # Generate PDF
+    pdf_bytes = generate_marketing_plan_pdf(
+        event=event_data,
+        venue=venue_data,
+        demographics=demographics,
+        personas=personas,
+        ad_campaigns=ad_campaigns,
+        budget_allocation=budget_allocation,
+        timeline=timeline,
+        roi_projections=roi_projections
+    )
+
+    # Return as downloadable PDF
+    filename = f"marketing_plan_{event.name.replace(' ', '_').lower()}_{datetime.now().strftime('%Y%m%d')}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
