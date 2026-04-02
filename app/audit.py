@@ -36,9 +36,10 @@ class AuditLog(Base):
 class AuditLogger:
     """Service for creating audit log entries."""
 
-    def __init__(self, db: Session):
-        """Initialize audit logger with database session."""
+    def __init__(self, db: Session, default_user_id: Optional[int] = None):
+        """Initialize audit logger with database session and optional default user."""
         self.db = db
+        self.default_user_id = default_user_id
 
     def log(
         self,
@@ -59,7 +60,7 @@ class AuditLogger:
             action: Action performed (e.g., "approve_affiliate", "override_points")
             entity_type: Type of entity affected (e.g., "affiliate", "loyalty_account")
             entity_id: ID of affected entity
-            user_id: ID of user who performed the action
+            user_id: ID of user who performed the action (defaults to default_user_id from constructor)
             old_value: Previous state (dict/JSON)
             new_value: New state (dict/JSON)
             ip_address: Client IP address
@@ -70,8 +71,11 @@ class AuditLogger:
             Created AuditLog instance
         """
         try:
+            # Use provided user_id or fall back to default_user_id
+            effective_user_id = user_id if user_id is not None else self.default_user_id
+
             audit_entry = AuditLog(
-                user_id=user_id,
+                user_id=effective_user_id,
                 action=action,
                 entity_type=entity_type,
                 entity_id=entity_id,
@@ -86,7 +90,7 @@ class AuditLogger:
             self.db.flush()  # Get ID without committing
 
             logger.info(
-                f"Audit log created: {action} on {entity_type}#{entity_id} by user {user_id}"
+                f"Audit log created: {action} on {entity_type}#{entity_id} by user {effective_user_id}"
             )
 
             return audit_entry
@@ -202,9 +206,18 @@ class AuditLogger:
         )
 
 
-def create_audit_logger(db: Session) -> AuditLogger:
-    """Factory function to create audit logger instance."""
-    return AuditLogger(db)
+def create_audit_logger(db: Session, user_id: Optional[int] = None) -> AuditLogger:
+    """
+    Factory function to create audit logger instance.
+
+    Args:
+        db: Database session
+        user_id: Optional default user ID to use for all logs
+
+    Returns:
+        AuditLogger instance
+    """
+    return AuditLogger(db, default_user_id=user_id)
 
 
 # Audit action constants

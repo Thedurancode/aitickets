@@ -189,18 +189,18 @@ def join_group_purchase(
         if not group:
             raise HTTPException(status_code=404, detail="Group purchase not found")
 
-    # Check status
-    if group.status != GroupPurchaseStatus.PENDING:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot join group with status: {group.status}"
-        )
+        # Check status
+        if group.status != GroupPurchaseStatus.PENDING:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot join group with status: {group.status}"
+            )
 
-    # Check expiration
-    if datetime.utcnow() > group.expires_at:
-        group.status = GroupPurchaseStatus.EXPIRED
-        db.commit()
-        raise HTTPException(status_code=400, detail="Group purchase has expired")
+        # Check expiration
+        if datetime.utcnow() > group.expires_at:
+            group.status = GroupPurchaseStatus.EXPIRED
+            db.commit()
+            raise HTTPException(status_code=400, detail="Group purchase has expired")
 
         # Check if already contributed
         existing = db.query(GroupContribution).filter(
