@@ -39,6 +39,11 @@ class AdStatus(str, enum.Enum):
     FAILED = "failed"  # Failed to publish
 
 
+def run_migration():
+    """Run the migration (standard interface)."""
+    upgrade()
+
+
 def upgrade():
     """Create ad campaign tables."""
     from app.database import engine

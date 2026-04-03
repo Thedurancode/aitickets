@@ -30,7 +30,7 @@ class SocialProofEngine:
         count = self.db.query(func.count(PageView.id)).filter(
             and_(
                 PageView.event_id == event_id,
-                PageView.timestamp >= five_min_ago
+                PageView.created_at >= five_min_ago
             )
         ).scalar() or 0
 

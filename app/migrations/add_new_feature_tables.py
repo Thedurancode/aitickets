@@ -10,6 +10,11 @@ from sqlalchemy import text
 from app.database import engine
 
 
+def run_migration():
+    """Run the migration (standard interface)."""
+    upgrade()
+
+
 def upgrade():
     """Create new feature tables."""
 

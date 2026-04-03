@@ -22,14 +22,30 @@ router = APIRouter(prefix="/events", tags=["events"])
 @router.get("", response_model=list[EventWithVenueResponse])
 def list_events(
     category: str | None = None,
+    q: str | None = None,  # Search query
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """List events with venue information. Optionally filter by category name."""
+    """
+    List events with venue information.
+
+    Optionally filter by:
+    - category: Filter by category name
+    - q: Search in event name, description, and venue
+    """
     query = db.query(Event).options(joinedload(Event.venue), joinedload(Event.categories))
+
     if category:
         query = query.join(Event.categories).filter(EventCategory.name.ilike(f"%{category}%"))
+
+    if q:
+        search_term = f"%{q}%"
+        query = query.filter(
+            (Event.name.ilike(search_term)) |
+            (Event.description.ilike(search_term))
+        )
+
     events = query.order_by(Event.event_date.desc()).offset(offset).limit(limit).all()
     return events
 

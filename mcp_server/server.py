@@ -26,6 +26,22 @@ from app.services.stripe_sync import (
     create_stripe_product_for_tier,
     sync_existing_tiers_to_stripe,
 )
+from mcp_server.platform_analytics_tools import (
+    get_platform_analytics_tools,
+    handle_platform_analytics_tool,
+)
+from mcp_server.weather_tools import (
+    get_weather_tools,
+    handle_weather_tool,
+)
+from mcp_server.social_media_tools import (
+    get_social_media_tools,
+    handle_social_media_tool,
+)
+from mcp_server.voiceover_tools import (
+    get_voiceover_tools,
+    handle_voiceover_tool,
+)
 
 settings = get_settings()
 
@@ -2991,12 +3007,67 @@ async def list_tools():
                 "required": [],
             },
         ),
-    ]
+    ] + get_platform_analytics_tools() + get_weather_tools() + get_social_media_tools() + get_voiceover_tools()
 
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
     """Handle tool calls."""
+    # Cross-platform analytics tools
+    platform_analytics_tool_names = [
+        "get_cross_platform_pageviews",
+        "get_platform_breakdown",
+        "get_all_platforms_summary",
+        "track_external_pageview",
+        "bulk_import_external_views"
+    ]
+
+    if name in platform_analytics_tool_names:
+        return await handle_platform_analytics_tool(name, arguments)
+
+    # Weather intelligence tools
+    weather_tool_names = [
+        "get_weather_forecast",
+        "check_event_weather",
+        "check_all_events_weather",
+        "get_weather_alerts",
+        "mark_weather_alerts_notified",
+        "get_weather_summary"
+    ]
+
+    if name in weather_tool_names:
+        return await handle_weather_tool(name, arguments)
+
+    # Social media publishing tools
+    social_media_tool_names = [
+        "update_event_social_media_posts",
+        "update_event_status_everywhere",
+        "publish_event_to_social_media",
+        "get_enabled_social_platforms",
+        "preview_social_media_content",
+        "publish_to_twitter",
+        "publish_to_facebook",
+        "publish_to_instagram",
+        "publish_to_linkedin",
+        "publish_via_postiz"
+    ]
+
+    if name in social_media_tool_names:
+        return await handle_social_media_tool(name, arguments)
+
+    # Voiceover generation tools
+    voiceover_tool_names = [
+        "generate_event_voiceover",
+        "get_available_voices",
+        "preview_voice",
+        "update_venue_voice",
+        "get_venue_voice_settings"
+    ]
+
+    if name in voiceover_tool_names:
+        return await handle_voiceover_tool(name, arguments)
+
+    # All other tools
     db = get_db()
     try:
         result = await _execute_tool(name, arguments, db)

@@ -14,6 +14,7 @@ from app.models import Event
 router = APIRouter(prefix="/api/social-proof", tags=["Social Proof"])
 
 
+@router.get("/{event_id}", response_model=Dict)
 @router.get("/events/{event_id}", response_model=Dict)
 def get_event_social_proof(
     event_id: int,

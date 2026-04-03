@@ -77,6 +77,36 @@ class ReferralStats(BaseModel):
 
 # ===================== API Endpoints =====================
 
+@router.get("", response_model=List[Dict])
+def list_affiliates(
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """
+    List active affiliates (public endpoint).
+
+    Shows affiliate profile information without sensitive data.
+    """
+    affiliates = db.query(Affiliate).filter(
+        Affiliate.status == AffiliateStatus.ACTIVE
+    ).limit(limit).all()
+
+    return [
+        {
+            "code": a.code,
+            "display_name": a.display_name,
+            "bio": a.bio,
+            "social_links": {
+                "instagram": a.instagram_handle,
+                "tiktok": a.tiktok_handle,
+                "youtube": a.youtube_channel,
+                "twitter": a.twitter_handle
+            }
+        }
+        for a in affiliates
+    ]
+
+
 @router.post("/apply", response_model=AffiliateResponse)
 def apply_as_affiliate(
     application: AffiliateApplication,

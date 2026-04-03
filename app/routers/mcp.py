@@ -96,6 +96,26 @@ async def mcp_info():
     }
 
 
+@router.get("/health")
+async def mcp_health():
+    """MCP health check endpoint."""
+    from sqlalchemy import text
+    from app.database import SessionLocal
+
+    checks = {"mcp": "ok", "database": "ok"}
+    status = "healthy"
+
+    try:
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+    except Exception as e:
+        checks["database"] = str(e)
+        status = "degraded"
+
+    return {"status": status, "checks": checks}
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     """Serve the real-time TV-style operations dashboard."""

@@ -105,6 +105,12 @@ class Venue(Base):
     address = Column(String(500), nullable=False)
     phone = Column(String(50), nullable=True)
     description = Column(Text, nullable=True)
+
+    # ElevenLabs voice settings for voiceovers
+    voice_id = Column(String(100), nullable=True)  # ElevenLabs voice ID
+    voice_name = Column(String(100), nullable=True)  # Human-readable voice name
+    voice_settings = Column(Text, nullable=True)  # JSON: {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": true}
+
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     events = relationship("Event", back_populates="venue", cascade="all, delete-orphan")
@@ -452,6 +458,11 @@ class PageView(Base):
     utm_medium = Column(String(100), nullable=True)
     utm_campaign = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    # Cross-platform tracking fields
+    platform = Column(String(50), default="internal")  # 'internal', 'eventbrite', 'facebook', 'ticketmaster', etc.
+    external_platform_id = Column(String(255), nullable=True)  # External event/listing ID
+    platform_api_response = Column(Text, nullable=True)  # JSON string of raw platform data
 
 
 class WaitlistEntry(Base):
@@ -1298,3 +1309,163 @@ class AdPerformance(Base):
 
     # Relationships
     ad_creative = relationship("AdCreative", back_populates="performance")
+
+# ============== EXPERT INTELLIGENCE MODELS ==============
+
+class WeatherForecast(Base):
+    """Weather forecasts for events with change tracking."""
+    __tablename__ = "weather_forecasts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    forecast_date = Column(Date, nullable=False)
+    
+    # Weather data
+    temperature_high = Column(Float)
+    temperature_low = Column(Float)
+    precipitation_probability = Column(Float)  # 0.0 to 1.0
+    precipitation_amount = Column(Float)  # inches
+    conditions = Column(String(100))  # "Clear", "Rain", "Thunderstorms"
+    wind_speed = Column(Float)  # mph
+    humidity = Column(Float)  # 0.0 to 1.0
+    
+    # Raw API response
+    api_response = Column(Text)
+    
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    
+    event = relationship("Event")
+
+
+class WeatherAlert(Base):
+    """Weather change alerts for events."""
+    __tablename__ = "weather_alerts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    alert_type = Column(String(50), nullable=False)  # "precipitation", "temperature", "severe"
+    severity = Column(String(20), nullable=False)  # "low", "medium", "high", "critical"
+    
+    old_value = Column(Float)
+    new_value = Column(Float)
+    message = Column(Text, nullable=False)
+    notified = Column(Boolean, default=False)
+    
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    
+    event = relationship("Event")
+
+
+class SalesPrediction(Base):
+    """AI-powered sales predictions for events."""
+    __tablename__ = "sales_predictions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+    prediction_date = Column(DateTime(timezone=True), nullable=False, index=True)
+    
+    # Predictions
+    predicted_tickets_sold = Column(Integer)
+    predicted_revenue = Column(Integer)  # cents
+    confidence_score = Column(Float)  # 0.0 to 1.0
+    sellout_probability = Column(Float)  # 0.0 to 1.0
+    days_to_sellout = Column(Float)
+    
+    # Model metadata
+    model_version = Column(String(50))
+    feature_importance = Column(Text)  # JSON
+    
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    
+    event = relationship("Event")
+
+
+class RecommendationStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    IMPLEMENTED = "implemented"
+    COMPLETED = "completed"
+
+
+class RecommendationPriority(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class AIRecommendation(Base):
+    """AI-generated proactive recommendations."""
+    __tablename__ = "ai_recommendations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)
+    
+    recommendation_type = Column(String(50), nullable=False)  # "budget", "pricing", "marketing", "weather"
+    priority = Column(Enum(RecommendationPriority), nullable=False, index=True)
+    
+    title = Column(Text, nullable=False)
+    description = Column(Text, nullable=False)
+    reasoning = Column(Text)  # Why the recommendation was made
+    expected_impact = Column(Text)  # Predicted outcome
+    action_items = Column(Text)  # JSON list of steps
+    
+    status = Column(Enum(RecommendationStatus), default=RecommendationStatus.PENDING, index=True)
+    implemented_at = Column(DateTime(timezone=True))
+    result_data = Column(Text)  # JSON of actual results
+    
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    
+    event = relationship("Event")
+
+
+class BudgetOptimizationLog(Base):
+    """Log of automated budget optimizations."""
+    __tablename__ = "budget_optimization_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)
+
+    optimization_type = Column(String(50), nullable=False)  # "shift", "pause", "increase", "decrease"
+    from_channel = Column(String(50))  # "meta_ads", "google_ads", "email"
+    to_channel = Column(String(50))
+    amount_moved = Column(Integer)  # cents
+
+    reason = Column(Text)
+    expected_improvement = Column(Text)
+    actual_improvement = Column(Text)  # Measured after implementation
+
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    event = relationship("Event")
+
+
+class SocialMediaPost(Base):
+    """Tracks social media posts for events to enable updates."""
+    __tablename__ = "social_media_posts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, index=True)
+
+    platform = Column(String(50), nullable=False, index=True)  # "twitter", "facebook", "instagram", "linkedin"
+    platform_post_id = Column(String(255), nullable=False)  # Platform's post ID
+    post_url = Column(String(500), nullable=True)  # Direct link to post
+
+    # Content snapshot
+    content = Column(Text)
+    image_url = Column(String(500), nullable=True)
+
+    # Status
+    is_published = Column(Boolean, default=True)
+    is_deleted = Column(Boolean, default=False)
+
+    # Metadata
+    scheduled_for = Column(DateTime(timezone=True), nullable=True)
+    published_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+    last_updated_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+    event = relationship("Event")

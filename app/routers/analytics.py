@@ -97,6 +97,7 @@ def get_event_analytics(
     }
 
 
+@router.get("/summary")
 @router.get("/overview")
 def get_analytics_overview(
     days: int = Query(default=30, ge=1, le=365),

@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 import uuid
 from pathlib import Path
+from typing import Optional
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import Venue, Event
@@ -13,8 +16,21 @@ from app.schemas import (
     EventResponse,
 )
 from app.config import get_settings
+from app.services.voiceover_service import get_voiceover_service
 
 router = APIRouter(prefix="/venues", tags=["venues"])
+
+
+# Pydantic schemas for voiceover endpoints
+class VoiceSettingsUpdate(BaseModel):
+    voice_id: str
+    voice_name: Optional[str] = None
+    voice_settings: Optional[dict] = None
+
+
+class VoicePreviewRequest(BaseModel):
+    voice_id: str
+    text: Optional[str] = None
 
 
 @router.get("", response_model=list[VenueResponse])
@@ -126,3 +142,80 @@ def list_venue_events(
 
     events = db.query(Event).filter(Event.venue_id == venue_id).order_by(Event.event_date.desc()).offset(offset).limit(limit).all()
     return events
+
+
+@router.get("/voiceover/voices")
+def get_available_voices(db: Session = Depends(get_db)):
+    """Get list of available ElevenLabs voices."""
+    service = get_voiceover_service(db)
+    result = service._get_available_voices()
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    return result
+
+
+@router.post("/voiceover/preview")
+def preview_voice(request: VoicePreviewRequest, db: Session = Depends(get_db)):
+    """Preview a voice with sample text."""
+    service = get_voiceover_service(db)
+    result = service.preview_voice(
+        voice_id=request.voice_id,
+        text=request.text
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    # Return the audio file
+    return FileResponse(
+        result["file_path"],
+        media_type="audio/mpeg",
+        filename=f"voice_preview_{request.voice_id}.mp3"
+    )
+
+
+@router.get("/{venue_id}/voice-settings")
+def get_venue_voice_settings(venue_id: int, db: Session = Depends(get_db)):
+    """Get venue's voice settings."""
+    venue = db.query(Venue).filter(Venue.id == venue_id).first()
+    if not venue:
+        raise HTTPException(status_code=404, detail="Venue not found")
+
+    import json
+    voice_settings = None
+    if venue.voice_settings:
+        try:
+            voice_settings = json.loads(venue.voice_settings)
+        except:
+            pass
+
+    return {
+        "venue_id": venue.id,
+        "venue_name": venue.name,
+        "voice_id": venue.voice_id,
+        "voice_name": venue.voice_name,
+        "voice_settings": voice_settings
+    }
+
+
+@router.put("/{venue_id}/voice-settings")
+def update_venue_voice_settings(
+    venue_id: int,
+    settings: VoiceSettingsUpdate,
+    db: Session = Depends(get_db)
+):
+    """Update venue's voice settings."""
+    service = get_voiceover_service(db)
+    result = service.update_venue_voice(
+        venue_id=venue_id,
+        voice_id=settings.voice_id,
+        voice_name=settings.voice_name,
+        voice_settings=settings.voice_settings
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=404, detail=result["error"])
+
+    return result

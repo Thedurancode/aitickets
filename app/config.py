@@ -122,6 +122,23 @@ class Settings(BaseSettings):
     spotify_client_id: str = ""  # Spotify Client ID
     spotify_client_secret: str = ""  # Spotify Client Secret
 
+    # Social Media APIs
+    twitter_api_key: str = ""  # Twitter API Key (Consumer Key)
+    twitter_api_secret: str = ""  # Twitter API Secret (Consumer Secret)
+    twitter_access_token: str = ""  # Twitter Access Token
+    twitter_access_secret: str = ""  # Twitter Access Token Secret
+    twitter_bearer_token: str = ""  # Twitter Bearer Token
+
+    tiktok_access_token: str = ""  # TikTok Access Token
+    tiktok_advertiser_id: str = ""  # TikTok Advertiser ID
+
+    linkedin_access_token: str = ""  # LinkedIn Access Token
+    linkedin_person_urn: str = ""  # LinkedIn Person URN (e.g., urn:li:person:abc123)
+    linkedin_company_id: str = ""  # LinkedIn Company ID (if posting as company)
+
+    pinterest_access_token: str = ""  # Pinterest Access Token
+    pinterest_board_id: str = ""  # Pinterest Board ID for event pins
+
     class Config:
         # Support environment-specific .env files
         # Usage: ENV=production python app.py
