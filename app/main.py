@@ -1,7 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -11,12 +11,14 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 import uuid
+from sqlalchemy.orm import Session
 
-from app.database import init_db
+from app.database import init_db, get_db
 from app.config import get_settings
+from app.models import Event, TicketTier
 from app.rate_limit import limiter
 from app.logging_config import setup_logging
-from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates, event_publisher, flyer_templates_enhanced, event_media, marketing_lists, refunds, dynamic_pricing, event_research, intelligence, webhooks_admin, alerts, alert_stream, campaign_tracking, analytics_dashboard, ad_campaigns, social_proof, group_buying, affiliates, loyalty, stripe_webhooks, voice_commands, mcp_events, venue_intelligence, waitlist, platform_analytics, weather, voiceovers
+from app.routers import venues, events, ticket_tiers, event_goers, tickets, payments, notifications, mcp, categories, promo_codes, public, analytics, knowledge, webhooks, about, flyer_styles, meta_ads, event_image_update, flyer_templates, event_publisher, flyer_templates_enhanced, event_media, marketing_lists, refunds, dynamic_pricing, event_research, intelligence, webhooks_admin, alerts, alert_stream, campaign_tracking, analytics_dashboard, ad_campaigns, social_proof, group_buying, affiliates, loyalty, stripe_webhooks, voice_commands, voice_agent, mcp_events, venue_intelligence, waitlist, platform_analytics, weather, voiceovers
 
 # Module-level logger (must be before exception handlers which use it)
 logger = logging.getLogger(__name__)
@@ -128,6 +130,7 @@ app.include_router(weather.router)  # Weather intelligence and monitoring
 app.include_router(voiceovers.router, prefix=api_prefix)  # AI voiceover generation
 app.include_router(stripe_webhooks.router)  # Stripe payment webhooks
 app.include_router(voice_commands.router)  # Voice command processor with MCP
+app.include_router(voice_agent.router)  # Enhanced voice agent with NLU
 app.include_router(mcp_events.router)  # MCP-powered event intelligence
 app.include_router(venue_intelligence.router)  # Venue demographics & ad composer
 app.include_router(flyer_templates.router)  # Router already includes /api prefix
@@ -300,9 +303,82 @@ def health_check():
 
 
 @app.get("/purchase-success", response_class=HTMLResponse)
-def purchase_success(session_id: str = None):
-    """Purchase success page."""
+def purchase_success(session_id: str = None, db: Session = Depends(get_db)):
+    """Purchase success page with QR codes."""
+    from app.models import Ticket, TicketStatus
+    from sqlalchemy.orm import joinedload
+    import qrcode
+    import io
+    import base64
+
     s = get_settings()
+
+    # Fetch tickets for this session
+    tickets = []
+    if session_id:
+        tickets = (
+            db.query(Ticket)
+            .options(
+                joinedload(Ticket.ticket_tier).joinedload(TicketTier.event).joinedload(Event.venue),
+                joinedload(Ticket.event_goer)
+            )
+            .filter(Ticket.stripe_checkout_session_id == session_id)
+            .filter(Ticket.status == TicketStatus.PAID)
+            .all()
+        )
+
+    # Generate QR codes for tickets
+    ticket_data = []
+    for ticket in tickets:
+        # Generate QR code
+        qr = qrcode.QRCode(version=1, box_size=10, border=2)
+        qr_url = f"{s.base_url}/api/tickets/verify/{ticket.qr_code_token}"
+        qr.add_data(qr_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+
+        # Convert to base64
+        buffer = io.BytesIO()
+        img.save(buffer, format='PNG')
+        img_str = base64.b64encode(buffer.getvalue()).decode()
+
+        ticket_data.append({
+            'id': ticket.id,
+            'qr_code': img_str,
+            'event_name': ticket.ticket_tier.event.name,
+            'tier_name': ticket.ticket_tier.name,
+            'venue_name': ticket.ticket_tier.event.venue.name if ticket.ticket_tier.event.venue else '',
+            'event_date': ticket.ticket_tier.event.event_date.strftime('%B %-d, %Y') if ticket.ticket_tier.event.event_date else '',
+            'event_time': ticket.ticket_tier.event.event_time or '',
+            'buyer_name': ticket.event_goer.name,
+        })
+
+    tickets_html = ""
+    if ticket_data:
+        for idx, t in enumerate(ticket_data):
+            tickets_html += f"""
+            <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 mb-4 animate-fade-in-up" style="animation-delay: {idx * 100}ms;">
+                <div class="flex flex-col md:flex-row items-center gap-6">
+                    <div class="flex-shrink-0">
+                        <img src="data:image/png;base64,{t['qr_code']}" alt="QR Code" class="w-48 h-48 rounded-lg bg-white p-2">
+                    </div>
+                    <div class="flex-1 text-center md:text-left">
+                        <h3 class="text-xl font-bold mb-2">{t['event_name']}</h3>
+                        <p class="text-gray-400 mb-1">{t['tier_name']}</p>
+                        <p class="text-gray-400 mb-1">{t['venue_name']}</p>
+                        <p class="text-gray-400 mb-2">{t['event_date']} at {t['event_time']}</p>
+                        <p class="text-sm text-gray-500">Ticket #{t['id']}</p>
+                        <p class="text-sm text-gray-500">{t['buyer_name']}</p>
+                    </div>
+                </div>
+                <div class="mt-4 pt-4 border-t border-gray-800 text-center">
+                    <button onclick="downloadTicket({t['id']}, '{t['event_name']}')" class="px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm font-medium transition-colors">
+                        Download Ticket
+                    </button>
+                </div>
+            </div>
+            """
+
     return HTMLResponse(content=f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -310,16 +386,88 @@ def purchase_success(session_id: str = None):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Purchase Successful | {s.org_name}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeInUp {{
+            from {{ opacity: 0; transform: translateY(20px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        .animate-fade-in-up {{ animation: fadeInUp 0.5s ease-out forwards; }}
+    </style>
 </head>
-<body class="bg-gray-950 text-white min-h-screen flex items-center justify-center">
-    <div class="text-center max-w-md mx-auto px-6">
-        <div class="text-6xl mb-6">🎉</div>
-        <h1 class="text-3xl font-bold mb-4">You're In!</h1>
-        <p class="text-gray-400 mb-8">Your tickets have been confirmed. Check your email for your ticket with QR code.</p>
-        <a href="/events" class="inline-block px-6 py-3 rounded-lg font-medium text-white transition-colors" style="background-color: {s.org_color};">
-            Browse More Events
-        </a>
+<body class="bg-gray-950 text-white min-h-screen py-12 px-4">
+    <div class="max-w-3xl mx-auto">
+        <div class="text-center mb-12">
+            <div class="text-6xl mb-4">🎉</div>
+            <h1 class="text-4xl font-bold mb-4">You're In!</h1>
+            <p class="text-gray-400 text-lg">Your tickets are ready. Save them below or check your email.</p>
+        </div>
+
+        {tickets_html if tickets_html else f'''
+        <div class="text-center bg-gray-900 border border-gray-800 rounded-2xl p-12">
+            <p class="text-gray-400 mb-6">Your tickets are being processed. Please check your email in a few moments.</p>
+            <a href="/events" class="inline-block px-6 py-3 rounded-lg font-medium text-white transition-colors" style="background-color: {s.org_color};">
+                Browse More Events
+            </a>
+        </div>
+        '''}
+
+        {f'''
+        <div class="text-center mt-8">
+            <a href="/events" class="text-gray-400 hover:text-white transition-colors">
+                Browse More Events →
+            </a>
+        </div>
+        ''' if tickets_html else ''}
     </div>
+
+    <script>
+    function downloadTicket(ticketId, eventName) {{
+        const card = event.target.closest('.bg-gray-900');
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Set canvas size
+        canvas.width = 800;
+        canvas.height = 400;
+
+        // Draw background
+        ctx.fillStyle = '#1f2937';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw ticket content
+        const img = card.querySelector('img');
+        const qrImg = new Image();
+        qrImg.src = img.src;
+        qrImg.onload = function() {{
+            // Draw QR code
+            ctx.drawImage(qrImg, 50, 50, 300, 300);
+
+            // Draw text
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 32px sans-serif';
+            ctx.fillText(eventName, 400, 100);
+
+            ctx.fillStyle = '#9ca3af';
+            ctx.font = '20px sans-serif';
+            const details = card.querySelectorAll('.text-gray-400');
+            let y = 150;
+            details.forEach(detail => {{
+                ctx.fillText(detail.textContent, 400, y);
+                y += 35;
+            }});
+
+            // Download
+            canvas.toBlob(function(blob) {{
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `ticket-${{ticketId}}.png`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }});
+        }};
+    }}
+    </script>
 </body>
 </html>""")
 

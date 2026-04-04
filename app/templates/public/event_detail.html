@@ -293,44 +293,70 @@
             {% endif %}
 
             <!-- Purchase Form (hidden until tier selected) -->
-            <div id="purchase-form" class="hidden mt-4 bg-gray-900 border border-brand/30 rounded-xl p-5 space-y-4">
-                <h3 class="font-semibold" id="selected-tier-name"></h3>
-
-                <div>
-                    <label class="block text-sm text-gray-400 mb-1">Name</label>
-                    <input type="text" id="buyer-name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand" required>
-                </div>
-                <div>
-                    <label class="block text-sm text-gray-400 mb-1">Email</label>
-                    <input type="email" id="buyer-email" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand" required>
-                </div>
-                <div>
-                    <label class="block text-sm text-gray-400 mb-1">Quantity</label>
-                    <select id="buyer-qty" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-brand">
-                        <option value="1">1</option>
-                        <option value="2">2</option>
-                        <option value="3">3</option>
-                        <option value="4">4</option>
-                    </select>
-                </div>
-
-                <!-- Promo Code -->
-                <div>
-                    <label class="block text-sm text-gray-400 mb-1">Promo Code (optional)</label>
-                    <div class="flex flex-col sm:flex-row gap-2">
-                        <input type="text" id="promo-code" placeholder="Enter code" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white uppercase focus:outline-none focus:border-brand">
-                        <button onclick="validatePromo()" class="w-full sm:w-auto px-6 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors">Apply</button>
+            <div id="purchase-form" class="hidden mt-4 overflow-hidden">
+                <div class="bg-gradient-to-br from-gray-900 via-gray-900 to-brand/5 border border-brand/30 rounded-2xl p-6 space-y-5 animate-slide-in-up shadow-2xl shadow-brand/10">
+                    <div class="flex items-center justify-between pb-3 border-b border-brand/20">
+                        <h3 class="font-bold text-lg" id="selected-tier-name"></h3>
+                        <button onclick="cancelSelection()" aria-label="Cancel" class="text-gray-500 hover:text-gray-300 transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
                     </div>
-                    <div id="promo-result" class="mt-2 text-sm hidden"></div>
+
+                    <div class="space-y-4">
+                        <div class="form-group">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Name</label>
+                            <input type="text" id="buyer-name"
+                                   class="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500
+                                          focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand transition-all duration-300"
+                                   placeholder="Your full name" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Email</label>
+                            <input type="email" id="buyer-email"
+                                   class="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500
+                                          focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand transition-all duration-300"
+                                   placeholder="your@email.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Quantity</label>
+                            <select id="buyer-qty"
+                                    class="w-full bg-gray-800/80 border border-gray-700 rounded-lg px-4 py-3 text-white
+                                           focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand transition-all duration-300">
+                                <option value="1">1 ticket</option>
+                                <option value="2">2 tickets</option>
+                                <option value="3">3 tickets</option>
+                                <option value="4">4 tickets</option>
+                            </select>
+                        </div>
+
+                        <!-- Promo Code -->
+                        <div class="form-group">
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Promo Code <span class="text-gray-600 font-normal">(optional)</span></label>
+                            <div class="flex gap-2">
+                                <input type="text" id="promo-code" placeholder="ENTER CODE"
+                                       class="flex-1 bg-gray-800/80 border border-gray-700 rounded-lg px-4 py-3 text-white uppercase placeholder-gray-600
+                                              focus:outline-none focus:ring-2 focus:ring-brand/50 focus:border-brand transition-all duration-300">
+                                <button onclick="validatePromo()"
+                                        class="px-6 py-3 bg-gray-700/80 hover:bg-gray-600 border border-gray-600 rounded-lg text-sm font-medium transition-all duration-300 hover:shadow-lg">
+                                    Apply
+                                </button>
+                            </div>
+                            <div id="promo-result" class="mt-2 text-sm hidden rounded-lg p-2 transition-all duration-300"></div>
+                        </div>
+                    </div>
+
+                    <div id="price-summary" class="text-base font-semibold pt-4 border-t border-brand/20 flex items-center justify-between"></div>
+
+                    <button onclick="purchase()" id="buy-btn"
+                            class="w-full bg-gradient-to-r from-brand to-brand-dark hover:from-brand-dark hover:to-brand text-white py-4 rounded-xl font-bold text-lg transition-all duration-300 hover:shadow-2xl hover:shadow-brand/30 hover:scale-[1.02] active:scale-[0.98] relative overflow-hidden group">
+                        <span class="relative z-10">Buy Tickets</span>
+                        <div class="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700"></div>
+                    </button>
+                    <div id="purchase-error" class="text-red-400 text-sm hidden p-3 bg-red-900/20 border border-red-800/50 rounded-lg animate-shake"></div>
+                    <div id="purchase-success" class="text-green-400 text-sm hidden"></div>
                 </div>
-
-                <div id="price-summary" class="text-sm text-gray-400 pt-2 border-t border-gray-800"></div>
-
-                <button onclick="purchase()" id="buy-btn" class="w-full bg-brand hover:bg-brand-dark text-white py-3 rounded-lg font-semibold text-lg transition-colors">
-                    Buy Tickets
-                </button>
-                <div id="purchase-error" class="text-red-400 text-sm hidden"></div>
-                <div id="purchase-success" class="text-green-400 text-sm hidden"></div>
             </div>
 
             <!-- Promo Code (quick access for non-selected) -->
@@ -448,11 +474,21 @@ function selectTier(tierId) {
     var price = parseInt(card.dataset.price);
 
     document.getElementById('selected-tier-name').textContent = tierName;
+
+    // Highlight selected tier card
+    document.querySelectorAll('.tier-card').forEach(function(c) {
+        c.classList.remove('ring-2', 'ring-brand');
+    });
+    card.classList.add('ring-2', 'ring-brand');
+
     document.getElementById('purchase-form').classList.remove('hidden');
     document.getElementById('promo-result').classList.add('hidden');
     document.getElementById('purchase-error').classList.add('hidden');
     document.getElementById('purchase-success').classList.add('hidden');
     document.getElementById('promo-code').value = '';
+    document.getElementById('buyer-name').value = '';
+    document.getElementById('buyer-email').value = '';
+    document.getElementById('buyer-qty').value = '1';
     updatePriceSummary(price);
 
     // Reset all discounted prices
@@ -461,7 +497,21 @@ function selectTier(tierId) {
         el.classList.remove('line-through', 'text-gray-500', 'text-sm');
     });
 
-    document.getElementById('purchase-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    // Smooth scroll with offset for sticky header
+    setTimeout(function() {
+        document.getElementById('purchase-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 100);
+}
+
+function cancelSelection() {
+    document.getElementById('purchase-form').classList.add('hidden');
+    selectedTierId = null;
+    promoDiscount = null;
+
+    // Remove highlight from all tier cards
+    document.querySelectorAll('.tier-card').forEach(function(c) {
+        c.classList.remove('ring-2', 'ring-brand');
+    });
 }
 
 function updatePriceSummary(priceCents) {
@@ -469,9 +519,9 @@ function updatePriceSummary(priceCents) {
     var total = priceCents * qty;
     var summary = document.getElementById('price-summary');
     if (total === 0) {
-        summary.innerHTML = '<span class="text-green-400 font-medium">Free!</span>';
+        summary.innerHTML = '<span class="text-gray-400">Total</span><span class="text-2xl font-bold text-green-400">FREE</span>';
     } else {
-        summary.innerHTML = 'Total: <span class="text-white font-semibold">$' + (total / 100).toFixed(2) + '</span>';
+        summary.innerHTML = '<span class="text-gray-400">Total</span><span class="text-2xl font-bold text-white">$' + (total / 100).toFixed(2) + '</span>';
     }
 }
 

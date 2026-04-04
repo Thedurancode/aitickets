@@ -31,6 +31,15 @@
                             '0%': { opacity: '0', transform: 'scale(0.95)' },
                             '100%': { opacity: '1', transform: 'scale(1)' },
                         },
+                        slideInUp: {
+                            '0%': { opacity: '0', transform: 'translateY(30px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        shake: {
+                            '0%, 100%': { transform: 'translateX(0)' },
+                            '10%, 30%, 50%, 70%, 90%': { transform: 'translateX(-5px)' },
+                            '20%, 40%, 60%, 80%': { transform: 'translateX(5px)' },
+                        },
                     },
                 }
             }
@@ -55,6 +64,14 @@
         }
         [data-animate="scale-in"].is-visible {
             animation: scaleIn 0.5s ease-out forwards;
+        }
+
+        /* Additional animations */
+        .animate-slide-in-up {
+            animation: slideInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .animate-shake {
+            animation: shake 0.5s ease-in-out;
         }
 
         /* View Transitions API */
@@ -100,7 +117,6 @@
             </a>
             {% if show_header_links %}
             <div class="flex items-center gap-4">
-                <a href="/about" class="text-gray-400 hover:text-white transition-colors text-sm font-medium">About</a>
                 <button onclick="openSearch()" aria-label="Search" class="text-gray-400 hover:text-white transition-colors p-2">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
