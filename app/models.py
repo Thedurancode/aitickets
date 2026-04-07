@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum, Boolean, Table, Date, Float
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DateTime, ForeignKey, Enum, Boolean, Table, Date, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import enum
@@ -121,6 +121,7 @@ class Event(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     venue_id = Column(Integer, ForeignKey("venues.id"), nullable=False, index=True)
+    artist_id = Column(Integer, ForeignKey("artists.id"), nullable=True, index=True)  # Link to artist
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     image_url = Column(String(500), nullable=True)
@@ -145,6 +146,8 @@ class Event(Base):
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     venue = relationship("Venue", back_populates="events")
+    artist = relationship("Artist", back_populates="events")  # Link to artist data
+    artist_research = relationship("ArtistResearch", back_populates="event")  # Research snapshots
     ticket_tiers = relationship("TicketTier", back_populates="event", cascade="all, delete-orphan")
     updates = relationship("EventUpdate", back_populates="event", cascade="all, delete-orphan")
     categories = relationship("EventCategory", secondary=event_category_link, back_populates="events")
@@ -1234,6 +1237,112 @@ class AdCreative(Base):
     performance = relationship("AdPerformance", back_populates="ad_creative", cascade="all, delete-orphan")
 
 
+class Artist(Base):
+    """
+    Artist/Performer information discovered through research.
+    Stores all data from Spotify, YouTube, Wikipedia, social media.
+    """
+    __tablename__ = "artists"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(255), nullable=False, unique=True, index=True)
+
+    # Spotify Data
+    spotify_id = Column(String(100), nullable=True, index=True)
+    spotify_followers = Column(Integer, nullable=True)
+    spotify_monthly_listeners = Column(Integer, nullable=True)
+    spotify_popularity = Column(Integer, nullable=True)  # 0-100 score
+    spotify_top_tracks = Column(Text, nullable=True)  # JSON list of track names/IDs
+    spotify_genres = Column(Text, nullable=True)  # JSON list of genres
+    spotify_image_url = Column(String(500), nullable=True)
+
+    # YouTube Data
+    youtube_channel_id = Column(String(100), nullable=True, index=True)
+    youtube_channel_name = Column(String(255), nullable=True)
+    youtube_subscribers = Column(Integer, nullable=True)
+    youtube_view_count = Column(BigInteger, nullable=True)
+    youtube_video_count = Column(Integer, nullable=True)
+    youtube_latest_videos = Column(Text, nullable=True)  # JSON list of recent videos
+
+    # Social Media
+    instagram_handle = Column(String(100), nullable=True, index=True)
+    instagram_followers = Column(Integer, nullable=True)
+    twitter_handle = Column(String(100), nullable=True)
+    twitter_followers = Column(Integer, nullable=True)
+    tiktok_handle = Column(String(100), nullable=True)
+    tiktok_followers = Column(Integer, nullable=True)
+    facebook_page = Column(String(255), nullable=True)
+    facebook_likes = Column(Integer, nullable=True)
+
+    # Artist Information
+    genre = Column(String(100), nullable=True)
+    sub_genres = Column(Text, nullable=True)  # JSON: ["Latin Trap", "Reggaeton"]
+    bio = Column(Text, nullable=True)  # Wikipedia/bio summary
+    achievements = Column(Text, nullable=True)  # JSON: awards, milestones
+    similar_artists = Column(Text, nullable=True)  # JSON: list of similar artist names
+    country_of_origin = Column(String(100), nullable=True)
+    active_since_year = Column(Integer, nullable=True)
+
+    # Fan Demographics (from research)
+    fan_demographics = Column(Text, nullable=True)  # JSON: age ranges, gender split
+    primary_markets = Column(Text, nullable=True)  # JSON: top cities/countries
+    fan_interests = Column(Text, nullable=True)  # JSON: common interests
+
+    # Performance Metrics
+    average_ticket_price = Column(Integer, nullable=True)  # Historical average in cents
+    typical_venue_size = Column(String(50), nullable=True)  # small/medium/large/stadium
+    sellout_velocity = Column(String(50), nullable=True)  # fast/moderate/slow
+
+    # Research Metadata
+    last_researched_at = Column(DateTime(timezone=True), nullable=True)
+    research_version = Column(Integer, default=1)
+    data_source = Column(String(100), nullable=True)  # spotify_api, web_search, manual
+    confidence_score = Column(Float, nullable=True)  # 0.0-1.0 data quality score
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    # Relationships
+    events = relationship("Event", back_populates="artist")
+    research_history = relationship("ArtistResearch", back_populates="artist", cascade="all, delete-orphan")
+
+
+class ArtistResearch(Base):
+    """
+    Historical snapshots of artist research.
+    Tracks how artist data changes over time.
+    """
+    __tablename__ = "artist_research"
+
+    id = Column(Integer, primary_key=True, index=True)
+    artist_id = Column(Integer, ForeignKey("artists.id"), nullable=False, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=True, index=True)
+
+    # Complete research snapshot
+    research_data = Column(Text, nullable=False)  # Full JSON of all discovered data
+
+    # What triggered this research
+    trigger = Column(String(50), nullable=True)  # event_creation, manual_refresh, scheduled
+
+    # Key metrics at time of research (for tracking growth)
+    spotify_listeners_snapshot = Column(Integer, nullable=True)
+    instagram_followers_snapshot = Column(Integer, nullable=True)
+    youtube_subscribers_snapshot = Column(Integer, nullable=True)
+
+    # Research quality
+    sources_checked = Column(Text, nullable=True)  # JSON: ["spotify", "youtube", "wikipedia"]
+    data_completeness = Column(Float, nullable=True)  # 0.0-1.0 how complete
+
+    # Timestamps
+    researched_at = Column(DateTime(timezone=True), default=utcnow)
+    research_duration_ms = Column(Integer, nullable=True)  # How long research took
+
+    # Relationships
+    artist = relationship("Artist", back_populates="research_history")
+    event = relationship("Event", back_populates="artist_research")
+
+
 class AdCampaignPerformance(Base):
     """
     Campaign-level performance metrics (daily rollup)
@@ -1469,3 +1578,245 @@ class SocialMediaPost(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow)
 
     event = relationship("Event")
+
+
+# Partnership and Sponsorship Models
+class Sponsor(Base):
+    """
+    Potential sponsors and brands for partnership matching
+    """
+    __tablename__ = "sponsors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    industry = Column(String)
+    category = Column(String)
+    target_demographics = Column(Text)  # JSON
+    brand_values = Column(Text)  # JSON
+    marketing_budget_range = Column(String)
+    past_sponsorships = Column(Text)  # JSON
+    avg_roi = Column(Float)
+    preferred_event_types = Column(Text)  # JSON
+    contact_info = Column(Text)  # JSON
+    preferred_audience_size = Column(String)
+    geographic_markets = Column(Text)  # JSON
+    excluded_genres = Column(Text)  # JSON
+    required_metrics = Column(Text)  # JSON
+    is_active = Column(Boolean, default=True)
+    last_contacted = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class PartnershipMatch(Base):
+    """
+    AI-generated partnership matches between events and sponsors
+    """
+    __tablename__ = "partnership_matches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    sponsor_id = Column(Integer, ForeignKey("sponsors.id"), nullable=False)
+    artist_id = Column(Integer, ForeignKey("artists.id"))
+    match_score = Column(Float)
+    audience_overlap_score = Column(Float)
+    brand_alignment_score = Column(Float)
+    geographic_score = Column(Float)
+    budget_fit_score = Column(Float)
+    match_reasons = Column(Text)  # JSON
+    potential_concerns = Column(Text)  # JSON
+    pitch_summary = Column(Text)
+    key_selling_points = Column(Text)  # JSON
+    projected_roi = Column(Float)
+    recommended_package = Column(Text)  # JSON
+    pitch_deck_url = Column(String)
+    pitch_deck_data = Column(Text)  # JSON
+    status = Column(String, default="generated")
+    sent_at = Column(DateTime(timezone=True))
+    response_received_at = Column(DateTime(timezone=True))
+    deal_value = Column(Float)
+    sponsor_feedback = Column(Text)
+    internal_notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class EventPartnership(Base):
+    """
+    Actual confirmed partnerships/sponsorships for events
+    """
+    __tablename__ = "event_partnerships"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    sponsor_id = Column(Integer, ForeignKey("sponsors.id"), nullable=False)
+    partnership_match_id = Column(Integer, ForeignKey("partnership_matches.id"))
+    partnership_type = Column(String)
+    deal_value = Column(Float)
+    payment_terms = Column(String)
+    sponsor_benefits = Column(Text)  # JSON
+    event_obligations = Column(Text)  # JSON
+    impressions_delivered = Column(Integer)
+    engagement_metrics = Column(Text)  # JSON
+    roi_achieved = Column(Float)
+    contract_signed_date = Column(DateTime(timezone=True))
+    start_date = Column(DateTime(timezone=True))
+    end_date = Column(DateTime(timezone=True))
+    is_renewed = Column(Boolean, default=False)
+    sponsor_satisfaction_score = Column(Float)
+    post_event_feedback = Column(Text)
+    case_study_url = Column(String)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+# Post-Event Intelligence Models
+class PostEventAnalysis(Base):
+    """
+    Comprehensive post-event analysis and learnings
+    """
+    __tablename__ = "post_event_analyses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False, unique=True)
+    artist_id = Column(Integer, ForeignKey("artists.id"))
+    tickets_sold = Column(Integer)
+    actual_attendance = Column(Integer)
+    no_show_rate = Column(Float)
+    capacity_percentage = Column(Float)
+    total_revenue = Column(Float)
+    ticket_revenue = Column(Float)
+    merchandise_revenue = Column(Float)
+    concession_revenue = Column(Float)
+    sponsorship_revenue = Column(Float)
+    total_costs = Column(Float)
+    artist_fee = Column(Float)
+    venue_cost = Column(Float)
+    production_cost = Column(Float)
+    marketing_spend = Column(Float)
+    net_profit = Column(Float)
+    profit_margin = Column(Float)
+    roi = Column(Float)
+    marketing_metrics = Column(Text)  # JSON
+    best_performing_channel = Column(String)
+    worst_performing_channel = Column(String)
+    viral_moments = Column(Text)  # JSON
+    actual_demographics = Column(Text)  # JSON
+    demographic_surprises = Column(Text)  # JSON
+    audience_sentiment_score = Column(Float)
+    net_promoter_score = Column(Float)
+    setup_issues = Column(Text)  # JSON
+    technical_issues = Column(Text)  # JSON
+    security_incidents = Column(Text)  # JSON
+    vendor_performance = Column(Text)  # JSON
+    peak_attendance_time = Column(DateTime(timezone=True))
+    peak_concession_time = Column(DateTime(timezone=True))
+    peak_social_mentions = Column(DateTime(timezone=True))
+    most_engaged_song = Column(String)
+    weather_conditions = Column(Text)  # JSON
+    competing_events = Column(Text)  # JSON
+    external_factors = Column(Text)  # JSON
+    total_social_mentions = Column(Integer)
+    social_reach = Column(Integer)
+    user_generated_content = Column(Integer)
+    influencer_attendance = Column(Text)  # JSON
+    predicted_sellout_date = Column(DateTime(timezone=True))
+    actual_sellout_date = Column(DateTime(timezone=True))
+    predicted_demographics = Column(Text)  # JSON
+    prediction_accuracy_score = Column(Float)
+    success_factors = Column(Text)  # JSON
+    improvement_areas = Column(Text)  # JSON
+    surprising_insights = Column(Text)  # JSON
+    pricing_recommendations = Column(Text)  # JSON
+    marketing_recommendations = Column(Text)  # JSON
+    operational_recommendations = Column(Text)  # JSON
+    future_artist_recommendations = Column(Text)  # JSON
+    data_completeness_score = Column(Float)
+    insight_quality_score = Column(Float)
+    actionability_score = Column(Float)
+    full_report_url = Column(String)
+    executive_summary = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    analyzed_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class EventFeedback(Base):
+    """
+    Individual feedback entries from various sources
+    """
+    __tablename__ = "event_feedback"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    analysis_id = Column(Integer, ForeignKey("post_event_analyses.id"))
+    source = Column(String)
+    source_platform = Column(String)
+    rating = Column(Float)
+    sentiment = Column(String)
+    feedback_text = Column(Text)
+    category = Column(String)
+    is_complaint = Column(Boolean, default=False)
+    requires_response = Column(Boolean, default=False)
+    user_demographic = Column(Text)  # JSON
+    is_verified_attendee = Column(Boolean, default=False)
+    processed = Column(Boolean, default=False)
+    ai_summary = Column(Text)
+    action_taken = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class EventLearning(Base):
+    """
+    Specific learnings extracted from events
+    """
+    __tablename__ = "event_learnings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(Integer, ForeignKey("events.id"), nullable=False)
+    analysis_id = Column(Integer, ForeignKey("post_event_analyses.id"))
+    category = Column(String)
+    learning_type = Column(String)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    impact_level = Column(String)
+    financial_impact = Column(Float)
+    applicable_to = Column(Text)  # JSON
+    supporting_data = Column(Text)  # JSON
+    confidence_score = Column(Float)
+    recommended_action = Column(Text)
+    implementation_complexity = Column(String)
+    has_been_applied = Column(Boolean, default=False)
+    applied_to_events = Column(Text)  # JSON
+    validated = Column(Boolean, default=False)
+    validation_results = Column(Text)  # JSON
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)
+
+
+class IntelligencePattern(Base):
+    """
+    Patterns discovered across multiple events
+    """
+    __tablename__ = "intelligence_patterns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    pattern_name = Column(String, nullable=False, unique=True)
+    pattern_type = Column(String)
+    description = Column(Text)
+    conditions = Column(Text)  # JSON
+    expected_outcome = Column(Text)  # JSON
+    confidence_level = Column(Float)
+    supporting_events = Column(Text)  # JSON
+    occurrence_count = Column(Integer)
+    first_observed = Column(DateTime(timezone=True))
+    last_observed = Column(DateTime(timezone=True))
+    prediction_accuracy = Column(Float)
+    false_positive_rate = Column(Float)
+    false_negative_rate = Column(Float)
+    recommended_strategy = Column(Text)
+    expected_improvement = Column(Text)  # JSON
+    risk_factors = Column(Text)  # JSON
+    is_active = Column(Boolean, default=True)
+    requires_review = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow)

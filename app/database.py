@@ -61,6 +61,7 @@ MIGRATIONS = [
     "add_ad_campaign_tables",
     "add_new_feature_tables",
     "add_performance_indexes",
+    "add_artist_tables",
 ]
 
 

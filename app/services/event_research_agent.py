@@ -19,6 +19,13 @@ from app.services.artist_social_research import (
     research_social_media_links,
     research_comprehensive_web_search,
 )
+from app.services.artist_service import (
+    find_or_create_artist,
+    save_artist_research,
+    should_refresh_research,
+    get_artist_with_history,
+    get_artist_insights,
+)
 
 
 def analyze_event_context(db: Session, event_id: int) -> Dict:
@@ -519,117 +526,290 @@ async def run_event_research_agent(
     event_id: int,
     include_ai_plan: bool = True,
     include_artist_research: bool = True,
+    force_refresh: bool = False,
 ) -> Dict:
     """
-    Run complete research agent for an event.
+    Enhanced research agent that saves all artist discoveries permanently.
 
-    Steps:
-    1. Analyze event context (date, venue, pricing, inventory)
-    2. Research artist/performer (bio, genre, social media, fan demographics)
-    2.5. Research artist YouTube videos (most viewed, subscriber count)
-    2.6. Research artist on Spotify (followers, top tracks, popularity)
-    2.7. Research artist on Wikipedia (biography, summary, image)
-    2.8. Research artist social media links (Instagram, TikTok, Twitter, etc.)
-    2.9. Comprehensive web search (news, tours, awards, collaborations)
-    3. Research venue area (demographics, competitors, weather)
-    4. Generate AI marketing plan with artist context
-    5. Generate enhanced event description
-    6. Return comprehensive research report
+    Improvements:
+    1. Checks if artist already exists before researching
+    2. Saves all research data to database
+    3. Tracks artist growth over time
+    4. Provides insights from historical data
     """
+    import time
+    start_time = time.time()
+
     # Step 1: Analyze event
     event_context = analyze_event_context(db, event_id)
 
     if "error" in event_context:
         return event_context
 
-    # Step 2: Research artist/performer
-    artist_research = {}
-    if include_artist_research:
+    # Get event details
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return {"error": "Event not found"}
+
+    # Extract artist name from event name
+    artist_name = extract_artist_name(event.name)
+
+    # Find or create artist in database
+    artist = find_or_create_artist(db, artist_name)
+
+    # Link artist to event
+    if not event.artist_id:
+        event.artist_id = artist.id
+        db.commit()
+
+    result = {
+        "event_id": event_id,
+        "event_name": event.name,
+        "artist_id": artist.id,
+        "artist_name": artist.name,
+        "used_cached_data": False,
+        "research_completed_at": datetime.utcnow().isoformat(),
+        "event_context": event_context,
+    }
+
+    # Check if we need to research or can use existing data
+    needs_research = should_refresh_research(artist) or force_refresh
+
+    if not needs_research and artist.spotify_monthly_listeners:
+        # Use existing artist data
+        result["used_cached_data"] = True
+        result["artist_research"] = {
+            "artist_name": artist.name,
+            "genre": artist.genre,
+            "bio": artist.bio,
+            "achievements": json.loads(artist.achievements) if artist.achievements else [],
+            "similar_artists": json.loads(artist.similar_artists) if artist.similar_artists else [],
+            "event_type": "Concert",
+        }
+
+        # Add cached research data
+        result["spotify_research"] = {
+            "id": artist.spotify_id,
+            "followers": artist.spotify_followers,
+            "monthly_listeners": artist.spotify_monthly_listeners,
+            "popularity": artist.spotify_popularity,
+            "top_tracks": json.loads(artist.spotify_top_tracks) if artist.spotify_top_tracks else [],
+            "genres": json.loads(artist.spotify_genres) if artist.spotify_genres else [],
+            "image_url": artist.spotify_image_url,
+            "cached": True,
+        }
+
+        result["youtube_research"] = {
+            "channel_id": artist.youtube_channel_id,
+            "channel_name": artist.youtube_channel_name,
+            "subscribers": artist.youtube_subscribers,
+            "view_count": artist.youtube_view_count,
+            "video_count": artist.youtube_video_count,
+            "latest_videos": json.loads(artist.youtube_latest_videos) if artist.youtube_latest_videos else [],
+            "cached": True,
+        }
+
+        result["social_media_research"] = {
+            "instagram": artist.instagram_handle,
+            "instagram_followers": artist.instagram_followers,
+            "twitter": artist.twitter_handle,
+            "twitter_followers": artist.twitter_followers,
+            "tiktok": artist.tiktok_handle,
+            "tiktok_followers": artist.tiktok_followers,
+            "cached": True,
+        }
+
+        # Get historical insights
+        result["insights"] = get_artist_insights(db, artist.id)
+
+    else:
+        # Perform new comprehensive research
+        research_data = {
+            "artist_name": artist_name,
+            "researched_at": datetime.utcnow().isoformat(),
+            "sources_checked": []
+        }
+
+        # Step 2: Research artist/performer
         artist_research = research_artist_or_performer(
             event_context['event']['name'],
             event_context['event']['description']
         )
+        result["artist_research"] = artist_research
+        if artist_research:
+            research_data["artist_info"] = artist_research
 
-    # Step 2.5: Research artist YouTube videos
-    youtube_research = {}
-    if include_artist_research and artist_research:
-        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        # Step 2.5: Research artist YouTube videos
         youtube_research = research_artist_youtube(artist_name, max_results=5)
+        result["youtube_research"] = youtube_research
+        if youtube_research and not youtube_research.get("error"):
+            research_data["youtube"] = youtube_research
+            research_data["sources_checked"].append("youtube")
 
-    # Step 2.6: Research artist on Spotify
-    spotify_research = {}
-    if include_artist_research and artist_research:
-        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        # Step 2.6: Research artist on Spotify
         spotify_research = research_spotify(artist_name)
+        result["spotify_research"] = spotify_research
+        if spotify_research and not spotify_research.get("error"):
+            research_data["spotify"] = spotify_research
+            research_data["sources_checked"].append("spotify")
 
-    # Step 2.7: Research artist on Wikipedia
-    wikipedia_research = {}
-    if include_artist_research and artist_research:
-        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        # Step 2.7: Research artist on Wikipedia
         wikipedia_research = research_wikipedia(artist_name)
+        result["wikipedia_research"] = wikipedia_research
+        if wikipedia_research and not wikipedia_research.get("error"):
+            research_data["wikipedia"] = wikipedia_research
+            research_data["sources_checked"].append("wikipedia")
 
-    # Step 2.8: Research artist social media links
-    social_media_research = {}
-    if include_artist_research and artist_research:
-        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        # Step 2.8: Research artist social media links
         social_media_research = research_social_media_links(artist_name)
+        result["social_media_research"] = social_media_research
+        if social_media_research and not social_media_research.get("error"):
+            research_data["social_media"] = social_media_research
+            research_data["sources_checked"].append("social_media")
 
-    # Step 2.9: Comprehensive web search (news, tours, awards)
-    web_search_research = {}
-    if include_artist_research and artist_research:
-        artist_name = artist_research.get('artist_name', event_context['event']['name'])
+        # Step 2.9: Comprehensive web search (news, tours, awards)
         web_search_research = research_comprehensive_web_search(artist_name)
+        result["web_search_research"] = web_search_research
+        if web_search_research and not web_search_research.get("error"):
+            research_data["web_search"] = web_search_research
+            research_data["sources_checked"].append("web_search")
+
+        # Extract fan demographics
+        research_data["fan_demographics"] = extract_fan_demographics_from_research(research_data)
+
+        # Calculate research duration
+        research_data["research_duration_ms"] = int((time.time() - start_time) * 1000)
+
+        # Save research to database
+        research_snapshot = save_artist_research(
+            db=db,
+            artist=artist,
+            research_data=research_data,
+            event_id=event_id,
+            trigger="event_creation"
+        )
+
+        result["research_snapshot_id"] = research_snapshot.id
+
+        # Get insights with new data
+        result["insights"] = get_artist_insights(db, artist.id)
 
     # Step 3: Research area
     area_research = research_venue_area(event_context['venue']['address'])
+    result["area_research"] = area_research
 
     # Step 4: Generate enhanced event description
     enhanced_description = None
-    if artist_research and not artist_research.get("fallback"):
+    if result.get("artist_research") and not result["artist_research"].get("fallback"):
         enhanced_description = _generate_event_description(
             event_context,
-            artist_research
+            result["artist_research"]
         )
+    result["enhanced_description"] = enhanced_description
 
     # Step 5: Generate marketing plan (with artist context)
     if include_ai_plan:
         marketing_plan = generate_marketing_plan(
             event_context,
             area_research,
-            artist_research
+            result.get("artist_research")
         )
+        result["marketing_plan"] = marketing_plan
     else:
-        marketing_plan = {"message": "AI plan generation skipped"}
+        result["marketing_plan"] = {"message": "AI plan generation skipped"}
 
-    # Step 6: Compile research report
-    return {
-        "event_id": event_id,
-        "event_name": event_context['event']['name'],
-        "research_completed_at": datetime.utcnow().isoformat(),
-        "event_context": event_context,
-        "artist_research": artist_research,
-        "youtube_research": youtube_research,
-        "spotify_research": spotify_research,
-        "wikipedia_research": wikipedia_research,
-        "social_media_research": social_media_research,
-        "web_search_research": web_search_research,
-        "area_research": area_research,
-        "enhanced_description": enhanced_description,
-        "marketing_plan": marketing_plan,
-        "next_steps": [
-            "Review artist bio and update event description" if enhanced_description else None,
-            "Embed top YouTube videos on event page" if youtube_research and not youtube_research.get("error") else None,
-            "Add Spotify player widget to event page" if spotify_research and not spotify_research.get("error") else None,
-            "Link to artist's Wikipedia page" if wikipedia_research and not wikipedia_research.get("error") else None,
-            "Add social media follow buttons" if social_media_research and not social_media_research.get("error") else None,
-            "Promote upcoming tour dates from web search" if web_search_research and not web_search_research.get("error") else None,
-            "Review marketing plan recommendations",
-            "Adjust budget allocations based on sell-through rate",
-            "Create Meta ad campaigns using recommended messaging",
-            "Schedule email/SMS campaigns per timing strategy",
-            "Monitor KPIs and adjust in real-time",
-        ],
+    # Add next steps
+    result["next_steps"] = [
+        "Review artist bio and update event description" if enhanced_description else None,
+        "Embed top YouTube videos on event page" if result.get("youtube_research") and not result["youtube_research"].get("error") else None,
+        "Add Spotify player widget to event page" if result.get("spotify_research") and not result["spotify_research"].get("error") else None,
+        "Link to artist's Wikipedia page" if result.get("wikipedia_research") and not result["wikipedia_research"].get("error") else None,
+        "Add social media follow buttons" if result.get("social_media_research") and not result["social_media_research"].get("error") else None,
+        "Promote upcoming tour dates from web search" if result.get("web_search_research") and not result["web_search_research"].get("error") else None,
+        "Review marketing plan recommendations",
+        "Adjust budget allocations based on sell-through rate",
+        "Create Meta ad campaigns using recommended messaging",
+        "Schedule email/SMS campaigns per timing strategy",
+        "Monitor KPIs and adjust in real-time",
+    ]
+
+    # Calculate total duration
+    result["research_duration_ms"] = int((time.time() - start_time) * 1000)
+
+    return result
+
+
+def extract_artist_name(event_name: str) -> str:
+    """
+    Extract artist name from event name.
+
+    Common patterns:
+    - "Bad Bunny - Most Wanted Tour" -> "Bad Bunny"
+    - "Drake Live at Madison Square Garden" -> "Drake"
+    - "Taylor Swift Eras Tour" -> "Taylor Swift"
+    - "Bad Bunny Summer Fest" -> "Bad Bunny"
+    """
+    # Remove common suffixes/keywords
+    suffixes_to_remove = [
+        " - ", " Live", " Tour", " Concert", " at ", " @ ",
+        " World Tour", " Festival", " Show", " Performance",
+        " Fest", " Summer", " Winter", " Spring", " Fall",
+        " 2024", " 2025", " 2026", " Night", " Special"
+    ]
+
+    artist_name = event_name
+
+    # First pass - remove everything after separator
+    for separator in [" - ", " at ", " @ ", " Live"]:
+        if separator in artist_name:
+            artist_name = artist_name.split(separator)[0]
+            break
+
+    # Second pass - remove common suffixes
+    for suffix in suffixes_to_remove:
+        if artist_name.endswith(suffix):
+            artist_name = artist_name[:-len(suffix)]
+
+    # Third pass - if contains known words, extract before them
+    for keyword in ["Tour", "Concert", "Festival", "Fest", "Show"]:
+        if f" {keyword}" in artist_name:
+            artist_name = artist_name.split(f" {keyword}")[0]
+
+    return artist_name.strip()
+
+
+def extract_fan_demographics_from_research(research_data: Dict) -> Dict:
+    """
+    Extract and synthesize fan demographics from all research sources.
+    """
+    demographics = {
+        "age_range": "18-35",  # Default
+        "gender_split": {"male": 50, "female": 50},
+        "primary_languages": ["English"],
+        "interests": []
     }
+
+    # From Spotify genres
+    if "spotify" in research_data and "genres" in research_data["spotify"]:
+        genres = research_data["spotify"]["genres"]
+        if "latin" in str(genres).lower() or "reggaeton" in str(genres).lower():
+            demographics["primary_languages"] = ["Spanish", "English"]
+            demographics["age_range"] = "18-35"
+            demographics["interests"].extend(["Latin Music", "Reggaeton", "Latin Culture"])
+        elif "k-pop" in str(genres).lower():
+            demographics["age_range"] = "16-28"
+            demographics["gender_split"] = {"male": 30, "female": 70}
+            demographics["interests"].extend(["K-Pop", "Korean Culture", "Fashion"])
+
+    # From artist info
+    if "artist_info" in research_data:
+        info = research_data["artist_info"]
+        if "fan_demographics" in info:
+            demographics["age_range"] = info.get("fan_age_range", demographics["age_range"])
+        if "fan_interests" in info:
+            demographics["interests"].extend(info["fan_interests"])
+
+    return demographics
 
 
 def get_research_summary(research_report: Dict) -> str:
