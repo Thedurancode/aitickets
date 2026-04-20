@@ -1,7 +1,6 @@
 """Service for media sharing token generation and notifications."""
 
 import logging
-import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -13,6 +12,7 @@ from app.models import Event, EventGoer, MediaShareToken
 from app.config import get_settings
 from app.services.email import _send_email
 from app.services.sms import send_sms
+from app.services.secure_token import SecureToken
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ def generate_media_share_token(
 
     if existing:
         # Refresh expired token
-        existing.token = secrets.token_urlsafe(32)
+        existing.token = SecureToken.generate()
         existing.expires_at = expires_at
         db.commit()
         db.refresh(existing)
@@ -68,7 +68,7 @@ def generate_media_share_token(
     token_obj = MediaShareToken(
         event_id=event_id,
         event_goer_id=event_goer_id,
-        token=secrets.token_urlsafe(32),
+        token=SecureToken.generate(),
         expires_at=expires_at,
     )
     db.add(token_obj)
@@ -133,19 +133,9 @@ def validate_media_token(
     event_id: int,
 ) -> Optional[MediaShareToken]:
     """Validate a media share token. Returns the token if valid, else None."""
-    token_obj = db.query(MediaShareToken).filter(
-        MediaShareToken.token == token,
-        MediaShareToken.event_id == event_id,
-    ).first()
-
-    if not token_obj:
+    record = SecureToken.validate(
+        db, MediaShareToken, token, check_used=False,
+    )
+    if record is None or record.event_id != event_id:
         return None
-
-    now = datetime.now(timezone.utc)
-    exp = token_obj.expires_at
-    if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
-    if exp <= now:
-        return None
-
-    return token_obj
+    return record

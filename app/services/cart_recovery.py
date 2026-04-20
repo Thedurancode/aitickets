@@ -168,8 +168,8 @@ def send_cart_recovery(db: Session, email: str = None, event_goer_id: int = None
             message=f"Cart recovery sent for {len(tickets)} pending ticket(s)",
             status=NotificationStatus.SENT if (email_sent or sms_sent) else NotificationStatus.FAILED,
         )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("Failed to log cart recovery notification for goer %s: %s", goer.id, e)
 
     return {
         "success": True,

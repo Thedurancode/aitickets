@@ -182,8 +182,8 @@ def send_event_survey(db: Session, event_id: int) -> dict:
                 ticket_id=survey.ticket_id,
                 status=NotificationStatus.SENT,
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("Failed to log survey notification for goer %s: %s", goer.id, e)
 
     db.commit()
 

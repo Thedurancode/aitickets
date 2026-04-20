@@ -17,6 +17,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session, joinedload
 from app.config import get_settings
 from app.models import Event, FlyerTemplate, FlyerTemplateMagicToken
+from app.services.secure_token import SecureToken
 
 logger = logging.getLogger(__name__)
 
@@ -310,28 +311,19 @@ def create_template_upload_token(
     Returns:
         Dict with token and upload URL
     """
-    import secrets
-
     event = db.query(Event).filter(Event.id == event_id).first()
     if not event:
         return {"error": "Event not found"}
     settings = get_settings()
 
-    # Generate token
-    token = secrets.token_urlsafe(32)
-
-    # Calculate expiration
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
-
-    # Save token to database
-    magic_token = FlyerTemplateMagicToken(
-        event_id=event_id,
-        phone=phone,
-        token=token,
-        expires_at=expires_at,
+    # Generate and save token
+    magic_token = SecureToken.create_and_save(
+        db, FlyerTemplateMagicToken,
+        expires_hours=expires_hours,
+        extra_fields={"event_id": event_id, "phone": phone},
     )
-    db.add(magic_token)
-    db.commit()
+    token = magic_token.token
+    expires_at = magic_token.expires_at
 
     upload_url = f"{settings.base_url.rstrip('/')}/flyer-templates/select/{token}"
 
@@ -360,7 +352,9 @@ Link expires in {expires_hours} hours."""
             "success": True,
             "token": token,
             "upload_url": upload_url,
-            "warning": "Token created but SMS failed to send"
+            "expires_at": expires_at.isoformat(),
+            "message": f"Token created but SMS failed to send: {e}",
+            "warning": "Token created but SMS failed to send",
         }
 
 
@@ -370,19 +364,7 @@ def validate_template_token(db: Session, token: str) -> Optional[FlyerTemplateMa
 
     Returns the token record if valid, None otherwise.
     """
-    magic_token = (
-        db.query(FlyerTemplateMagicToken)
-        .filter(FlyerTemplateMagicToken.token == token)
-        .first()
-    )
-
-    if not magic_token:
-        return None
-
-    if magic_token.expires_at < _utc_now_matching(magic_token.expires_at):
-        return None
-
-    return magic_token
+    return SecureToken.validate(db, FlyerTemplateMagicToken, token, check_used=False)
 
 
 def get_templates_for_selection(
@@ -446,6 +428,5 @@ def mark_token_used(db: Session, token: str) -> bool:
     if not magic_token:
         return False
 
-    magic_token.used_at = datetime.now(timezone.utc)
-    db.commit()
+    SecureToken.mark_used(db, magic_token)
     return True

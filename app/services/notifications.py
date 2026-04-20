@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from sqlalchemy import func
@@ -15,6 +16,8 @@ from app.services.sms import (
     send_event_cancelled_sms, send_event_postponed_sms, send_marketing_sms,
 )
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def log_notification(
@@ -751,6 +754,14 @@ def send_marketing_campaign(
                     stats["failed"] += 1
             except Exception as e:
                 stats["failed"] += 1
+                logger.error("Marketing email failed for %s: %s", recipient.email, e)
+                log_notification(
+                    db, recipient.id, NotificationType.MARKETING,
+                    NotificationChannel.EMAIL, campaign.content,
+                    subject=campaign.subject,
+                    status=NotificationStatus.FAILED,
+                    failed_reason=str(e),
+                )
 
         # Send SMS
         if NotificationChannel.SMS in channels and recipient.sms_opt_in and recipient.phone:

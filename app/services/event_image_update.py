@@ -6,24 +6,16 @@ Similar to style picker - generates token, sends SMS link, shows upload page.
 """
 
 import logging
-import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models import Event, EventImageUpdateToken
 from app.services.sms import send_sms
+from app.services.secure_token import SecureToken
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-
-def _utc_now_matching(dt: datetime) -> datetime:
-    """Return UTC now with timezone-awareness matching `dt`."""
-    now = datetime.now(timezone.utc)
-    if dt.tzinfo is None:
-        return now.replace(tzinfo=None)
-    return now
 
 
 def generate_image_update_token(
@@ -49,21 +41,14 @@ def generate_image_update_token(
     if not event:
         return {"error": "Event not found"}
 
-    # Generate secure token
-    token = secrets.token_urlsafe(32)
-
-    # Calculate expiration
-    expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_hours)
-
-    # Save token to database
-    update_token = EventImageUpdateToken(
-        event_id=event_id,
-        phone=phone,
-        token=token,
-        expires_at=expires_at,
+    # Generate and save token
+    update_token = SecureToken.create_and_save(
+        db, EventImageUpdateToken,
+        expires_hours=expires_hours,
+        extra_fields={"event_id": event_id, "phone": phone},
     )
-    db.add(update_token)
-    db.commit()
+    token = update_token.token
+    expires_at = update_token.expires_at
 
     # Generate magic link
     settings = get_settings()
@@ -104,24 +89,7 @@ def validate_token(db: Session, token: str) -> Optional[EventImageUpdateToken]:
 
     Returns the token record if valid, None otherwise.
     """
-    update_token = (
-        db.query(EventImageUpdateToken)
-        .filter(EventImageUpdateToken.token == token)
-        .first()
-    )
-
-    if not update_token:
-        return None
-
-    # Check if expired
-    if update_token.expires_at < _utc_now_matching(update_token.expires_at):
-        return None
-
-    # Check if already used
-    if update_token.used_at:
-        return None
-
-    return update_token
+    return SecureToken.validate(db, EventImageUpdateToken, token)
 
 
 def mark_token_used(db: Session, token: str) -> bool:
@@ -133,8 +101,7 @@ def mark_token_used(db: Session, token: str) -> bool:
     )
 
     if update_token:
-        update_token.used_at = datetime.now(timezone.utc)
-        db.commit()
+        SecureToken.mark_used(db, update_token)
         return True
 
     return False
