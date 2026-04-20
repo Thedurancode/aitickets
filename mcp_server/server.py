@@ -650,13 +650,16 @@ async def list_tools():
                     "phone": {"type": "string", "description": "Customer's phone number (optional)"},
                     "birthdate": {"type": "string", "description": "Birthdate in YYYY-MM-DD format (optional)"},
                     "birthday_opt_in": {"type": "boolean", "description": "Opt-in for birthday marketing (optional)"},
+                    "postal_code": {"type": "string", "description": "Postal/ZIP code (optional)"},
+                    "state": {"type": "string", "description": "State or province (optional)"},
+                    "country": {"type": "string", "description": "Country (optional)"},
                 },
                 "required": ["name", "email"],
             },
         ),
         Tool(
             name="update_customer",
-            description="Update a customer's info (email, phone, name, birthdate, birthday opt-in)",
+            description="Update a customer's info (email, phone, name, birthdate, location, birthday opt-in)",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -666,6 +669,9 @@ async def list_tools():
                     "phone": {"type": "string", "description": "New phone (optional)"},
                     "birthdate": {"type": "string", "description": "Birthdate in YYYY-MM-DD format (optional)"},
                     "birthday_opt_in": {"type": "boolean", "description": "Opt-in for birthday marketing (optional)"},
+                    "postal_code": {"type": "string", "description": "Postal/ZIP code (optional)"},
+                    "state": {"type": "string", "description": "State or province (optional)"},
+                    "country": {"type": "string", "description": "Country (optional)"},
                 },
                 "required": ["customer_id"],
             },
@@ -4202,6 +4208,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             birthday_opt_in=arguments.get("birthday_opt_in", False),
             email_opt_in=True,
             sms_opt_in=bool(phone),
+            postal_code=arguments.get("postal_code"),
+            state=arguments.get("state"),
+            country=arguments.get("country"),
         )
         db.add(customer)
         db.commit()
@@ -4246,6 +4255,15 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if "birthday_opt_in" in arguments:
             customer.birthday_opt_in = arguments["birthday_opt_in"]
             updates.append(f"birthday_opt_in → {arguments['birthday_opt_in']}")
+        if arguments.get("postal_code"):
+            customer.postal_code = arguments["postal_code"]
+            updates.append(f"postal_code → {arguments['postal_code']}")
+        if arguments.get("state"):
+            customer.state = arguments["state"]
+            updates.append(f"state → {arguments['state']}")
+        if arguments.get("country"):
+            customer.country = arguments["country"]
+            updates.append(f"country → {arguments['country']}")
 
         db.commit()
         db.refresh(customer)
@@ -4260,6 +4278,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 "phone": customer.phone,
                 "birthdate": customer.birthdate.isoformat() if customer.birthdate else None,
                 "birthday_opt_in": customer.birthday_opt_in,
+                "postal_code": customer.postal_code,
+                "state": customer.state,
+                "country": customer.country,
             }
         }
 
@@ -9233,14 +9254,12 @@ def _apply_segment_filters(db, query, segments: dict):
         )
         query = query.filter(EventGoer.id.in_(db.query(spent_subq.c.event_goer_id)))
 
-    # Postal code targeting (extract from email or use separate field if available)
+    # Postal code targeting
     if segments.get("postal_codes"):
-        # This would require a postal_code field on EventGoer or parsing from address
-        # For now, we'll filter by name/email patterns if common postal codes
         postal_codes = segments["postal_codes"]
-        # Simple implementation - filter by email domain patterns if zip codes are reflected
-        # In production, you'd have a dedicated postal_code field
-        pass  # Placeholder - requires additional model field
+        if isinstance(postal_codes, str):
+            postal_codes = [postal_codes]
+        query = query.filter(EventGoer.postal_code.in_(postal_codes))
 
     # Pending payments (customers with pending/failed payments)
     if segments.get("has_pending_payment"):

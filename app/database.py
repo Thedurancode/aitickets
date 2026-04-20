@@ -59,6 +59,7 @@ MIGRATIONS = [
     "add_media_sharing",
     "add_inventory_alerts",
     "add_audit_logs",
+    "add_customer_geo_and_financials",
 ]
 
 

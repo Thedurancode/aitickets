@@ -234,6 +234,11 @@ class EventGoer(Base):
     phone = Column(String(50), nullable=True)
     birthdate = Column(Date, nullable=True)  # Customer birthdate for birthday marketing
 
+    # Address / geo
+    postal_code = Column(String(20), nullable=True, index=True)
+    state = Column(String(100), nullable=True)
+    country = Column(String(100), nullable=True)
+
     # Notification preferences
     email_opt_in = Column(Boolean, default=True)  # Transactional emails (tickets, reminders)
     sms_opt_in = Column(Boolean, default=False)   # SMS notifications
@@ -267,6 +272,13 @@ class Ticket(Base):
     # Reminder tracking
     reminder_sent = Column(Boolean, default=False)
     reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Financial breakdown
+    net_amount_cents = Column(Integer, nullable=True)  # Final amount charged after discounts
+    platform_fee_cents = Column(Integer, nullable=True)  # Platform's cut
+    processing_fee_cents = Column(Integer, nullable=True)  # Stripe/payment processor fee
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
+    refund_amount_cents = Column(Integer, nullable=True)
 
     # Promo code tracking
     promo_code_id = Column(Integer, ForeignKey("promo_codes.id"), nullable=True)
@@ -380,6 +392,7 @@ class CustomerPreference(Base):
     # Communication preferences
     preferred_language = Column(String(20), default="en")
     preferred_contact_method = Column(String(20), default="sms")  # sms, email, phone
+    timezone = Column(String(50), nullable=True)  # IANA tz e.g. "America/Chicago"
 
     # Interests
     favorite_teams = Column(Text, nullable=True)  # JSON list
