@@ -67,6 +67,7 @@ class EventPublisher:
             platforms = [
                 "eventbrite",
                 "bandsintown",
+                "google_my_business",
                 "social_media",
                 "meta_ads",
                 "webhooks",
@@ -84,6 +85,8 @@ class EventPublisher:
                     results["eventbrite"] = self.publish_to_eventbrite()
                 elif platform == "bandsintown":
                     results["bandsintown"] = self.publish_to_bandsintown()
+                elif platform == "google_my_business":
+                    results["google_my_business"] = self.publish_to_google_my_business()
                 elif platform == "social_media":
                     results["social_media"] = self.publish_to_social_media()
                 elif platform == "meta_ads":
@@ -123,8 +126,21 @@ class EventPublisher:
             }
 
         try:
+            from datetime import datetime, timedelta, timezone
+
             # Parse event datetime
-            event_datetime = f"{self.event.event_date}T{self.event.event_time or '19:00'}:00"
+            event_date_str = str(self.event.event_date)
+            event_time_str = str(self.event.event_time or '19:00:00')
+
+            # Combine date and time
+            event_datetime_str = f"{event_date_str}T{event_time_str}"
+            event_dt = datetime.fromisoformat(event_datetime_str)
+
+            # Assume Eastern Time (UTC-5 during standard time, UTC-4 during DST)
+            # For May, it's DST so UTC-4
+            eastern_offset = timedelta(hours=-4)
+            event_dt_utc = event_dt - eastern_offset
+            event_end_utc = event_dt_utc + timedelta(hours=3)  # 3-hour event
 
             # Build Eventbrite event payload
             payload = {
@@ -132,12 +148,12 @@ class EventPublisher:
                     "name": {"html": self.event.name},
                     "description": {"html": self.event.description or ""},
                     "start": {
-                        "timezone": "America/New_York",  # Make this configurable
-                        "utc": event_datetime + "Z"
+                        "timezone": "America/New_York",
+                        "utc": event_dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                     },
                     "end": {
                         "timezone": "America/New_York",
-                        "utc": event_datetime + "Z"  # Add duration
+                        "utc": event_end_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
                     },
                     "currency": "USD",
                     "online_event": False,
@@ -145,7 +161,7 @@ class EventPublisher:
                     "shareable": True,
                     "invite_only": False,
                     "show_remaining": True,
-                    "capacity": sum(t.capacity for t in self.event.ticket_tiers) if self.event.ticket_tiers else 100,
+                    "capacity": sum(t.quantity_available for t in self.event.ticket_tiers) if self.event.ticket_tiers else 100,
                 }
             }
 
@@ -192,16 +208,16 @@ class EventPublisher:
                         "name": tier.name,
                         "description": tier.description or "",
                         "quantity_total": tier.quantity_available,
-                        "cost": f"USD,{tier.price / 100:.2f}" if tier.price > 0 else "free",
+                        "cost": f"USD,{int(tier.price)}" if tier.price > 0 else None,
                         "free": tier.price == 0,
-                        "sales_start": self.event.sale_start_date.isoformat() if self.event.sale_start_date else None,
-                        "sales_end": self.event.event_date.isoformat() if self.event.event_date else None,
+                        "sales_start": str(self.event.sale_start_date) + "T00:00:00Z" if self.event.sale_start_date else None,
+                        "sales_end": str(self.event.event_date) + "T23:59:59Z" if self.event.event_date else None,
                     }
                 }
 
                 tier_response = requests.post(
                     f"https://www.eventbriteapi.com/v3/events/{eventbrite_id}/ticket_classes/",
-                    headers={"Authorization": f"Bearer {eventbrite_token}"},
+                    headers={"Authorization": f"Bearer {api_key}"},
                     json=ticket_class_payload,
                     timeout=30
                 )
@@ -226,6 +242,45 @@ class EventPublisher:
         except Exception as e:
             logger.exception("Eventbrite publish failed")
             return {"success": False, "error": str(e)}
+
+    # ==================== Google My Business ====================
+
+    def publish_to_google_my_business(self) -> Dict[str, Any]:
+        """
+        Publish event to Google My Business for local discovery.
+
+        Features:
+        - Event appears in Google Search
+        - Shows on Google Maps
+        - Visible in Business Profile
+        - Free local marketing
+
+        Requires:
+        - Google OAuth credentials
+        - Verified business location
+        """
+        try:
+            from app.services.google_my_business import GoogleMyBusinessPublisher
+
+            gmb_publisher = GoogleMyBusinessPublisher(self.db, self.event.id)
+            result = gmb_publisher.publish()
+
+            return result
+
+        except ImportError:
+            return {
+                "success": False,
+                "platform": "google_my_business",
+                "error": "Google My Business module not found",
+                "help": "Ensure google_my_business.py is in app/services/"
+            }
+        except Exception as e:
+            logger.exception("Google My Business publish failed")
+            return {
+                "success": False,
+                "platform": "google_my_business",
+                "error": str(e)
+            }
 
     # ==================== Bandsintown ====================
 
@@ -502,6 +557,13 @@ def get_available_platforms() -> List[Dict[str, Any]]:
             "configured": bool(getattr(settings, 'bandsintown_app_id', None)),
             "requires": ["BANDSINTOWN_APP_ID"],
             "docs_url": "https://artists.bandsintown.com/support/api"
+        },
+        {
+            "id": "google_my_business",
+            "name": "Google My Business",
+            "configured": bool(getattr(settings, 'google_client_id', None) and getattr(settings, 'google_refresh_token', None)),
+            "requires": ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"],
+            "docs_url": "https://developers.google.com/my-business"
         },
         {
             "id": "social_media",

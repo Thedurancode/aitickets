@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import CheckoutContent from "./checkout-content";
+import NextGenCheckoutContent from "./next-gen-checkout";
 
 export const metadata: Metadata = {
-  title: "Checkout",
-  description: "Complete your ticket purchase.",
+  title: "Next-Gen Checkout | AI Tickets",
+  description: "Experience the future of secure payments with our AI-powered checkout.",
   robots: { index: false, follow: false },
 };
 
 export default function CheckoutPage() {
-  return <CheckoutContent />;
+  return <NextGenCheckoutContent />;
 }

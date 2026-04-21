@@ -47,16 +47,18 @@ export function EventHero({ event }: EventHeroProps) {
         )}
 
         {/* Categories overlay */}
-        <div className="absolute top-4 left-4 flex gap-2 flex-wrap">
-          {event.categories.map((category) => (
-            <Badge
-              key={category.id}
-              className="backdrop-blur-md bg-black/40 border-white/10 text-white"
-            >
-              {category.name}
-            </Badge>
-          ))}
-        </div>
+        {event.categories && event.categories.length > 0 && (
+          <div className="absolute top-4 left-4 flex gap-2 flex-wrap">
+            {event.categories.map((category) => (
+              <Badge
+                key={category.id}
+                className="backdrop-blur-md bg-black/40 border-white/10 text-white"
+              >
+                {category.name}
+              </Badge>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Event Info */}

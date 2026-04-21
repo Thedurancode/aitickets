@@ -50,7 +50,7 @@ export function EventCard({ event }: EventCardProps) {
               )}
 
               {/* Category badges */}
-              {event.categories.length > 0 && (
+              {event.categories && event.categories.length > 0 && (
                 <div className="absolute top-3 left-3 flex gap-2 flex-wrap">
                   {event.categories.slice(0, 2).map((category) => (
                     <Badge

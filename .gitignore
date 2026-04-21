@@ -26,6 +26,9 @@ build/
 .vscode/
 .idea/
 
+# Claude local state (worktrees, session settings)
+.claude/
+
 # Uploads
 uploads/
 

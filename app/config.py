@@ -39,6 +39,22 @@ class Settings(BaseSettings):
     facebook_page_id: str = ""  # Required for publishing ads
     instagram_account_id: str = ""  # Instagram Business Account ID (optional)
 
+    # EventBrite Integration
+    eventbrite_api_key: str = ""  # Private token for API access
+    eventbrite_client_secret: str = ""  # OAuth client secret
+    eventbrite_public_token: str = ""  # Public token for client-side operations
+    eventbrite_app_key: str = ""  # Application key
+    eventbrite_organization_id: str = ""  # Your EventBrite organization ID
+
+    # Bandsintown Integration
+    bandsintown_app_id: str = ""  # Application ID for Bandsintown API
+
+    # Google My Business Integration
+    google_client_id: str = ""  # OAuth 2.0 Client ID
+    google_client_secret: str = ""  # OAuth 2.0 Client Secret
+    google_refresh_token: str = ""  # Long-lived refresh token
+    google_location_id: str = ""  # Business location ID (optional, auto-detected)
+
     # Apple Wallet
     apple_wallet_team_id: str = ""
     apple_wallet_pass_type_id: str = "pass.com.example.event"
