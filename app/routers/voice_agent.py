@@ -23,7 +23,12 @@ from app.database import get_db
 from app.models import EventGoer
 from app.auth import get_current_user
 from app.services.voice_agent_enhanced import process_enhanced_voice_command, EnhancedVoiceAgent
+from app.services.voice_mcp_router import match_intent, route_intent, MCPAction
 from app.config import get_settings
+from dataclasses import asdict
+import hmac
+import hashlib
+import os
 
 router = APIRouter(prefix="/api/voice-agent", tags=["Voice Agent"])
 
@@ -107,6 +112,68 @@ async def process_voice_command(
                 )
 
     return VoiceCommandResponse(**result)
+
+
+class ElevenLabsToolCall(BaseModel):
+    text: str
+    session_id: Optional[str] = None
+    entities: Optional[Dict[str, Any]] = None
+    agent_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+
+
+class ElevenLabsToolResponse(BaseModel):
+    spoken_text: str
+    action: Optional[Dict[str, Any]] = None
+    intent: Optional[str] = None
+    requires_confirmation: bool = False
+    followups: List[str] = []
+
+
+def _verify_elevenlabs_signature(raw_body: bytes, signature: Optional[str]) -> bool:
+    secret = os.getenv("ELEVENLABS_WEBHOOK_SECRET")
+    if not secret:
+        return True
+    if not signature:
+        return False
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+@router.post("/elevenlabs", response_model=ElevenLabsToolResponse)
+async def elevenlabs_webhook(
+    payload: ElevenLabsToolCall,
+    db: Session = Depends(get_db),
+):
+    """Webhook for an ElevenLabs Conversational AI agent.
+
+    Fast-path: match_intent() + route_intent() returns an MCPAction for
+    Gmail / Calendar / Supabase / claude-mem. Fall-through: the existing
+    enhanced voice agent handles open-ended queries.
+    """
+    intent = match_intent(payload.text)
+    if intent:
+        action = route_intent(intent, payload.entities or {})
+        if isinstance(action, MCPAction):
+            return ElevenLabsToolResponse(
+                spoken_text=action.spoken_preamble,
+                action=asdict(action),
+                intent=intent,
+                requires_confirmation=action.requires_confirmation,
+                followups=action.followup_intents,
+            )
+
+    result = await process_enhanced_voice_command(
+        db=db,
+        user_id=1,
+        text=payload.text,
+        session_id=payload.session_id,
+    )
+    return ElevenLabsToolResponse(
+        spoken_text=result["text"],
+        intent=result.get("intent"),
+        followups=result.get("suggestions", []),
+    )
 
 
 @router.post("/transcribe")
