@@ -551,3 +551,64 @@ async def _run_auto_onboarding_with_options(
         logger.exception(f"Auto-onboarding exception for event {event_id}: {str(e)}")
     finally:
         db.close()
+
+
+# ============== Artist Data for Event ==============
+
+@router.get("/{event_id}/artist")
+def get_event_artist(event_id: int, db: Session = Depends(get_db)):
+    """Get artist data for an event."""
+    from app.models import Artist
+    import json as _json
+    
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        return {"error": "Event not found"}
+    if not event.artist_id:
+        return {"has_artist": False}
+    
+    artist = db.query(Artist).filter(Artist.id == event.artist_id).first()
+    if not artist:
+        return {"has_artist": False}
+    
+    def parse_json(val):
+        if not val:
+            return None
+        try:
+            return _json.loads(val) if isinstance(val, str) else val
+        except:
+            return val
+    
+    return {
+        "has_artist": True,
+        "id": artist.id,
+        "name": artist.name,
+        "bio": artist.bio,
+        "genre": artist.genre,
+        "sub_genres": parse_json(artist.sub_genres),
+        "country_of_origin": artist.country_of_origin,
+        "active_since_year": artist.active_since_year,
+        "spotify_image_url": artist.spotify_image_url,
+        "primary_image_url": artist.primary_image_url,
+        "spotify_followers": artist.spotify_followers,
+        "spotify_monthly_listeners": artist.spotify_monthly_listeners,
+        "spotify_popularity": artist.spotify_popularity,
+        "spotify_top_tracks": parse_json(artist.spotify_top_tracks),
+        "spotify_genres": parse_json(artist.spotify_genres),
+        "youtube_subscribers": artist.youtube_subscribers,
+        "instagram_handle": artist.instagram_handle,
+        "instagram_followers": artist.instagram_followers,
+        "twitter_handle": artist.twitter_handle,
+        "twitter_followers": artist.twitter_followers,
+        "tiktok_handle": artist.tiktok_handle,
+        "tiktok_followers": artist.tiktok_followers,
+        "facebook_page": artist.facebook_page,
+        "facebook_likes": artist.facebook_likes,
+        "achievements": parse_json(artist.achievements),
+        "similar_artists": parse_json(artist.similar_artists),
+        "fan_demographics": parse_json(artist.fan_demographics),
+        "primary_markets": parse_json(artist.primary_markets),
+        "typical_venue_size": artist.typical_venue_size,
+        "sellout_velocity": artist.sellout_velocity,
+        "reference_images": parse_json(artist.reference_images),
+    }
