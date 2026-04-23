@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { Ticket, ShoppingCart, Menu, X, CalendarDays } from "lucide-react";
+import { Ticket, ShoppingCart, Menu, X, CalendarDays, MapPin } from "lucide-react";
 import { useCheckoutStore } from "@/stores/checkout-store";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,12 @@ export function Header() {
           <Link href="/events">
             <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
               Events
+            </Button>
+          </Link>
+
+          <Link href="/venues">
+            <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+              Venues
             </Button>
           </Link>
 
@@ -118,6 +124,14 @@ export function Header() {
               >
                 <CalendarDays className="h-4 w-4 text-muted-foreground" />
                 Events
+              </Link>
+              <Link
+                href="/venues"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 px-3 py-3 rounded-lg text-foreground hover:bg-white/5 transition-colors"
+              >
+                <MapPin className="h-4 w-4 text-muted-foreground" />
+                Venues
               </Link>
               <Link
                 href="/tickets"

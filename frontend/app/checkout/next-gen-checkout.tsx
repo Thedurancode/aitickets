@@ -140,7 +140,7 @@ function NextGenCheckoutInner() {
 
     try {
       const result = await purchaseMutation.mutateAsync({
-        ticket_tier_id: selectedTier.id,
+        ticket_tier_id: selectedTier!.id,
         email,
         name,
         phone: phone || undefined,

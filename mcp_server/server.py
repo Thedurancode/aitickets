@@ -252,6 +252,7 @@ async def list_tools():
                     "address": {"type": "string", "description": "New address (optional)"},
                     "phone": {"type": "string", "description": "New phone (optional)"},
                     "description": {"type": "string", "description": "New description (optional)"},
+                    "logo_url": {"type": "string", "description": "Venue logo/image URL (optional)"},
                 },
                 "required": ["venue_id"],
             },
@@ -349,6 +350,22 @@ async def list_tools():
                     "post_event_video_url": {"type": "string", "description": "Post-event recap/highlight video URL (optional)"},
                 },
                 "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="set_image",
+            description="Smart image setter — set the image/photo for any event or venue by just providing the URL. Auto-detects whether it's for an event or venue based on context. Can look up by name if no ID provided.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "image_url": {"type": "string", "description": "The image URL to set"},
+                    "event_id": {"type": "integer", "description": "Event ID (optional if event_name provided)"},
+                    "venue_id": {"type": "integer", "description": "Venue ID (optional if venue_name provided)"},
+                    "event_name": {"type": "string", "description": "Event name to search for (fuzzy match)"},
+                    "venue_name": {"type": "string", "description": "Venue name to search for (fuzzy match)"},
+                    "target": {"type": "string", "description": "Force target: 'event' or 'venue'. Auto-detected if not provided."},
+                },
+                "required": ["image_url"],
             },
         ),
         Tool(
@@ -3007,6 +3024,150 @@ async def list_tools():
                 "required": [],
             },
         ),
+        # ---- Additional CRUD & operational tools ----
+        Tool(
+            name="delete_event",
+            description="Delete an event by ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to delete"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="delete_venue",
+            description="Delete a venue by ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "venue_id": {"type": "integer", "description": "Venue ID to delete"},
+                },
+                "required": ["venue_id"],
+            },
+        ),
+        Tool(
+            name="cancel_ticket",
+            description="Cancel a ticket by ID (sets status to cancelled)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "Ticket ID to cancel"},
+                },
+                "required": ["ticket_id"],
+            },
+        ),
+        Tool(
+            name="transfer_ticket",
+            description="Transfer a ticket to a new email address",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "Ticket ID to transfer"},
+                    "new_email": {"type": "string", "description": "New attendee email address"},
+                },
+                "required": ["ticket_id", "new_email"],
+            },
+        ),
+        Tool(
+            name="delete_promo_code",
+            description="Delete a promo code by ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "promo_code_id": {"type": "integer", "description": "Promo code ID to delete"},
+                },
+                "required": ["promo_code_id"],
+            },
+        ),
+        Tool(
+            name="join_waitlist",
+            description="Add an email to the waitlist for an event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "email": {"type": "string", "description": "Email address"},
+                    "name": {"type": "string", "description": "Person's name (optional)"},
+                    "phone": {"type": "string", "description": "Phone number (optional)"},
+                },
+                "required": ["event_id", "email"],
+            },
+        ),
+        Tool(
+            name="generate_flyer",
+            description="Generate an AI event flyer by calling the flyer generation service",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to generate flyer for"},
+                    "style_instructions": {"type": "string", "description": "Optional style/design instructions"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="send_notification",
+            description="Send an SMS or email notification to event attendees",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "message": {"type": "string", "description": "Notification message"},
+                    "channel": {"type": "string", "enum": ["email", "sms"], "description": "Notification channel (email or sms)"},
+                },
+                "required": ["event_id", "message", "channel"],
+            },
+        ),
+        Tool(
+            name="send_event_reminder",
+            description="Send reminder notifications for an upcoming event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "use_sms": {"type": "boolean", "description": "Also send SMS reminders (default false)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="export_guest_list",
+            description="Export the attendee/guest list for an event as formatted text",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="generate_checkout_link",
+            description="Generate a Stripe checkout URL for a ticket tier",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                    "quantity": {"type": "integer", "description": "Number of tickets (default 1)"},
+                },
+                "required": ["event_id", "tier_id"],
+            },
+        ),
+        Tool(
+            name="email_report",
+            description="Send an event report summary via email",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "to_email": {"type": "string", "description": "Email address to send the report to"},
+                },
+                "required": ["event_id", "to_email"],
+            },
+        ),
     ] + get_platform_analytics_tools() + get_weather_tools() + get_social_media_tools() + get_voiceover_tools()
 
 
@@ -3364,9 +3525,48 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             venue.phone = arguments["phone"]
         if "description" in arguments:
             venue.description = arguments["description"]
+        if "logo_url" in arguments:
+            venue.logo_url = arguments["logo_url"]
         db.commit()
         db.refresh(venue)
         return _venue_to_dict(venue)
+
+    elif name == "set_image":
+        image_url = arguments["image_url"]
+        target = arguments.get("target", "").lower()
+
+        # Determine target
+        if arguments.get("venue_id") or arguments.get("venue_name") or target == "venue":
+            # Venue image
+            venue = None
+            if arguments.get("venue_id"):
+                venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
+            elif arguments.get("venue_name"):
+                venue = db.query(Venue).filter(Venue.name.ilike(f"%{arguments['venue_name']}%")).first()
+            elif target == "venue":
+                venue = db.query(Venue).order_by(Venue.id.desc()).first()
+            if not venue:
+                return {"error": "Venue not found"}
+            venue.logo_url = image_url
+            db.commit()
+            db.refresh(venue)
+            return {"success": True, "message": f"Image set for venue '{venue.name}'", "venue": _venue_to_dict(venue)}
+
+        else:
+            # Event image (default)
+            event = None
+            if arguments.get("event_id"):
+                event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+            elif arguments.get("event_name"):
+                event = db.query(Event).filter(Event.name.ilike(f"%{arguments['event_name']}%")).first()
+            else:
+                event = db.query(Event).order_by(Event.id.desc()).first()
+            if not event:
+                return {"error": "Event not found"}
+            event.image_url = image_url
+            db.commit()
+            db.refresh(event)
+            return {"success": True, "message": f"Image set for event '{event.name}'", "event": _event_to_dict(event)}
 
     # ============== Event Tools ==============
     elif name == "list_events":
@@ -10356,6 +10556,293 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 for i, row in enumerate(top_events)
             ],
         }
+
+    # ============== Additional CRUD & Operational Tools ==============
+
+    elif name == "delete_event":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+        event_name = event.name
+        db.delete(event)
+        db.commit()
+        return {"success": True, "message": f"Deleted event '{event_name}'"}
+
+    elif name == "delete_venue":
+        venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
+        if not venue:
+            return {"error": "Venue not found"}
+        venue_name = venue.name
+        db.delete(venue)
+        db.commit()
+        return {"success": True, "message": f"Deleted venue '{venue_name}'"}
+
+    elif name == "cancel_ticket":
+        ticket = db.query(Ticket).filter(Ticket.id == arguments["ticket_id"]).first()
+        if not ticket:
+            return {"error": "Ticket not found"}
+        ticket.status = TicketStatus.CANCELLED
+        db.commit()
+        return {"success": True, "ticket_id": ticket.id, "status": "cancelled"}
+
+    elif name == "transfer_ticket":
+        ticket = db.query(Ticket).filter(Ticket.id == arguments["ticket_id"]).first()
+        if not ticket:
+            return {"error": "Ticket not found"}
+        old_email = ticket.attendee_email
+        ticket.attendee_email = arguments["new_email"]
+        db.commit()
+        return {
+            "success": True,
+            "ticket_id": ticket.id,
+            "old_email": old_email,
+            "new_email": arguments["new_email"],
+        }
+
+    elif name == "delete_promo_code":
+        promo = db.query(PromoCode).filter(PromoCode.id == arguments["promo_code_id"]).first()
+        if not promo:
+            return {"error": "Promo code not found"}
+        code = promo.code
+        db.delete(promo)
+        db.commit()
+        return {"success": True, "message": f"Deleted promo code '{code}'"}
+
+    elif name == "join_waitlist":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+        # Check if already on waitlist
+        existing = (
+            db.query(WaitlistEntry)
+            .filter(WaitlistEntry.event_id == event.id, WaitlistEntry.email == arguments["email"])
+            .first()
+        )
+        if existing:
+            return {"error": "Email is already on the waitlist for this event"}
+        # Get next position
+        max_pos = (
+            db.query(WaitlistEntry.position)
+            .filter(WaitlistEntry.event_id == event.id)
+            .order_by(WaitlistEntry.position.desc())
+            .first()
+        )
+        next_pos = (max_pos[0] + 1) if max_pos else 1
+        entry = WaitlistEntry(
+            event_id=event.id,
+            email=arguments["email"],
+            name=arguments.get("name"),
+            phone=arguments.get("phone"),
+            position=next_pos,
+            status=WaitlistStatus.WAITING,
+        )
+        db.add(entry)
+        db.commit()
+        return {
+            "success": True,
+            "event": event.name,
+            "email": arguments["email"],
+            "position": next_pos,
+        }
+
+    elif name == "generate_flyer":
+        from sqlalchemy.orm import joinedload as _jl
+        from app.services.flyer_generator import build_flyer_prompt, generate_flyer as _generate_flyer
+
+        event = (
+            db.query(Event)
+            .options(_jl(Event.venue), _jl(Event.ticket_tiers))
+            .filter(Event.id == arguments["event_id"])
+            .first()
+        )
+        if not event:
+            return {"error": "Event not found"}
+
+        tiers_data = [
+            {"name": tier.name, "price": tier.price}
+            for tier in (event.ticket_tiers or [])
+        ]
+
+        prompt = build_flyer_prompt(
+            event_name=event.name,
+            event_date=str(event.event_date),
+            event_time=event.event_time or "",
+            venue_name=event.venue.name if event.venue else None,
+            venue_address=event.venue.address if event.venue else None,
+            description=event.description,
+            tiers=tiers_data,
+            org_name=settings.org_name,
+            style_instructions=arguments.get("style_instructions"),
+        )
+
+        result = _generate_flyer(prompt)
+        if not result["success"]:
+            return {"error": result["error"]}
+
+        event.image_url = result["image_url"]
+        db.commit()
+        return {
+            "success": True,
+            "event_id": event.id,
+            "image_url": result["image_url"],
+        }
+
+    elif name == "send_notification":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        channel_str = arguments["channel"]
+        channel = NotificationChannel.EMAIL if channel_str == "email" else NotificationChannel.SMS
+
+        # Get all ticket holders for this event
+        tickets = (
+            db.query(Ticket)
+            .join(TicketTier)
+            .filter(TicketTier.event_id == event.id, Ticket.status != TicketStatus.CANCELLED)
+            .all()
+        )
+
+        notifications_created = 0
+        for ticket in tickets:
+            notif = Notification(
+                event_id=event.id,
+                ticket_id=ticket.id,
+                channel=channel,
+                notification_type=NotificationType.CUSTOM,
+                recipient=ticket.attendee_email,
+                message=arguments["message"],
+            )
+            db.add(notif)
+            notifications_created += 1
+
+        db.commit()
+        return {
+            "success": True,
+            "event": event.name,
+            "channel": channel_str,
+            "notifications_created": notifications_created,
+        }
+
+    elif name == "send_event_reminder":
+        from app.services.notifications import send_event_reminders
+
+        channels = [NotificationChannel.EMAIL]
+        if arguments.get("use_sms"):
+            channels.append(NotificationChannel.SMS)
+
+        result = send_event_reminders(
+            db=db,
+            event_id=arguments["event_id"],
+            channels=channels,
+        )
+        return result
+
+    elif name == "export_guest_list":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        tickets = (
+            db.query(Ticket)
+            .join(TicketTier)
+            .filter(TicketTier.event_id == event.id, Ticket.status != TicketStatus.CANCELLED)
+            .all()
+        )
+
+        lines = [f"Guest List for {event.name}", f"Total Attendees: {len(tickets)}", ""]
+        for i, ticket in enumerate(tickets, 1):
+            lines.append(
+                f"{i}. {ticket.attendee_name or 'N/A'} | {ticket.attendee_email} | "
+                f"Tier: {ticket.tier.name if ticket.tier else 'N/A'} | Status: {ticket.status.value}"
+            )
+
+        return {
+            "event": event.name,
+            "total_attendees": len(tickets),
+            "guest_list": "\n".join(lines),
+        }
+
+    elif name == "generate_checkout_link":
+        import stripe
+        stripe.api_key = settings.stripe_secret_key
+
+        event = db.query(Event).options(joinedload(Event.venue)).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        tier = db.query(TicketTier).filter(TicketTier.id == arguments["tier_id"]).first()
+        if not tier:
+            return {"error": "Ticket tier not found"}
+
+        quantity = arguments.get("quantity", 1)
+
+        try:
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": tier.price,
+                        "product_data": {
+                            "name": f"{event.name} - {tier.name}",
+                        },
+                    },
+                    "quantity": quantity,
+                }],
+                metadata={
+                    "event_id": str(event.id),
+                    "tier_id": str(tier.id),
+                },
+                success_url=f"{settings.base_url}/checkout/success",
+                cancel_url=f"{settings.base_url}/checkout/cancel",
+            )
+            return {
+                "success": True,
+                "checkout_url": session.url,
+                "event": event.name,
+                "tier": tier.name,
+                "quantity": quantity,
+                "total_display": f"${tier.price * quantity / 100:.2f}",
+            }
+        except stripe.error.StripeError as e:
+            return {"success": False, "error": str(e)}
+
+    elif name == "email_report":
+        from app.services.email_service import send_email
+
+        event = db.query(Event).options(joinedload(Event.venue)).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        # Gather stats
+        tickets = (
+            db.query(Ticket)
+            .join(TicketTier)
+            .filter(TicketTier.event_id == event.id)
+            .all()
+        )
+        total_sold = sum(1 for t in tickets if t.status != TicketStatus.CANCELLED)
+        total_revenue = sum(t.amount_paid or 0 for t in tickets if t.status != TicketStatus.CANCELLED)
+
+        report_body = (
+            f"Event Report: {event.name}\n"
+            f"Date: {event.event_date}\n"
+            f"Venue: {event.venue.name if event.venue else 'N/A'}\n"
+            f"Status: {event.status.value if event.status else 'active'}\n\n"
+            f"Tickets Sold: {total_sold}\n"
+            f"Total Revenue: ${total_revenue / 100:.2f}\n"
+        )
+
+        try:
+            send_email(
+                to=arguments["to_email"],
+                subject=f"Event Report: {event.name}",
+                body=report_body,
+            )
+            return {"success": True, "message": f"Report sent to {arguments['to_email']}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     return {"error": f"Unknown tool: {name}"}
 
