@@ -656,9 +656,6 @@ async def run_event_research_agent(
         if ai_research and not ai_research.get("fallback"):
             research_data["ai_research"] = ai_research
             research_data["sources_checked"].append("ai_research")
-            # Populate artist model with AI data
-            populate_artist_from_ai(db, artist, ai_research)
-            logger.info(f"AI research populated artist '{artist_name}' with comprehensive data")
 
         # Step 2.6b: Research artist on Spotify (fallback/supplement)
         spotify_research = research_spotify(artist_name)
@@ -704,6 +701,13 @@ async def run_event_research_agent(
         )
 
         result["research_snapshot_id"] = research_snapshot.id
+
+        # Populate artist with AI research data AFTER save_artist_research
+        # This ensures AI data fills any gaps left by failed API lookups
+        ai_data = result.get("ai_research", {})
+        if ai_data and not ai_data.get("fallback"):
+            populate_artist_from_ai(db, artist, ai_data)
+            logger.info(f"AI research populated artist '{artist_name}' with comprehensive data")
 
         # Get insights with new data
         result["insights"] = get_artist_insights(db, artist.id)

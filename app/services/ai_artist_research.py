@@ -150,55 +150,57 @@ def populate_artist_from_ai(db, artist, ai_data: Dict) -> None:
     if ai_data.get("fallback") or ai_data.get("error"):
         return
 
-    def set_if_empty(field, value):
-        if value and not getattr(artist, field, None):
+    def set_field(field, value):
+        """Set field if AI provided a real value."""
+        if value is not None and value != '' and value != 0 and value != []:
             setattr(artist, field, value)
 
-    def set_json_if_empty(field, value):
-        if value and not getattr(artist, field, None):
+    def set_json_field(field, value):
+        """Set JSON field if AI provided real data."""
+        if value and value != [] and value != {}:
             setattr(artist, field, json.dumps(value) if isinstance(value, (list, dict)) else value)
 
     # Basic info
-    set_if_empty("bio", ai_data.get("bio"))
-    set_if_empty("genre", ai_data.get("genre"))
-    set_json_if_empty("sub_genres", ai_data.get("sub_genres"))
-    set_if_empty("country_of_origin", ai_data.get("country_of_origin"))
-    set_if_empty("active_since_year", ai_data.get("active_since_year"))
+    set_field("bio", ai_data.get("bio"))
+    set_field("genre", ai_data.get("genre"))
+    set_json_field("sub_genres", ai_data.get("sub_genres"))
+    set_field("country_of_origin", ai_data.get("country_of_origin"))
+    set_field("active_since_year", ai_data.get("active_since_year"))
 
     # Spotify data
-    set_if_empty("spotify_followers", ai_data.get("spotify_followers"))
-    set_if_empty("spotify_monthly_listeners", ai_data.get("spotify_monthly_listeners"))
-    set_if_empty("spotify_popularity", ai_data.get("spotify_popularity"))
-    set_json_if_empty("spotify_genres", ai_data.get("spotify_genres"))
-    set_json_if_empty("spotify_top_tracks", ai_data.get("spotify_top_tracks"))
-    set_if_empty("spotify_image_url", ai_data.get("spotify_image_url"))
+    set_field("spotify_followers", ai_data.get("spotify_followers"))
+    set_field("spotify_monthly_listeners", ai_data.get("spotify_monthly_listeners"))
+    set_field("spotify_popularity", ai_data.get("spotify_popularity"))
+    set_json_field("spotify_genres", ai_data.get("spotify_genres"))
+    set_json_field("spotify_top_tracks", ai_data.get("spotify_top_tracks"))
+    set_field("spotify_image_url", ai_data.get("spotify_image_url"))
 
     # YouTube
-    set_if_empty("youtube_subscribers", ai_data.get("youtube_subscribers"))
-    set_if_empty("youtube_view_count", ai_data.get("youtube_view_count"))
+    set_field("youtube_subscribers", ai_data.get("youtube_subscribers"))
+    set_field("youtube_view_count", ai_data.get("youtube_view_count"))
 
     # Social media
-    set_if_empty("instagram_handle", ai_data.get("instagram_handle"))
-    set_if_empty("instagram_followers", ai_data.get("instagram_followers"))
-    set_if_empty("twitter_handle", ai_data.get("twitter_handle"))
-    set_if_empty("twitter_followers", ai_data.get("twitter_followers"))
-    set_if_empty("tiktok_handle", ai_data.get("tiktok_handle"))
-    set_if_empty("tiktok_followers", ai_data.get("tiktok_followers"))
-    set_if_empty("facebook_page", ai_data.get("facebook_page"))
-    set_if_empty("facebook_likes", ai_data.get("facebook_likes"))
+    set_field("instagram_handle", ai_data.get("instagram_handle"))
+    set_field("instagram_followers", ai_data.get("instagram_followers"))
+    set_field("twitter_handle", ai_data.get("twitter_handle"))
+    set_field("twitter_followers", ai_data.get("twitter_followers"))
+    set_field("tiktok_handle", ai_data.get("tiktok_handle"))
+    set_field("tiktok_followers", ai_data.get("tiktok_followers"))
+    set_field("facebook_page", ai_data.get("facebook_page"))
+    set_field("facebook_likes", ai_data.get("facebook_likes"))
 
     # Career info
-    set_json_if_empty("achievements", ai_data.get("achievements"))
-    set_json_if_empty("similar_artists", ai_data.get("similar_artists"))
-    set_json_if_empty("fan_demographics", ai_data.get("fan_demographics"))
-    set_json_if_empty("primary_markets", ai_data.get("primary_markets"))
-    set_json_if_empty("fan_interests", ai_data.get("fan_interests"))
+    set_json_field("achievements", ai_data.get("achievements"))
+    set_json_field("similar_artists", ai_data.get("similar_artists"))
+    set_json_field("fan_demographics", ai_data.get("fan_demographics"))
+    set_json_field("primary_markets", ai_data.get("primary_markets"))
+    set_json_field("fan_interests", ai_data.get("fan_interests"))
 
     # Performance metrics
     if ai_data.get("average_ticket_price_usd"):
-        set_if_empty("average_ticket_price", int(ai_data["average_ticket_price_usd"] * 100))
-    set_if_empty("typical_venue_size", ai_data.get("typical_venue_size"))
-    set_if_empty("sellout_velocity", ai_data.get("sellout_velocity"))
+        set_field("average_ticket_price", int(ai_data["average_ticket_price_usd"] * 100))
+    set_field("typical_venue_size", ai_data.get("typical_venue_size"))
+    set_field("sellout_velocity", ai_data.get("sellout_velocity"))
 
     # Set primary image
     if not artist.primary_image_url:
