@@ -13,6 +13,10 @@ services:
       APP_URL: http://localhost:3200
       CORS_ORIGINS: http://localhost:3200
       DATABASE_URL: sqlite:///./data/tickets.db
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:-}
+      SPOTIFY_CLIENT_SECRET: ${SPOTIFY_CLIENT_SECRET:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      FROM_EMAIL: ${FROM_EMAIL:-noreply@dispotree.com}
     volumes:
       - aitickets_data:/app/data
     depends_on: !override
