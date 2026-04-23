@@ -20,7 +20,7 @@ from app.models import (
     CustomerNote, CustomerPreference, EventCategory,
     MarketingCampaign, MarketingList, PromoCode, DiscountType, EventPhoto,
     WaitlistEntry, WaitlistStatus, MediaShareToken, VoiceCallCampaign, VoiceCall,
-    MetaAdCampaign,
+    MetaAdCampaign, Artist,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -366,6 +366,45 @@ async def list_tools():
                     "target": {"type": "string", "description": "Force target: 'event' or 'venue'. Auto-detected if not provided."},
                 },
                 "required": ["image_url"],
+            },
+        ),
+        Tool(
+            name="add_artist_image",
+            description="Add a reference image to an artist. Artists can have multiple reference images for flyer generation. If no artist images exist, always ask the user to provide one before generating a flyer.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist_id": {"type": "integer", "description": "Artist ID"},
+                    "artist_name": {"type": "string", "description": "Artist name (fuzzy match if no ID)"},
+                    "image_url": {"type": "string", "description": "Image URL to add"},
+                    "label": {"type": "string", "description": "Label for the image (e.g., 'headshot', 'live performance', 'press photo')"},
+                    "set_as_primary": {"type": "boolean", "description": "Set this as the primary/main image (default false)"},
+                },
+                "required": ["image_url"],
+            },
+        ),
+        Tool(
+            name="get_artist_images",
+            description="Get all reference images for an artist. Use this before generating a flyer to check if we have images. If no images exist, ask the user to provide reference images.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist_id": {"type": "integer", "description": "Artist ID"},
+                    "artist_name": {"type": "string", "description": "Artist name (fuzzy match)"},
+                    "event_id": {"type": "integer", "description": "Get artist for this event"},
+                },
+            },
+        ),
+        Tool(
+            name="remove_artist_image",
+            description="Remove a reference image from an artist by URL.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist_id": {"type": "integer", "description": "Artist ID"},
+                    "image_url": {"type": "string", "description": "Image URL to remove"},
+                },
+                "required": ["artist_id", "image_url"],
             },
         ),
         Tool(
@@ -3567,6 +3606,92 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             db.commit()
             db.refresh(event)
             return {"success": True, "message": f"Image set for event '{event.name}'", "event": _event_to_dict(event)}
+
+    # ============== Artist Image Tools ==============
+    elif name == "add_artist_image":
+        import json as _json
+        artist = None
+        if arguments.get("artist_id"):
+            artist = db.query(Artist).filter(Artist.id == arguments["artist_id"]).first()
+        elif arguments.get("artist_name"):
+            artist = db.query(Artist).filter(Artist.name.ilike(f"%{arguments['artist_name']}%")).first()
+        if not artist:
+            return {"error": "Artist not found. Create the artist first or check the name."}
+
+        # Parse existing images
+        existing = _json.loads(artist.reference_images) if artist.reference_images else []
+        new_img = {"url": arguments["image_url"], "label": arguments.get("label", "reference")}
+        existing.append(new_img)
+        artist.reference_images = _json.dumps(existing)
+
+        if arguments.get("set_as_primary", False) or not artist.primary_image_url:
+            artist.primary_image_url = arguments["image_url"]
+
+        db.commit()
+        db.refresh(artist)
+        return {
+            "success": True,
+            "artist": artist.name,
+            "total_images": len(existing),
+            "primary_image": artist.primary_image_url,
+            "images": existing,
+        }
+
+    elif name == "get_artist_images":
+        import json as _json
+        artist = None
+        if arguments.get("artist_id"):
+            artist = db.query(Artist).filter(Artist.id == arguments["artist_id"]).first()
+        elif arguments.get("artist_name"):
+            artist = db.query(Artist).filter(Artist.name.ilike(f"%{arguments['artist_name']}%")).first()
+        elif arguments.get("event_id"):
+            event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+            if event and event.artist_id:
+                artist = db.query(Artist).filter(Artist.id == event.artist_id).first()
+
+        if not artist:
+            return {"has_images": False, "message": "No artist found. Please provide reference images for flyer generation."}
+
+        images = _json.loads(artist.reference_images) if artist.reference_images else []
+        spotify_img = artist.spotify_image_url
+        primary = artist.primary_image_url
+
+        all_images = []
+        if primary:
+            all_images.append({"url": primary, "label": "primary", "source": "user"})
+        if spotify_img and spotify_img != primary:
+            all_images.append({"url": spotify_img, "label": "spotify", "source": "spotify"})
+        for img in images:
+            if img.get("url") not in [primary, spotify_img]:
+                all_images.append({**img, "source": "user"})
+
+        if not all_images:
+            return {
+                "has_images": False,
+                "artist": artist.name,
+                "message": f"No reference images found for {artist.name}. Please provide at least one image URL before generating a flyer.",
+            }
+
+        return {
+            "has_images": True,
+            "artist": artist.name,
+            "total_images": len(all_images),
+            "primary_image": primary or spotify_img,
+            "images": all_images,
+        }
+
+    elif name == "remove_artist_image":
+        import json as _json
+        artist = db.query(Artist).filter(Artist.id == arguments["artist_id"]).first()
+        if not artist:
+            return {"error": "Artist not found"}
+        existing = _json.loads(artist.reference_images) if artist.reference_images else []
+        existing = [img for img in existing if img.get("url") != arguments["image_url"]]
+        artist.reference_images = _json.dumps(existing)
+        if artist.primary_image_url == arguments["image_url"]:
+            artist.primary_image_url = existing[0]["url"] if existing else artist.spotify_image_url
+        db.commit()
+        return {"success": True, "remaining_images": len(existing)}
 
     # ============== Event Tools ==============
     elif name == "list_events":
@@ -10646,6 +10771,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "generate_flyer":
+        import json as _json2
         from sqlalchemy.orm import joinedload as _jl
         from app.services.flyer_generator import build_flyer_prompt, generate_flyer as _generate_flyer
 
@@ -10658,10 +10784,44 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if not event:
             return {"error": "Event not found"}
 
+        # Check for artist reference images
+        artist_images = []
+        artist_name = None
+        if event.artist_id:
+            artist = db.query(Artist).filter(Artist.id == event.artist_id).first()
+            if artist:
+                artist_name = artist.name
+                # Collect all available images
+                if artist.primary_image_url:
+                    artist_images.append(artist.primary_image_url)
+                if artist.spotify_image_url and artist.spotify_image_url not in artist_images:
+                    artist_images.append(artist.spotify_image_url)
+                if artist.reference_images:
+                    for img in _json2.loads(artist.reference_images):
+                        if img.get("url") and img["url"] not in artist_images:
+                            artist_images.append(img["url"])
+
+        # If no artist images, warn the user
+        if not artist_images and not arguments.get("skip_image_check"):
+            return {
+                "needs_images": True,
+                "event_id": event.id,
+                "event_name": event.name,
+                "artist_name": artist_name,
+                "message": f"No reference images found for this event's artist{(' (' + artist_name + ')') if artist_name else ''}. Please provide at least one artist image URL using add_artist_image, then try again. Or pass skip_image_check=true to generate without artist photos.",
+            }
+
         tiers_data = [
             {"name": tier.name, "price": tier.price}
             for tier in (event.ticket_tiers or [])
         ]
+
+        # Include artist info in the prompt
+        style_instructions = arguments.get("style_instructions", "")
+        if artist_name:
+            style_instructions += f"\nFeatured artist: {artist_name}."
+        if artist_images:
+            style_instructions += f"\nArtist reference images provided: {len(artist_images)} images."
 
         prompt = build_flyer_prompt(
             event_name=event.name,
@@ -10672,7 +10832,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             description=event.description,
             tiers=tiers_data,
             org_name=settings.org_name,
-            style_instructions=arguments.get("style_instructions"),
+            style_instructions=style_instructions,
         )
 
         result = _generate_flyer(prompt)
@@ -10685,6 +10845,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             "success": True,
             "event_id": event.id,
             "image_url": result["image_url"],
+            "artist_images_used": len(artist_images),
         }
 
     elif name == "send_notification":

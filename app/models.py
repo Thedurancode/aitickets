@@ -1293,6 +1293,10 @@ class Artist(Base):
     typical_venue_size = Column(String(50), nullable=True)  # small/medium/large/stadium
     sellout_velocity = Column(String(50), nullable=True)  # fast/moderate/slow
 
+    # Reference Images (multiple images for flyer generation)
+    reference_images = Column(Text, nullable=True)  # JSON: [{"url": "...", "label": "headshot"}, ...]
+    primary_image_url = Column(String(500), nullable=True)  # Main image (user-selected or best quality)
+
     # Research Metadata
     last_researched_at = Column(DateTime(timezone=True), nullable=True)
     research_version = Column(Integer, default=1)
