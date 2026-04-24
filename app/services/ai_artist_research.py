@@ -90,7 +90,8 @@ IMPORTANT:
 - Use real, accurate data from your knowledge. Do NOT make up numbers.
 - For social media stats, use the most recent numbers you know of.
 - For image URLs, provide real publicly accessible image URLs if you know them (Wikipedia commons, official sites). Otherwise return empty array.
-- For spotify_image_url, use the format: https://i.scdn.co/image/... if you know it, otherwise null.
+- For spotify_image_url: set to null. Do NOT make up Spotify image URLs — they will be broken.
+- For image_search_urls: provide real, publicly accessible image URLs ONLY if you are 100% certain they exist (e.g. from Wikipedia Commons). Otherwise return empty array. Do NOT fabricate URLs.
 - Return ONLY the JSON object, no other text."""
 
     try:
