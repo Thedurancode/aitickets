@@ -62,6 +62,7 @@ MIGRATIONS = [
     "add_new_feature_tables",
     "add_performance_indexes",
     "add_artist_tables",
+    "add_auth_fields",
 ]
 
 

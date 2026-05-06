@@ -1,17 +1,61 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Ticket, ShoppingCart, Menu, X, CalendarDays, MapPin } from "lucide-react";
+import {
+  Ticket,
+  ShoppingCart,
+  Menu,
+  X,
+  CalendarDays,
+  MapPin,
+  LogIn,
+  UserPlus,
+  LayoutDashboard,
+  LogOut,
+  User,
+} from "lucide-react";
 import { useCheckoutStore } from "@/stores/checkout-store";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { auth } from "@/lib/auth";
 
 export function Header() {
   const { selectedTier, quantity } = useCheckoutStore();
   const hasItemsInCart = selectedTier !== null;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (auth.isLoggedIn()) {
+        setLoggedIn(true);
+        try {
+          const user = await auth.getUser();
+          setUserName(user.name);
+          setAvatarUrl(user.avatar_url || null);
+        } catch {
+          // Token may be expired
+          setLoggedIn(false);
+        }
+      }
+    };
+    checkAuth();
+  }, []);
+
+  const handleLogout = () => {
+    auth.logout();
+    setLoggedIn(false);
+    setUserName(null);
+    setAvatarUrl(null);
+    setMobileMenuOpen(false);
+    router.push("/events");
+  };
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-white/5 bg-background/80 backdrop-blur-xl">
@@ -70,6 +114,45 @@ export function Header() {
               </Button>
             </motion.div>
           </Link>
+
+          {/* Auth section */}
+          {loggedIn ? (
+            <>
+              <Link href="/dashboard">
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground gap-2">
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
+                  ) : (
+                    <User className="h-4 w-4" />
+                  )}
+                  {userName || "Dashboard"}
+                </Button>
+              </Link>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-red-400"
+                onClick={handleLogout}
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </>
+          ) : (
+            <>
+              <Link href="/login">
+                <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground">
+                  <LogIn className="h-4 w-4 mr-2" />
+                  Login
+                </Button>
+              </Link>
+              <Link href="/register">
+                <Button variant="outline" size="sm" className="border-white/10">
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Sign Up
+                </Button>
+              </Link>
+            </>
+          )}
         </nav>
 
         {/* Mobile: cart + hamburger */}
@@ -149,6 +232,47 @@ export function Header() {
                 <ShoppingCart className="h-4 w-4 text-muted-foreground" />
                 Cart {hasItemsInCart && `(${quantity})`}
               </Link>
+
+              <div className="border-t border-white/5 my-2" />
+
+              {loggedIn ? (
+                <>
+                  <Link
+                    href="/dashboard"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3 py-3 rounded-lg text-foreground hover:bg-white/5 transition-colors"
+                  >
+                    <LayoutDashboard className="h-4 w-4 text-muted-foreground" />
+                    Dashboard
+                  </Link>
+                  <button
+                    onClick={handleLogout}
+                    className="flex items-center gap-3 px-3 py-3 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors w-full text-left"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3 py-3 rounded-lg text-foreground hover:bg-white/5 transition-colors"
+                  >
+                    <LogIn className="h-4 w-4 text-muted-foreground" />
+                    Login
+                  </Link>
+                  <Link
+                    href="/register"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center gap-3 px-3 py-3 rounded-lg text-foreground hover:bg-white/5 transition-colors"
+                  >
+                    <UserPlus className="h-4 w-4 text-muted-foreground" />
+                    Sign Up
+                  </Link>
+                </>
+              )}
             </nav>
           </motion.div>
         )}

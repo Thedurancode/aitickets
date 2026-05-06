@@ -257,6 +257,13 @@ class EventGoer(Base):
     marketing_opt_in = Column(Boolean, default=False)  # Marketing communications
     birthday_opt_in = Column(Boolean, default=False)  # Birthday greetings/marketing (GDPR consent)
 
+    # Auth fields
+    password_hash = Column(String(255), nullable=True)
+    is_admin = Column(Boolean, default=False)
+    avatar_url = Column(String(500), nullable=True)
+    google_id = Column(String(100), nullable=True, index=True)
+    auth_provider = Column(String(50), default="email")  # email, google
+
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
