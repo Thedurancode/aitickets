@@ -3207,12 +3207,51 @@ async def list_tools():
                 "required": ["event_id", "to_email"],
             },
         ),
+        Tool(
+            name="fts_search",
+            description="Full-text search across all events and customers using BM25 ranking. Handles stemming, fuzzy matching, and relevance scoring.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "description": "Max results (default 10)"},
+                    "type": {"type": "string", "description": "all, events, or customers"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="fts_sync",
+            description="Rebuild the full-text search index from current database.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ] + get_platform_analytics_tools() + get_weather_tools() + get_social_media_tools() + get_voiceover_tools()
-
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
     """Handle tool calls."""
+    # Full-text search tools
+    if name == "fts_search":
+        from app.services.fts_search import fts_search
+        query = arguments["query"]
+        limit = arguments.get("limit", 10)
+        search_type = arguments.get("type", "all")
+
+        if search_type == "events":
+            results = fts_search.search_events(query, limit)
+            return {"query": query, "type": "events", "count": len(results), "results": results}
+        elif search_type == "customers":
+            results = fts_search.search_customers(query, limit)
+            return {"query": query, "type": "customers", "count": len(results), "results": results}
+        else:
+            return fts_search.search_all(query, limit)
+
+    elif name == "fts_sync":
+        from app.services.fts_search import fts_search
+        events_count = fts_search.sync_events(db)
+        customers_count = fts_search.sync_customers(db)
+        return {"success": True, "events_indexed": events_count, "customers_indexed": customers_count}
+
     # Cross-platform analytics tools
     platform_analytics_tool_names = [
         "get_cross_platform_pageviews",
@@ -3515,7 +3554,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         query = db.query(Event).filter(Event.categories.contains(category))
 
         if arguments.get("upcoming_only", True):
-            from datetime import datetime
+            # from datetime import datetime  # already at top level
             query = query.filter(Event.event_date >= datetime.now().strftime("%Y-%m-%d"))
 
         events = query.order_by(Event.event_date).all()
@@ -3749,7 +3788,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "create_recurring_event":
         import uuid as uuid_mod
         import calendar
-        from datetime import date
+        # from datetime import date  # already at top level
 
         # Validate venue
         venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
@@ -5280,7 +5319,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         # If no event specified, auto-detect today's event
         if not event_id:
-            from datetime import date
+            # from datetime import date  # already at top level
             today = date.today().isoformat()
             todays_events = db.query(Event).filter(
                 Event.event_date == today,
@@ -5372,7 +5411,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         # If no event specified, auto-detect today's event
         if not event_id:
-            from datetime import date
+            # from datetime import date  # already at top level
             today = date.today().isoformat()
             todays_events = db.query(Event).filter(
                 Event.event_date == today,
@@ -6433,7 +6472,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             return {"error": f"Stripe error: {e}"}
 
         # Step 4: Format date
-        from datetime import datetime as dt
+        dt = datetime  # alias
         try:
             event_date_obj = dt.strptime(event.event_date, "%Y-%m-%d")
             friendly_date = event_date_obj.strftime("%A, %B %d, %Y")
@@ -6600,7 +6639,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         price_display = f"${price_cents / 100:.2f}"
 
         # Format date nicely
-        from datetime import datetime as dt
+        dt = datetime  # alias
         try:
             event_date_obj = dt.strptime(event.event_date, "%Y-%m-%d")
             friendly_date = event_date_obj.strftime("%A, %B %d, %Y")
@@ -6877,7 +6916,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if not ticket.qr_code_token:
             return {"error": "Ticket has no QR code"}
 
-        settings = get_settings()
+        # settings already global
         base_url = settings.base_url
         event = ticket.ticket_tier.event
         venue = event.venue
@@ -7624,7 +7663,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "get_traffic_sources":
         from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         hours = arguments.get("hours", 24)
         event_id = arguments.get("event_id")
@@ -7689,7 +7728,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "get_live_view_count":
         from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         event_id = arguments.get("event_id")
 
@@ -7732,9 +7771,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_top_events_by_views":
-        from app.models import PageView, Event
+        from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         days = arguments.get("days", 7)
         limit = min(arguments.get("limit", 10), 50)
@@ -7769,9 +7808,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_utm_performance":
-        from app.models import PageView, Ticket, TicketTier, TicketStatus
+        from app.models import PageView  # removed duplicates
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         event_id = arguments.get("event_id")
         days = arguments.get("days", 30)
@@ -7838,7 +7877,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "get_referrer_breakdown":
         from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
         from urllib.parse import urlparse
 
         event_id = arguments.get("event_id")
@@ -8155,7 +8194,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             text = f"{event.name}"
             if event.event_date:
                 try:
-                    from datetime import datetime as dt
+                    dt = datetime  # alias
                     parsed = dt.strptime(event.event_date, "%Y-%m-%d")
                     text += f"\n{parsed.strftime('%A, %B %d')}"
                 except ValueError:
@@ -8624,9 +8663,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     # ============== Refund Tool ==============
     elif name == "refund_ticket":
         import stripe
-        from app.config import get_settings
+        # get_settings already imported
 
-        settings = get_settings()
+        # settings already global
         stripe.api_key = settings.stripe_secret_key
 
         ticket_id = arguments.get("ticket_id")
@@ -8907,7 +8946,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "get_customer_recommendations":
         from app.services.event_intelligence import suggest_related_events
-        from app.models import Ticket
+        # from app.models import Ticket  # already imported at top level
 
         ticket_id = arguments["ticket_id"]
         ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
@@ -9059,7 +9098,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         return result
 
     elif name == "set_inventory_alerts":
-        from app.models import TicketTier
+        # from app.models import TicketTier  # already imported at top level
         tier = db.query(TicketTier).filter(TicketTier.id == arguments["tier_id"]).first()
         if not tier:
             return {"error": "Ticket tier not found"}
@@ -9078,7 +9117,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_inventory_alerts":
-        from app.models import TicketTier
+        # from app.models import TicketTier  # already imported at top level
         tier_id = arguments.get("tier_id")
         event_id = arguments.get("event_id")
         if tier_id:
@@ -9484,7 +9523,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "send_style_picker_sms":
         import secrets
-        from datetime import timedelta
+        # from datetime import timedelta  # already at top level
         from app.models import StylePickerSession, StylePickerStatus
         from app.services.sms import send_style_picker_sms as _send_picker_sms
 
@@ -9738,7 +9777,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         if arguments.get("target_event_id"):
             # Target attendees of specific event
-            from app.models import TicketTier
+            # from app.models import TicketTier  # already imported at top level
             target_event = db.query(Event).filter(Event.id == arguments["target_event_id"]).first()
             if target_event:
                 attendees = db.query(EventGoer).join(Ticket).join(TicketTier).filter(
@@ -10080,7 +10119,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "mark_alert_read":
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         alert = db.query(Alert).filter(Alert.id == arguments["alert_id"]).first()
         if not alert:
@@ -10098,7 +10137,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "mark_all_alerts_read":
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         unread = db.query(Alert).filter(Alert.is_read == False).all()
         count = 0
@@ -10161,7 +10200,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "dismiss_alert":
         # Alias for mark_alert_read with voice response
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         alert = db.query(Alert).filter(Alert.id == arguments["alert_id"]).first()
         if not alert:
@@ -10180,7 +10219,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "clear_alerts":
         # Alias for mark_all_alerts_read with voice response
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         unread = db.query(Alert).filter(Alert.is_read == False).all()
         count = len(unread)
@@ -10281,7 +10320,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "get_campaign_performance":
         from app.models import Campaign
-        from datetime import datetime, timedelta, timezone
+        from datetime import timezone
 
         days = arguments.get("days", 30)
         limit = arguments.get("limit", 10)
@@ -10366,7 +10405,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "top_campaigns":
         from app.models import Campaign
-        from datetime import datetime, timedelta, timezone
+        from datetime import timezone
 
         days = arguments.get("days", 30)
         since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -10398,8 +10437,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     # ============== Analytics Dashboard Tools ==============
     elif name == "get_dashboard_metrics":
-        from app.models import Ticket, Campaign, Alert, ConversionTracking, TicketTier
-        from datetime import datetime, timedelta, timezone
+        from app.models import Campaign, Alert, ConversionTracking  # removed duplicates
+        from datetime import timezone
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -10447,8 +10486,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_revenue_trends":
-        from app.models import Ticket, TicketTier
-        from datetime import datetime, timedelta, timezone
+        # from app.models import Ticket, TicketTier  # already imported at top level
+        from datetime import timezone
         from sqlalchemy import func
 
         period = arguments.get("period", "daily")
@@ -10511,8 +10550,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             }
 
     elif name == "get_top_events":
-        from app.models import Event, Ticket, TicketTier
-        from datetime import datetime, timedelta, timezone
+        # Event, Ticket, TicketTier already imported at top level
+        from datetime import timezone
         from sqlalchemy import func
 
         days = arguments.get("days", 30)
@@ -10550,8 +10589,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     # ============== Voice-Optimized Dashboard Aliases ==============
     elif name == "quick_status":
-        from app.models import Ticket, Alert, AlertSeverity, TicketTier
-        from datetime import datetime, timezone
+        from app.models import Alert, AlertSeverity  # removed duplicates
+        from datetime import timezone
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -10584,8 +10623,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "todays_revenue":
-        from app.models import Ticket, TicketTier
-        from datetime import datetime, timezone
+        # from app.models import Ticket, TicketTier  # already imported at top level
+        from datetime import timezone
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -10603,8 +10642,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "revenue_today":
         # Alias for get_revenue_trends with hourly period for today
-        from app.models import Ticket, TicketTier
-        from datetime import datetime, timezone
+        # from app.models import Ticket, TicketTier  # already imported at top level
+        from datetime import timezone
         from sqlalchemy import func
 
         now = datetime.now(timezone.utc)
@@ -10637,8 +10676,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "top_events":
-        from app.models import Event, Ticket, TicketTier
-        from datetime import datetime, timedelta, timezone
+        # Event, Ticket, TicketTier imported at top
+        from datetime import timezone
         from sqlalchemy import func
 
         since = datetime.now(timezone.utc) - timedelta(days=30)
@@ -11189,7 +11228,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # Lapsed customers (last purchase > N days ago)
     if segments.get("days_since_last_event"):
-        from datetime import datetime as dt, timedelta, timezone
+        from datetime import timezone
         cutoff = dt.now(timezone.utc) - timedelta(days=int(segments["days_since_last_event"]))
         last_purchase_subq = (
             db.query(
@@ -11205,7 +11244,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # Recently active (attended within last N days)
     if segments.get("attended_since_days"):
-        from datetime import datetime as dt, timedelta, timezone
+        from datetime import timezone
         since_cutoff = dt.now(timezone.utc) - timedelta(days=int(segments["attended_since_days"]))
         recent_goer_ids = (
             db.query(Ticket.event_goer_id)
@@ -11219,7 +11258,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # Birthdays this month
     if segments.get("birthdays_this_month"):
-        from datetime import datetime as dt
+        dt = datetime  # alias
         current_month = dt.now().month
         birthday_ids = db.query(EventGoer.id).filter(
             EventGoer.birthdate.isnot(None),
@@ -11262,7 +11301,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # No-shows (bought tickets but never checked in)
     if segments.get("no_show"):
-        from datetime import datetime as dt, timedelta, timezone
+        from datetime import timezone
         # Get customers who bought tickets but never checked in for past events
         past_events = db.query(Event.id).filter(
             Event.event_date < dt.now(timezone.utc).strftime("%Y-%m-%d")
