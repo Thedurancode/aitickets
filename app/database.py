@@ -62,6 +62,7 @@ MIGRATIONS = [
     "add_new_feature_tables",
     "add_performance_indexes",
     "add_artist_tables",
+    "add_auth_fields",
 ]
 
 
@@ -118,6 +119,10 @@ def init_db():
                 module.run_migration()
                 _record_migration(conn, name)
                 logger.info("Migration applied: %s", name)
-            except Exception:
-                logger.exception("Migration failed: %s", name)
+            except Exception as e:
+                if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
+                    _record_migration(conn, name)
+                    logger.info("Migration already applied (skipped): %s", name)
+                else:
+                    logger.exception("Migration failed: %s", name)
                 raise

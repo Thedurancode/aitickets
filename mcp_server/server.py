@@ -20,7 +20,7 @@ from app.models import (
     CustomerNote, CustomerPreference, EventCategory,
     MarketingCampaign, MarketingList, PromoCode, DiscountType, EventPhoto,
     WaitlistEntry, WaitlistStatus, MediaShareToken, VoiceCallCampaign, VoiceCall,
-    MetaAdCampaign,
+    MetaAdCampaign, Artist,
 )
 from app.services.stripe_sync import (
     create_stripe_product_for_tier,
@@ -252,6 +252,7 @@ async def list_tools():
                     "address": {"type": "string", "description": "New address (optional)"},
                     "phone": {"type": "string", "description": "New phone (optional)"},
                     "description": {"type": "string", "description": "New description (optional)"},
+                    "logo_url": {"type": "string", "description": "Venue logo/image URL (optional)"},
                 },
                 "required": ["venue_id"],
             },
@@ -349,6 +350,61 @@ async def list_tools():
                     "post_event_video_url": {"type": "string", "description": "Post-event recap/highlight video URL (optional)"},
                 },
                 "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="set_image",
+            description="Smart image setter — set the image/photo for any event or venue by just providing the URL. Auto-detects whether it's for an event or venue based on context. Can look up by name if no ID provided.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "image_url": {"type": "string", "description": "The image URL to set"},
+                    "event_id": {"type": "integer", "description": "Event ID (optional if event_name provided)"},
+                    "venue_id": {"type": "integer", "description": "Venue ID (optional if venue_name provided)"},
+                    "event_name": {"type": "string", "description": "Event name to search for (fuzzy match)"},
+                    "venue_name": {"type": "string", "description": "Venue name to search for (fuzzy match)"},
+                    "target": {"type": "string", "description": "Force target: 'event' or 'venue'. Auto-detected if not provided."},
+                },
+                "required": ["image_url"],
+            },
+        ),
+        Tool(
+            name="add_artist_image",
+            description="Add a reference image to an artist. Artists can have multiple reference images for flyer generation. If no artist images exist, always ask the user to provide one before generating a flyer.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist_id": {"type": "integer", "description": "Artist ID"},
+                    "artist_name": {"type": "string", "description": "Artist name (fuzzy match if no ID)"},
+                    "image_url": {"type": "string", "description": "Image URL to add"},
+                    "label": {"type": "string", "description": "Label for the image (e.g., 'headshot', 'live performance', 'press photo')"},
+                    "set_as_primary": {"type": "boolean", "description": "Set this as the primary/main image (default false)"},
+                },
+                "required": ["image_url"],
+            },
+        ),
+        Tool(
+            name="get_artist_images",
+            description="Get all reference images for an artist. Use this before generating a flyer to check if we have images. If no images exist, ask the user to provide reference images.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist_id": {"type": "integer", "description": "Artist ID"},
+                    "artist_name": {"type": "string", "description": "Artist name (fuzzy match)"},
+                    "event_id": {"type": "integer", "description": "Get artist for this event"},
+                },
+            },
+        ),
+        Tool(
+            name="remove_artist_image",
+            description="Remove a reference image from an artist by URL.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "artist_id": {"type": "integer", "description": "Artist ID"},
+                    "image_url": {"type": "string", "description": "Image URL to remove"},
+                },
+                "required": ["artist_id", "image_url"],
             },
         ),
         Tool(
@@ -3007,12 +3063,195 @@ async def list_tools():
                 "required": [],
             },
         ),
+        # ---- Additional CRUD & operational tools ----
+        Tool(
+            name="delete_event",
+            description="Delete an event by ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to delete"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="delete_venue",
+            description="Delete a venue by ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "venue_id": {"type": "integer", "description": "Venue ID to delete"},
+                },
+                "required": ["venue_id"],
+            },
+        ),
+        Tool(
+            name="cancel_ticket",
+            description="Cancel a ticket by ID (sets status to cancelled)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "Ticket ID to cancel"},
+                },
+                "required": ["ticket_id"],
+            },
+        ),
+        Tool(
+            name="transfer_ticket",
+            description="Transfer a ticket to a new email address",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "ticket_id": {"type": "integer", "description": "Ticket ID to transfer"},
+                    "new_email": {"type": "string", "description": "New attendee email address"},
+                },
+                "required": ["ticket_id", "new_email"],
+            },
+        ),
+        Tool(
+            name="delete_promo_code",
+            description="Delete a promo code by ID",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "promo_code_id": {"type": "integer", "description": "Promo code ID to delete"},
+                },
+                "required": ["promo_code_id"],
+            },
+        ),
+        Tool(
+            name="join_waitlist",
+            description="Add an email to the waitlist for an event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "email": {"type": "string", "description": "Email address"},
+                    "name": {"type": "string", "description": "Person's name (optional)"},
+                    "phone": {"type": "string", "description": "Phone number (optional)"},
+                },
+                "required": ["event_id", "email"],
+            },
+        ),
+        Tool(
+            name="generate_flyer",
+            description="Generate an AI event flyer by calling the flyer generation service",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID to generate flyer for"},
+                    "style_instructions": {"type": "string", "description": "Optional style/design instructions"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="send_notification",
+            description="Send an SMS or email notification to event attendees",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "message": {"type": "string", "description": "Notification message"},
+                    "channel": {"type": "string", "enum": ["email", "sms"], "description": "Notification channel (email or sms)"},
+                },
+                "required": ["event_id", "message", "channel"],
+            },
+        ),
+        Tool(
+            name="send_event_reminder",
+            description="Send reminder notifications for an upcoming event",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "use_sms": {"type": "boolean", "description": "Also send SMS reminders (default false)"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="export_guest_list",
+            description="Export the attendee/guest list for an event as formatted text",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                },
+                "required": ["event_id"],
+            },
+        ),
+        Tool(
+            name="generate_checkout_link",
+            description="Generate a Stripe checkout URL for a ticket tier",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "tier_id": {"type": "integer", "description": "Ticket tier ID"},
+                    "quantity": {"type": "integer", "description": "Number of tickets (default 1)"},
+                },
+                "required": ["event_id", "tier_id"],
+            },
+        ),
+        Tool(
+            name="email_report",
+            description="Send an event report summary via email",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "event_id": {"type": "integer", "description": "Event ID"},
+                    "to_email": {"type": "string", "description": "Email address to send the report to"},
+                },
+                "required": ["event_id", "to_email"],
+            },
+        ),
+        Tool(
+            name="fts_search",
+            description="Full-text search across all events and customers using BM25 ranking. Handles stemming, fuzzy matching, and relevance scoring.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "limit": {"type": "integer", "description": "Max results (default 10)"},
+                    "type": {"type": "string", "description": "all, events, or customers"},
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="fts_sync",
+            description="Rebuild the full-text search index from current database.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
     ] + get_platform_analytics_tools() + get_weather_tools() + get_social_media_tools() + get_voiceover_tools()
-
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict):
     """Handle tool calls."""
+    # Full-text search tools
+    if name == "fts_search":
+        from app.services.fts_search import fts_search
+        query = arguments["query"]
+        limit = arguments.get("limit", 10)
+        search_type = arguments.get("type", "all")
+
+        if search_type == "events":
+            results = fts_search.search_events(query, limit)
+            return {"query": query, "type": "events", "count": len(results), "results": results}
+        elif search_type == "customers":
+            results = fts_search.search_customers(query, limit)
+            return {"query": query, "type": "customers", "count": len(results), "results": results}
+        else:
+            return fts_search.search_all(query, limit)
+
+    elif name == "fts_sync":
+        from app.services.fts_search import fts_search
+        events_count = fts_search.sync_events(db)
+        customers_count = fts_search.sync_customers(db)
+        return {"success": True, "events_indexed": events_count, "customers_indexed": customers_count}
+
     # Cross-platform analytics tools
     platform_analytics_tool_names = [
         "get_cross_platform_pageviews",
@@ -3315,7 +3554,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         query = db.query(Event).filter(Event.categories.contains(category))
 
         if arguments.get("upcoming_only", True):
-            from datetime import datetime
+            # from datetime import datetime  # already at top level
             query = query.filter(Event.event_date >= datetime.now().strftime("%Y-%m-%d"))
 
         events = query.order_by(Event.event_date).all()
@@ -3364,9 +3603,134 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             venue.phone = arguments["phone"]
         if "description" in arguments:
             venue.description = arguments["description"]
+        if "logo_url" in arguments:
+            venue.logo_url = arguments["logo_url"]
         db.commit()
         db.refresh(venue)
         return _venue_to_dict(venue)
+
+    elif name == "set_image":
+        image_url = arguments["image_url"]
+        target = arguments.get("target", "").lower()
+
+        # Determine target
+        if arguments.get("venue_id") or arguments.get("venue_name") or target == "venue":
+            # Venue image
+            venue = None
+            if arguments.get("venue_id"):
+                venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
+            elif arguments.get("venue_name"):
+                venue = db.query(Venue).filter(Venue.name.ilike(f"%{arguments['venue_name']}%")).first()
+            elif target == "venue":
+                venue = db.query(Venue).order_by(Venue.id.desc()).first()
+            if not venue:
+                return {"error": "Venue not found"}
+            venue.logo_url = image_url
+            db.commit()
+            db.refresh(venue)
+            return {"success": True, "message": f"Image set for venue '{venue.name}'", "venue": _venue_to_dict(venue)}
+
+        else:
+            # Event image (default)
+            event = None
+            if arguments.get("event_id"):
+                event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+            elif arguments.get("event_name"):
+                event = db.query(Event).filter(Event.name.ilike(f"%{arguments['event_name']}%")).first()
+            else:
+                event = db.query(Event).order_by(Event.id.desc()).first()
+            if not event:
+                return {"error": "Event not found"}
+            event.image_url = image_url
+            db.commit()
+            db.refresh(event)
+            return {"success": True, "message": f"Image set for event '{event.name}'", "event": _event_to_dict(event)}
+
+    # ============== Artist Image Tools ==============
+    elif name == "add_artist_image":
+        import json as _json
+        artist = None
+        if arguments.get("artist_id"):
+            artist = db.query(Artist).filter(Artist.id == arguments["artist_id"]).first()
+        elif arguments.get("artist_name"):
+            artist = db.query(Artist).filter(Artist.name.ilike(f"%{arguments['artist_name']}%")).first()
+        if not artist:
+            return {"error": "Artist not found. Create the artist first or check the name."}
+
+        # Parse existing images
+        existing = _json.loads(artist.reference_images) if artist.reference_images else []
+        new_img = {"url": arguments["image_url"], "label": arguments.get("label", "reference")}
+        existing.append(new_img)
+        artist.reference_images = _json.dumps(existing)
+
+        if arguments.get("set_as_primary", False) or not artist.primary_image_url:
+            artist.primary_image_url = arguments["image_url"]
+
+        db.commit()
+        db.refresh(artist)
+        return {
+            "success": True,
+            "artist": artist.name,
+            "total_images": len(existing),
+            "primary_image": artist.primary_image_url,
+            "images": existing,
+        }
+
+    elif name == "get_artist_images":
+        import json as _json
+        artist = None
+        if arguments.get("artist_id"):
+            artist = db.query(Artist).filter(Artist.id == arguments["artist_id"]).first()
+        elif arguments.get("artist_name"):
+            artist = db.query(Artist).filter(Artist.name.ilike(f"%{arguments['artist_name']}%")).first()
+        elif arguments.get("event_id"):
+            event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+            if event and event.artist_id:
+                artist = db.query(Artist).filter(Artist.id == event.artist_id).first()
+
+        if not artist:
+            return {"has_images": False, "message": "No artist found. Please provide reference images for flyer generation."}
+
+        images = _json.loads(artist.reference_images) if artist.reference_images else []
+        spotify_img = artist.spotify_image_url
+        primary = artist.primary_image_url
+
+        all_images = []
+        if primary:
+            all_images.append({"url": primary, "label": "primary", "source": "user"})
+        if spotify_img and spotify_img != primary:
+            all_images.append({"url": spotify_img, "label": "spotify", "source": "spotify"})
+        for img in images:
+            if img.get("url") not in [primary, spotify_img]:
+                all_images.append({**img, "source": "user"})
+
+        if not all_images:
+            return {
+                "has_images": False,
+                "artist": artist.name,
+                "message": f"No reference images found for {artist.name}. Please provide at least one image URL before generating a flyer.",
+            }
+
+        return {
+            "has_images": True,
+            "artist": artist.name,
+            "total_images": len(all_images),
+            "primary_image": primary or spotify_img,
+            "images": all_images,
+        }
+
+    elif name == "remove_artist_image":
+        import json as _json
+        artist = db.query(Artist).filter(Artist.id == arguments["artist_id"]).first()
+        if not artist:
+            return {"error": "Artist not found"}
+        existing = _json.loads(artist.reference_images) if artist.reference_images else []
+        existing = [img for img in existing if img.get("url") != arguments["image_url"]]
+        artist.reference_images = _json.dumps(existing)
+        if artist.primary_image_url == arguments["image_url"]:
+            artist.primary_image_url = existing[0]["url"] if existing else artist.spotify_image_url
+        db.commit()
+        return {"success": True, "remaining_images": len(existing)}
 
     # ============== Event Tools ==============
     elif name == "list_events":
@@ -3424,7 +3788,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "create_recurring_event":
         import uuid as uuid_mod
         import calendar
-        from datetime import date
+        # from datetime import date  # already at top level
 
         # Validate venue
         venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
@@ -4955,7 +5319,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         # If no event specified, auto-detect today's event
         if not event_id:
-            from datetime import date
+            # from datetime import date  # already at top level
             today = date.today().isoformat()
             todays_events = db.query(Event).filter(
                 Event.event_date == today,
@@ -5047,7 +5411,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         # If no event specified, auto-detect today's event
         if not event_id:
-            from datetime import date
+            # from datetime import date  # already at top level
             today = date.today().isoformat()
             todays_events = db.query(Event).filter(
                 Event.event_date == today,
@@ -6108,7 +6472,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             return {"error": f"Stripe error: {e}"}
 
         # Step 4: Format date
-        from datetime import datetime as dt
+        dt = datetime  # alias
         try:
             event_date_obj = dt.strptime(event.event_date, "%Y-%m-%d")
             friendly_date = event_date_obj.strftime("%A, %B %d, %Y")
@@ -6275,7 +6639,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         price_display = f"${price_cents / 100:.2f}"
 
         # Format date nicely
-        from datetime import datetime as dt
+        dt = datetime  # alias
         try:
             event_date_obj = dt.strptime(event.event_date, "%Y-%m-%d")
             friendly_date = event_date_obj.strftime("%A, %B %d, %Y")
@@ -6552,7 +6916,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         if not ticket.qr_code_token:
             return {"error": "Ticket has no QR code"}
 
-        settings = get_settings()
+        # settings already global
         base_url = settings.base_url
         event = ticket.ticket_tier.event
         venue = event.venue
@@ -7299,7 +7663,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "get_traffic_sources":
         from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         hours = arguments.get("hours", 24)
         event_id = arguments.get("event_id")
@@ -7364,7 +7728,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "get_live_view_count":
         from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         event_id = arguments.get("event_id")
 
@@ -7407,9 +7771,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_top_events_by_views":
-        from app.models import PageView, Event
+        from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         days = arguments.get("days", 7)
         limit = min(arguments.get("limit", 10), 50)
@@ -7444,9 +7808,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_utm_performance":
-        from app.models import PageView, Ticket, TicketTier, TicketStatus
+        from app.models import PageView  # removed duplicates
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
 
         event_id = arguments.get("event_id")
         days = arguments.get("days", 30)
@@ -7513,7 +7877,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "get_referrer_breakdown":
         from app.models import PageView
         from sqlalchemy import func as sqlfunc
-        from datetime import datetime
+        # from datetime import datetime  # already at top level
         from urllib.parse import urlparse
 
         event_id = arguments.get("event_id")
@@ -7830,7 +8194,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             text = f"{event.name}"
             if event.event_date:
                 try:
-                    from datetime import datetime as dt
+                    dt = datetime  # alias
                     parsed = dt.strptime(event.event_date, "%Y-%m-%d")
                     text += f"\n{parsed.strftime('%A, %B %d')}"
                 except ValueError:
@@ -8299,9 +8663,9 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     # ============== Refund Tool ==============
     elif name == "refund_ticket":
         import stripe
-        from app.config import get_settings
+        # get_settings already imported
 
-        settings = get_settings()
+        # settings already global
         stripe.api_key = settings.stripe_secret_key
 
         ticket_id = arguments.get("ticket_id")
@@ -8582,7 +8946,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "get_customer_recommendations":
         from app.services.event_intelligence import suggest_related_events
-        from app.models import Ticket
+        # from app.models import Ticket  # already imported at top level
 
         ticket_id = arguments["ticket_id"]
         ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
@@ -8734,7 +9098,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         return result
 
     elif name == "set_inventory_alerts":
-        from app.models import TicketTier
+        # from app.models import TicketTier  # already imported at top level
         tier = db.query(TicketTier).filter(TicketTier.id == arguments["tier_id"]).first()
         if not tier:
             return {"error": "Ticket tier not found"}
@@ -8753,7 +9117,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_inventory_alerts":
-        from app.models import TicketTier
+        # from app.models import TicketTier  # already imported at top level
         tier_id = arguments.get("tier_id")
         event_id = arguments.get("event_id")
         if tier_id:
@@ -9159,7 +9523,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "send_style_picker_sms":
         import secrets
-        from datetime import timedelta
+        # from datetime import timedelta  # already at top level
         from app.models import StylePickerSession, StylePickerStatus
         from app.services.sms import send_style_picker_sms as _send_picker_sms
 
@@ -9413,7 +9777,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
         if arguments.get("target_event_id"):
             # Target attendees of specific event
-            from app.models import TicketTier
+            # from app.models import TicketTier  # already imported at top level
             target_event = db.query(Event).filter(Event.id == arguments["target_event_id"]).first()
             if target_event:
                 attendees = db.query(EventGoer).join(Ticket).join(TicketTier).filter(
@@ -9755,7 +10119,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "mark_alert_read":
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         alert = db.query(Alert).filter(Alert.id == arguments["alert_id"]).first()
         if not alert:
@@ -9773,7 +10137,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "mark_all_alerts_read":
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         unread = db.query(Alert).filter(Alert.is_read == False).all()
         count = 0
@@ -9836,7 +10200,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "dismiss_alert":
         # Alias for mark_alert_read with voice response
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         alert = db.query(Alert).filter(Alert.id == arguments["alert_id"]).first()
         if not alert:
@@ -9855,7 +10219,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
     elif name == "clear_alerts":
         # Alias for mark_all_alerts_read with voice response
         from app.models import Alert
-        from datetime import datetime, timezone
+        from datetime import timezone
 
         unread = db.query(Alert).filter(Alert.is_read == False).all()
         count = len(unread)
@@ -9956,7 +10320,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "get_campaign_performance":
         from app.models import Campaign
-        from datetime import datetime, timedelta, timezone
+        from datetime import timezone
 
         days = arguments.get("days", 30)
         limit = arguments.get("limit", 10)
@@ -10041,7 +10405,7 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "top_campaigns":
         from app.models import Campaign
-        from datetime import datetime, timedelta, timezone
+        from datetime import timezone
 
         days = arguments.get("days", 30)
         since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -10073,8 +10437,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     # ============== Analytics Dashboard Tools ==============
     elif name == "get_dashboard_metrics":
-        from app.models import Ticket, Campaign, Alert, ConversionTracking, TicketTier
-        from datetime import datetime, timedelta, timezone
+        from app.models import Campaign, Alert, ConversionTracking  # removed duplicates
+        from datetime import timezone
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -10122,8 +10486,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "get_revenue_trends":
-        from app.models import Ticket, TicketTier
-        from datetime import datetime, timedelta, timezone
+        # from app.models import Ticket, TicketTier  # already imported at top level
+        from datetime import timezone
         from sqlalchemy import func
 
         period = arguments.get("period", "daily")
@@ -10186,8 +10550,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
             }
 
     elif name == "get_top_events":
-        from app.models import Event, Ticket, TicketTier
-        from datetime import datetime, timedelta, timezone
+        # Event, Ticket, TicketTier already imported at top level
+        from datetime import timezone
         from sqlalchemy import func
 
         days = arguments.get("days", 30)
@@ -10225,8 +10589,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     # ============== Voice-Optimized Dashboard Aliases ==============
     elif name == "quick_status":
-        from app.models import Ticket, Alert, AlertSeverity, TicketTier
-        from datetime import datetime, timezone
+        from app.models import Alert, AlertSeverity  # removed duplicates
+        from datetime import timezone
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -10259,8 +10623,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "todays_revenue":
-        from app.models import Ticket, TicketTier
-        from datetime import datetime, timezone
+        # from app.models import Ticket, TicketTier  # already imported at top level
+        from datetime import timezone
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -10278,8 +10642,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
 
     elif name == "revenue_today":
         # Alias for get_revenue_trends with hourly period for today
-        from app.models import Ticket, TicketTier
-        from datetime import datetime, timezone
+        # from app.models import Ticket, TicketTier  # already imported at top level
+        from datetime import timezone
         from sqlalchemy import func
 
         now = datetime.now(timezone.utc)
@@ -10312,8 +10676,8 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
         }
 
     elif name == "top_events":
-        from app.models import Event, Ticket, TicketTier
-        from datetime import datetime, timedelta, timezone
+        # Event, Ticket, TicketTier imported at top
+        from datetime import timezone
         from sqlalchemy import func
 
         since = datetime.now(timezone.utc) - timedelta(days=30)
@@ -10356,6 +10720,329 @@ async def _execute_tool(name: str, arguments: dict, db: Session):
                 for i, row in enumerate(top_events)
             ],
         }
+
+    # ============== Additional CRUD & Operational Tools ==============
+
+    elif name == "delete_event":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+        event_name = event.name
+        db.delete(event)
+        db.commit()
+        return {"success": True, "message": f"Deleted event '{event_name}'"}
+
+    elif name == "delete_venue":
+        venue = db.query(Venue).filter(Venue.id == arguments["venue_id"]).first()
+        if not venue:
+            return {"error": "Venue not found"}
+        venue_name = venue.name
+        db.delete(venue)
+        db.commit()
+        return {"success": True, "message": f"Deleted venue '{venue_name}'"}
+
+    elif name == "cancel_ticket":
+        ticket = db.query(Ticket).filter(Ticket.id == arguments["ticket_id"]).first()
+        if not ticket:
+            return {"error": "Ticket not found"}
+        ticket.status = TicketStatus.CANCELLED
+        db.commit()
+        return {"success": True, "ticket_id": ticket.id, "status": "cancelled"}
+
+    elif name == "transfer_ticket":
+        ticket = db.query(Ticket).filter(Ticket.id == arguments["ticket_id"]).first()
+        if not ticket:
+            return {"error": "Ticket not found"}
+        old_email = ticket.attendee_email
+        ticket.attendee_email = arguments["new_email"]
+        db.commit()
+        return {
+            "success": True,
+            "ticket_id": ticket.id,
+            "old_email": old_email,
+            "new_email": arguments["new_email"],
+        }
+
+    elif name == "delete_promo_code":
+        promo = db.query(PromoCode).filter(PromoCode.id == arguments["promo_code_id"]).first()
+        if not promo:
+            return {"error": "Promo code not found"}
+        code = promo.code
+        db.delete(promo)
+        db.commit()
+        return {"success": True, "message": f"Deleted promo code '{code}'"}
+
+    elif name == "join_waitlist":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+        # Check if already on waitlist
+        existing = (
+            db.query(WaitlistEntry)
+            .filter(WaitlistEntry.event_id == event.id, WaitlistEntry.email == arguments["email"])
+            .first()
+        )
+        if existing:
+            return {"error": "Email is already on the waitlist for this event"}
+        # Get next position
+        max_pos = (
+            db.query(WaitlistEntry.position)
+            .filter(WaitlistEntry.event_id == event.id)
+            .order_by(WaitlistEntry.position.desc())
+            .first()
+        )
+        next_pos = (max_pos[0] + 1) if max_pos else 1
+        entry = WaitlistEntry(
+            event_id=event.id,
+            email=arguments["email"],
+            name=arguments.get("name"),
+            phone=arguments.get("phone"),
+            position=next_pos,
+            status=WaitlistStatus.WAITING,
+        )
+        db.add(entry)
+        db.commit()
+        return {
+            "success": True,
+            "event": event.name,
+            "email": arguments["email"],
+            "position": next_pos,
+        }
+
+    elif name == "generate_flyer":
+        import json as _json2
+        from sqlalchemy.orm import joinedload as _jl
+        from app.services.flyer_generator import build_flyer_prompt, generate_flyer as _generate_flyer
+
+        event = (
+            db.query(Event)
+            .options(_jl(Event.venue), _jl(Event.ticket_tiers))
+            .filter(Event.id == arguments["event_id"])
+            .first()
+        )
+        if not event:
+            return {"error": "Event not found"}
+
+        # Check for artist reference images
+        artist_images = []
+        artist_name = None
+        if event.artist_id:
+            artist = db.query(Artist).filter(Artist.id == event.artist_id).first()
+            if artist:
+                artist_name = artist.name
+                # Collect all available images
+                if artist.primary_image_url:
+                    artist_images.append(artist.primary_image_url)
+                if artist.spotify_image_url and artist.spotify_image_url not in artist_images:
+                    artist_images.append(artist.spotify_image_url)
+                if artist.reference_images:
+                    for img in _json2.loads(artist.reference_images):
+                        if img.get("url") and img["url"] not in artist_images:
+                            artist_images.append(img["url"])
+
+        # If no artist images, warn the user
+        if not artist_images and not arguments.get("skip_image_check"):
+            return {
+                "needs_images": True,
+                "event_id": event.id,
+                "event_name": event.name,
+                "artist_name": artist_name,
+                "message": f"No reference images found for this event's artist{(' (' + artist_name + ')') if artist_name else ''}. Please provide at least one artist image URL using add_artist_image, then try again. Or pass skip_image_check=true to generate without artist photos.",
+            }
+
+        tiers_data = [
+            {"name": tier.name, "price": tier.price}
+            for tier in (event.ticket_tiers or [])
+        ]
+
+        # Include artist info in the prompt
+        style_instructions = arguments.get("style_instructions", "")
+        if artist_name:
+            style_instructions += f"\nFeatured artist: {artist_name}."
+        if artist_images:
+            style_instructions += f"\nArtist reference images provided: {len(artist_images)} images."
+
+        prompt = build_flyer_prompt(
+            event_name=event.name,
+            event_date=str(event.event_date),
+            event_time=event.event_time or "",
+            venue_name=event.venue.name if event.venue else None,
+            venue_address=event.venue.address if event.venue else None,
+            description=event.description,
+            tiers=tiers_data,
+            org_name=settings.org_name,
+            style_instructions=style_instructions,
+        )
+
+        result = _generate_flyer(prompt)
+        if not result["success"]:
+            return {"error": result["error"]}
+
+        event.image_url = result["image_url"]
+        db.commit()
+        return {
+            "success": True,
+            "event_id": event.id,
+            "image_url": result["image_url"],
+            "artist_images_used": len(artist_images),
+        }
+
+    elif name == "send_notification":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        channel_str = arguments["channel"]
+        channel = NotificationChannel.EMAIL if channel_str == "email" else NotificationChannel.SMS
+
+        # Get all ticket holders for this event
+        tickets = (
+            db.query(Ticket)
+            .join(TicketTier)
+            .filter(TicketTier.event_id == event.id, Ticket.status != TicketStatus.CANCELLED)
+            .all()
+        )
+
+        notifications_created = 0
+        for ticket in tickets:
+            notif = Notification(
+                event_id=event.id,
+                ticket_id=ticket.id,
+                channel=channel,
+                notification_type=NotificationType.CUSTOM,
+                recipient=ticket.attendee_email,
+                message=arguments["message"],
+            )
+            db.add(notif)
+            notifications_created += 1
+
+        db.commit()
+        return {
+            "success": True,
+            "event": event.name,
+            "channel": channel_str,
+            "notifications_created": notifications_created,
+        }
+
+    elif name == "send_event_reminder":
+        from app.services.notifications import send_event_reminders
+
+        channels = [NotificationChannel.EMAIL]
+        if arguments.get("use_sms"):
+            channels.append(NotificationChannel.SMS)
+
+        result = send_event_reminders(
+            db=db,
+            event_id=arguments["event_id"],
+            channels=channels,
+        )
+        return result
+
+    elif name == "export_guest_list":
+        event = db.query(Event).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        tickets = (
+            db.query(Ticket)
+            .join(TicketTier)
+            .filter(TicketTier.event_id == event.id, Ticket.status != TicketStatus.CANCELLED)
+            .all()
+        )
+
+        lines = [f"Guest List for {event.name}", f"Total Attendees: {len(tickets)}", ""]
+        for i, ticket in enumerate(tickets, 1):
+            lines.append(
+                f"{i}. {ticket.attendee_name or 'N/A'} | {ticket.attendee_email} | "
+                f"Tier: {ticket.tier.name if ticket.tier else 'N/A'} | Status: {ticket.status.value}"
+            )
+
+        return {
+            "event": event.name,
+            "total_attendees": len(tickets),
+            "guest_list": "\n".join(lines),
+        }
+
+    elif name == "generate_checkout_link":
+        import stripe
+        stripe.api_key = settings.stripe_secret_key
+
+        event = db.query(Event).options(joinedload(Event.venue)).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        tier = db.query(TicketTier).filter(TicketTier.id == arguments["tier_id"]).first()
+        if not tier:
+            return {"error": "Ticket tier not found"}
+
+        quantity = arguments.get("quantity", 1)
+
+        try:
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": "usd",
+                        "unit_amount": tier.price,
+                        "product_data": {
+                            "name": f"{event.name} - {tier.name}",
+                        },
+                    },
+                    "quantity": quantity,
+                }],
+                metadata={
+                    "event_id": str(event.id),
+                    "tier_id": str(tier.id),
+                },
+                success_url=f"{settings.base_url}/checkout/success",
+                cancel_url=f"{settings.base_url}/checkout/cancel",
+            )
+            return {
+                "success": True,
+                "checkout_url": session.url,
+                "event": event.name,
+                "tier": tier.name,
+                "quantity": quantity,
+                "total_display": f"${tier.price * quantity / 100:.2f}",
+            }
+        except stripe.error.StripeError as e:
+            return {"success": False, "error": str(e)}
+
+    elif name == "email_report":
+        from app.services.email_service import send_email
+
+        event = db.query(Event).options(joinedload(Event.venue)).filter(Event.id == arguments["event_id"]).first()
+        if not event:
+            return {"error": "Event not found"}
+
+        # Gather stats
+        tickets = (
+            db.query(Ticket)
+            .join(TicketTier)
+            .filter(TicketTier.event_id == event.id)
+            .all()
+        )
+        total_sold = sum(1 for t in tickets if t.status != TicketStatus.CANCELLED)
+        total_revenue = sum(t.amount_paid or 0 for t in tickets if t.status != TicketStatus.CANCELLED)
+
+        report_body = (
+            f"Event Report: {event.name}\n"
+            f"Date: {event.event_date}\n"
+            f"Venue: {event.venue.name if event.venue else 'N/A'}\n"
+            f"Status: {event.status.value if event.status else 'active'}\n\n"
+            f"Tickets Sold: {total_sold}\n"
+            f"Total Revenue: ${total_revenue / 100:.2f}\n"
+        )
+
+        try:
+            send_email(
+                to=arguments["to_email"],
+                subject=f"Event Report: {event.name}",
+                body=report_body,
+            )
+            return {"success": True, "message": f"Report sent to {arguments['to_email']}"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     return {"error": f"Unknown tool: {name}"}
 
@@ -10541,7 +11228,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # Lapsed customers (last purchase > N days ago)
     if segments.get("days_since_last_event"):
-        from datetime import datetime as dt, timedelta, timezone
+        from datetime import timezone
         cutoff = dt.now(timezone.utc) - timedelta(days=int(segments["days_since_last_event"]))
         last_purchase_subq = (
             db.query(
@@ -10557,7 +11244,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # Recently active (attended within last N days)
     if segments.get("attended_since_days"):
-        from datetime import datetime as dt, timedelta, timezone
+        from datetime import timezone
         since_cutoff = dt.now(timezone.utc) - timedelta(days=int(segments["attended_since_days"]))
         recent_goer_ids = (
             db.query(Ticket.event_goer_id)
@@ -10571,7 +11258,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # Birthdays this month
     if segments.get("birthdays_this_month"):
-        from datetime import datetime as dt
+        dt = datetime  # alias
         current_month = dt.now().month
         birthday_ids = db.query(EventGoer.id).filter(
             EventGoer.birthdate.isnot(None),
@@ -10614,7 +11301,7 @@ def _apply_segment_filters(db, query, segments: dict):
 
     # No-shows (bought tickets but never checked in)
     if segments.get("no_show"):
-        from datetime import datetime as dt, timedelta, timezone
+        from datetime import timezone
         # Get customers who bought tickets but never checked in for past events
         past_events = db.query(Event.id).filter(
             Event.event_date < dt.now(timezone.utc).strftime("%Y-%m-%d")

@@ -8,7 +8,7 @@
 import { useContext, createContext } from 'react';
 
 export interface MCPClient {
-  callTool(name: string, arguments: Record<string, any>): Promise<any>;
+  callTool(name: string, args: Record<string, any>): Promise<any>;
   listTools(): Promise<string[]>;
   isConnected(): boolean;
 }

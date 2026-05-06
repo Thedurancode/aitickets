@@ -257,6 +257,13 @@ class EventGoer(Base):
     marketing_opt_in = Column(Boolean, default=False)  # Marketing communications
     birthday_opt_in = Column(Boolean, default=False)  # Birthday greetings/marketing (GDPR consent)
 
+    # Auth fields
+    password_hash = Column(String(255), nullable=True)
+    is_admin = Column(Boolean, default=False)
+    avatar_url = Column(String(500), nullable=True)
+    google_id = Column(String(100), nullable=True, index=True)
+    auth_provider = Column(String(50), default="email")  # email, google
+
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -1292,6 +1299,10 @@ class Artist(Base):
     average_ticket_price = Column(Integer, nullable=True)  # Historical average in cents
     typical_venue_size = Column(String(50), nullable=True)  # small/medium/large/stadium
     sellout_velocity = Column(String(50), nullable=True)  # fast/moderate/slow
+
+    # Reference Images (multiple images for flyer generation)
+    reference_images = Column(Text, nullable=True)  # JSON: [{"url": "...", "label": "headshot"}, ...]
+    primary_image_url = Column(String(500), nullable=True)  # Main image (user-selected or best quality)
 
     # Research Metadata
     last_researched_at = Column(DateTime(timezone=True), nullable=True)

@@ -6,9 +6,12 @@ and generates data-driven marketing plans using web search and AI analysis.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models import Event, Venue, EventCategory, TicketTier
 from app.config import get_settings
@@ -19,6 +22,7 @@ from app.services.artist_social_research import (
     research_social_media_links,
     research_comprehensive_web_search,
 )
+from app.services.ai_artist_research import research_artist_with_ai, populate_artist_from_ai
 from app.services.artist_service import (
     find_or_create_artist,
     save_artist_research,
@@ -646,7 +650,14 @@ async def run_event_research_agent(
             research_data["youtube"] = youtube_research
             research_data["sources_checked"].append("youtube")
 
-        # Step 2.6: Research artist on Spotify
+        # Step 2.6: AI-powered comprehensive artist research (primary source)
+        ai_research = research_artist_with_ai(artist_name)
+        result["ai_research"] = ai_research
+        if ai_research and not ai_research.get("fallback"):
+            research_data["ai_research"] = ai_research
+            research_data["sources_checked"].append("ai_research")
+
+        # Step 2.6b: Research artist on Spotify (fallback/supplement)
         spotify_research = research_spotify(artist_name)
         result["spotify_research"] = spotify_research
         if spotify_research and not spotify_research.get("error"):
@@ -690,6 +701,13 @@ async def run_event_research_agent(
         )
 
         result["research_snapshot_id"] = research_snapshot.id
+
+        # Populate artist with AI research data AFTER save_artist_research
+        # This ensures AI data fills any gaps left by failed API lookups
+        ai_data = result.get("ai_research", {})
+        if ai_data and not ai_data.get("fallback"):
+            populate_artist_from_ai(db, artist, ai_data)
+            logger.info(f"AI research populated artist '{artist_name}' with comprehensive data")
 
         # Get insights with new data
         result["insights"] = get_artist_insights(db, artist.id)

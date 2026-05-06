@@ -49,7 +49,7 @@ function MyTicketsPageInner() {
   };
 
   return (
-    <div className="container px-4 sm:px-6 lg:px-8 py-6 md:py-12 max-w-3xl">
+    <div className="container px-4 sm:px-6 lg:px-8 py-6 md:py-12 max-w-3xl mx-auto">
       <FadeIn>
         <div className="mb-6 sm:mb-10 text-center">
           <motion.div

@@ -132,10 +132,13 @@ def run_migration():
             CREATE INDEX IF NOT EXISTS idx_artist_research_date ON artist_research(researched_at)
         """))
 
-        # Add artist_id column to events table
-        conn.execute(text("""
-            ALTER TABLE events ADD COLUMN artist_id INTEGER REFERENCES artists(id)
-        """))
+        # Add artist_id column to events table (ignore if exists)
+        try:
+            conn.execute(text("""
+                ALTER TABLE events ADD COLUMN artist_id INTEGER REFERENCES artists(id)
+            """))
+        except Exception:
+            pass  # Column already exists
 
         # Create index on events.artist_id
         conn.execute(text("""

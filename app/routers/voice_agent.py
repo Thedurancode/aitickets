@@ -69,7 +69,7 @@ async def process_voice_command(
     request: VoiceCommandRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user: Optional[EventGoer] = None  # Made optional for demo
+    current_user: Any = None  # Made optional for demo
 ):
     """
     Process a voice command with enhanced natural language understanding.
@@ -461,7 +461,7 @@ async def send_voice_notification(
 async def get_voice_analytics(
     days: int = 7,
     db: Session = Depends(get_db),
-    current_user: Optional[EventGoer] = None  # Made optional for demo
+    current_user: Any = None  # Made optional for demo
 ):
     """
     Get voice interaction analytics.
